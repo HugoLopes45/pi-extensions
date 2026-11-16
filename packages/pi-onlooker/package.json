@@ -1,6 +1,6 @@
 {
   "name": "pi-onlooker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A second AI model checks the Pi coding agent's work and tells it when it breaks your instructions, repeats a failure or claims work it did not do.",
   "keywords": [
     "ai-agent",
