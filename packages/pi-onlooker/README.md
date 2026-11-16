@@ -12,8 +12,6 @@
 pi install npm:pi-onlooker
 ```
 
-> **Not on npm yet.** Until the first release, this command fails. Run `pi install ./packages/pi-onlooker` from the root of your pi-extensions clone instead.
-
 Then turn it on with `/onlooker on --global`. Each Review is a paid model request that sees your conversation: read [Limits](#limits) first.
 
 ## Why pi-onlooker
