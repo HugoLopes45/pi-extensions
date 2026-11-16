@@ -7,7 +7,7 @@ import {
   type TuiMouseEvent,
   type TuiMouseEventType,
 } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { expandMessageOnClick } from "../../src/utils/expand-on-click.js";
 import { expectClickToggles, keybindingHints } from "../fixtures/ui-testing.js";

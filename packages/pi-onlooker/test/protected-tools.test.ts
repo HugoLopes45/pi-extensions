@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { contentText } from "@earendil-works/pi-ai";
-import { beforeAll, afterAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, afterAll, describe, expect, it } from "vitest";
 
 import { createProtectedReadTools } from "../src/protected-tools.js";
 import { createSdkHarness, reply, toolCall } from "./fixtures/sdk-harness.js";

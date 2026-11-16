@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { expect, it } from "vite-plus/test";
+import { expect, it } from "vitest";
 
 import { arrayContaining, objectContaining } from "./fixtures/matchers.js";
 

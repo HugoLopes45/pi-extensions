@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { onTestFinished, expect, it } from "vite-plus/test";
+import { onTestFinished, expect, it } from "vitest";
 
 import { readOnlookerSettings } from "../src/onlooker-settings.js";
 import type { EvidenceMessage } from "../src/utils/evidence.js";

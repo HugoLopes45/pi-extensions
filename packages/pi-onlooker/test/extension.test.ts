@@ -23,7 +23,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it, vi } from "vite-plus/test";
+import { onTestFinished, expect, it, vi } from "vitest";
 
 import "./fixtures/observer-extension.js";
 import { anyInstance, stringContaining } from "./fixtures/matchers.js";

@@ -42,28 +42,20 @@
   ],
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit && vitest --run",
     "check:live": "node scripts/live-check.ts",
+    "check": "tsc --noEmit && vitest --run",
     "prepublishOnly": "npm run check"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^1.0.3",
-    "@earendil-works/pi-coding-agent": "^1.0.3",
-    "@types/node": "^26.6.4",
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
-  },
-  "overrides": {
-    "@eslint/config-array": {
-      "minimatch": "^11.0.8"
-    },
-    "eslint": {
-      "minimatch": "^11.0.8"
-    }
   },
   "engines": {
     "node": ">=22.19.0"

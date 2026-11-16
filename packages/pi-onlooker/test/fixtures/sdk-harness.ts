@@ -25,7 +25,7 @@ import {
   type ExtensionError,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished } from "vite-plus/test";
+import { onTestFinished } from "vitest";
 
 import { recordToolOutputs } from "./tool-testing.js";
 

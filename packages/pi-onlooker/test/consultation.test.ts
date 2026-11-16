@@ -18,7 +18,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it } from "vite-plus/test";
+import { onTestFinished, expect, it } from "vitest";
 
 import { TROUBLESHOOTING_HINT } from "../src/troubleshooting-skill.js";
 import "./fixtures/observer-extension.js";

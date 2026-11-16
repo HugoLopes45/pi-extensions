@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/pi-ai";
-import { onTestFinished, expect, it } from "vite-plus/test";
+import { onTestFinished, expect, it } from "vitest";
 
 import { readOnlookerSettings } from "../src/onlooker-settings.js";
 import { createObserver } from "./fixtures/observer-harness.js";

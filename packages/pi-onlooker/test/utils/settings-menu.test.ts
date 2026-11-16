@@ -7,7 +7,7 @@ import {
   type Component,
   type Terminal,
 } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   cycleDisplay,

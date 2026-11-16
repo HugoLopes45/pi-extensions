@@ -7,7 +7,7 @@ import { streamSimple as codexStream } from "@earendil-works/pi-ai/api/openai-co
 import { streamSimple as openaiStream } from "@earendil-works/pi-ai/api/openai-responses";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { onTestFinished, expect, it, vi } from "vite-plus/test";
+import { onTestFinished, expect, it, vi } from "vitest";
 
 import { readOnlookerSettings } from "../src/onlooker-settings.js";
 import { stringContaining } from "./fixtures/matchers.js";

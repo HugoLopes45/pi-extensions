@@ -27,7 +27,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { afterEach, expect, test } from "vite-plus/test";
+import { afterEach, expect, test } from "vitest";
 
 import { acceptNullForOptionalArguments } from "../../src/utils/null-optional-arguments.js";
 import { toolDeclarations } from "../fixtures/tool-testing.js";

@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { describe, expect, test } from "vite-plus/test";
+import { describe, expect, test } from "vitest";
 
 import { acceptNullForOptionalArguments } from "../../src/utils/null-optional-arguments.js";
 import {

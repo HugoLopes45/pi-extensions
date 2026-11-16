@@ -21,7 +21,7 @@ import {
   SettingsManager,
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished } from "vite-plus/test";
+import { onTestFinished } from "vitest";
 
 import "./observer-extension.js";
 import "./review-regression-extension.js";
