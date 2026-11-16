@@ -1,38 +1,86 @@
 # Pi Extensions
 
-Monorepo for Hugo's Pi extensions. It is the single source of truth for their development, CI and npm releases.
+Add-ons that make the Pi coding assistant work better, built by Hugo Lopes.
 
-| Package                                     | npm              | Minimum Pi |
-| ------------------------------------------- | ---------------- | ---------- |
-| [`pi-context-kit`](packages/pi-context-kit) | `pi-context-kit` | 1.0.3      |
-| [`pi-onlooker`](packages/pi-onlooker)       | `pi-onlooker`    | 1.5.1      |
-| [`pi-claude-pro`](packages/pi-claude-pro)   | `pi-claude-pro`  | 1.0.3      |
+[Pi](https://pi.dev) is an AI assistant that reads, writes and fixes code from a terminal window. An extension adds one feature to Pi. Install only the extensions you want.
 
-## Install
+## What each extension does
 
-Each package installs on its own: `pi install npm:<package>`, or `pi install ./packages/<package>` from the root of a clone. pi-onlooker is not on npm yet, so use the local path for it.
+| Extension                                        | What it does for you                                                                                      | Can I install it? |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ----------------- |
+| [pi-context-kit](packages/pi-context-kit#readme) | Keeps long conversations with Pi clear. Pi puts old, unneeded text aside, so it keeps track of your work. | Yes               |
+| [pi-claude-pro](packages/pi-claude-pro#readme)   | Lets Pi use your Claude Pro, Max or Ultra plan. You do not need a separate Anthropic API key.             | Yes               |
+| [pi-onlooker](packages/pi-onlooker#readme)       | A second AI checks Pi's work while it runs, and tells Pi when something is wrong.                         | Not yet           |
 
-## Layout
+## Before you start
 
-Each extension lives in `packages/<name>/` with its own manifest, README, changelog, license, source and tests. The root uses pnpm workspaces.
+You need Pi, and an account with an AI provider that Pi supports, such as Anthropic or OpenAI. If Pi already works on your computer, go to [Install an extension](#install-an-extension).
 
-## Contributing
+1. Open a terminal window:
+   - macOS: press <kbd>Cmd</kbd> + <kbd>Space</kbd>, type `Terminal`, then press <kbd>Enter</kbd>.
+   - Windows: press the <kbd>Windows</kbd> key, type `PowerShell`, then press <kbd>Enter</kbd>.
+   - Linux: open the Terminal application.
+2. Copy the line for your computer, paste it into the terminal, then press <kbd>Enter</kbd>. This is the official Pi installer.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, documentation rules and releases, and [SECURITY.md](SECURITY.md) to report a vulnerability.
+   macOS or Linux:
 
-## Migration
+   ```bash
+   curl -fsSL https://pi.dev/install.sh | sh
+   ```
 
-Imported packages are snapshots of tracked files at a source commit, without lockfiles, nested workspace files or `.github/`, then formatted with oxfmt. Their earlier history stays in the source repositories, which are frozen after the import.
+   Windows:
 
-| Package          | Source                       | Commit                                     | License |
-| ---------------- | ---------------------------- | ------------------------------------------ | ------- |
-| `pi-context-kit` | `HugoLopes45/pi-context-kit` | `3b8199ae051a346f23935002ec594bbe356b0c0e` | MIT     |
-| `pi-onlooker`    | `HugoLopes45/pi-onlooker`    | `eb626e20579cce9f65f8a725bdd7c5449eebe0dc` | MIT     |
-| `pi-claude-pro`  | `HugoLopes45/pi-claude-pro`  | `0d68b46ccff704477421a24ff9a8db2340ba80e6` | MIT     |
+   ```shell
+   powershell -c "irm https://pi.dev/install.ps1 | iex"
+   ```
 
-`pi-context-kit` commit `6d7330ff09b61ae801c90735a920beb26e506aa4` is ported afterward by cherry-pick.
+3. Type `pi`, then press <kbd>Enter</kbd>. Pi starts.
+4. In Pi, type `/login`, press <kbd>Enter</kbd>, then follow the steps to connect your AI account.
 
-Do not commit credentials, environment files, session journals or local agent settings.
+## Install an extension
+
+1. Quit Pi if it is open: press <kbd>Ctrl</kbd> + <kbd>C</kbd> two times.
+2. In the terminal, type the line for the extension you want, then press <kbd>Enter</kbd>:
+
+   ```bash
+   pi install npm:pi-context-kit
+   ```
+
+   ```bash
+   pi install npm:pi-claude-pro    # needs a Claude Pro, Max or Ultra plan
+   ```
+
+3. Type `pi`, then press <kbd>Enter</kbd>. The extension is now active.
+4. Open the extension's page from the [table above](#what-each-extension-does) to learn what to do next.
+
+To see which extensions you have, type `pi list`.
+
+## Update or remove an extension
+
+Quit Pi first. Then type one of these lines, with the name of your extension, and press <kbd>Enter</kbd>:
+
+```bash
+pi update npm:pi-context-kit    # get the newest version
+pi remove npm:pi-context-kit    # remove the extension
+```
+
+Start Pi again to use the change.
+
+## Good to know
+
+- Some features send extra requests to your AI model, which count against your plan or your bill. Each extension page explains this in its **Limits** section.
+- pi-claude-pro is not made or supported by Anthropic. Read its **Limits** section before you use it.
+- pi-onlooker is not released yet. Developers can try it from a copy of this project: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Get help
+
+If something does not work, [open an issue](https://github.com/HugoLopes45/pi-extensions/issues). Tell us which extension you use, what you did and what you saw. Type `pi --version` to find your Pi version, and add it. Do not include passwords, API keys or private conversations.
+
+To report a security problem, read [SECURITY.md](SECURITY.md).
+
+## For developers
+
+[CONTRIBUTING.md](CONTRIBUTING.md) explains how to build, test and release the extensions. Each extension lives in `packages/<name>/` with its own README, changelog, license, source and tests.
 
 ## Author
 

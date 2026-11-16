@@ -30,7 +30,7 @@ Each package must declare `"type": "module"` in its `package.json`; otherwise, T
 - Do not weaken tests or input validation to pass checks.
 - Use Pi's native features and small changes before new dependencies or abstractions. Host-provided peer dependencies stay `"*"`.
 - Keep each extension independent of personal paths, prompts and other extensions. Preserve unrelated user instructions and session content.
-- Never put credentials, account data or private conversation content in commits, screenshots or logs.
+- Never put credentials, account data or private conversation content in commits, screenshots or logs. Do not commit environment files, session journals or local agent settings.
 - pi-claude-pro: offline tests cannot prove that Anthropic accepts subscription requests. `pnpm --filter pi-claude-pro run check:live` sends a real request with your Pi login and consumes account usage; run it only with the account owner's permission. State whether a change was tested offline, live, or both.
 - pi-onlooker: the Onlooker stays read-only. Keep a rule in code, not in the Onlooker Prompt, when code can enforce it.
 
@@ -70,3 +70,15 @@ Only the repository owner publishes. Each package is released on its own:
 `.github/workflows/release.yml` checks the tag, the commit and the changelog entry, sets the version and publishes to npm with trusted publishing, through the `npm` environment. It does not rerun the checks; it relies on CI on `main`. Do not bump the version in pull requests: the tag sets it.
 
 Configure each package's npm trusted publisher with this repository, `release.yml` and the `npm` environment. Restrict that environment to tags `*@v*` and make the owner its required reviewer. A published version cannot be replaced: fix a bad release with a new version.
+
+## Provenance
+
+Imported packages are snapshots of tracked files at a source commit, without lockfiles, nested workspace files or `.github/`, then formatted with oxfmt. Their earlier history stays in the source repositories, which are frozen after the import.
+
+| Package          | Source                       | Commit                                     | License |
+| ---------------- | ---------------------------- | ------------------------------------------ | ------- |
+| `pi-context-kit` | `HugoLopes45/pi-context-kit` | `3b8199ae051a346f23935002ec594bbe356b0c0e` | MIT     |
+| `pi-onlooker`    | `HugoLopes45/pi-onlooker`    | `eb626e20579cce9f65f8a725bdd7c5449eebe0dc` | MIT     |
+| `pi-claude-pro`  | `HugoLopes45/pi-claude-pro`  | `0d68b46ccff704477421a24ff9a8db2340ba80e6` | MIT     |
+
+`pi-context-kit` commit `6d7330ff09b61ae801c90735a920beb26e506aa4` is ported afterward by cherry-pick.
