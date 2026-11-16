@@ -3,9 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchUsage } from "../src/usage.ts";
 
 function stubFetch() {
-  const fetch = vi.fn(
-    async (_input: string | URL | Request, _init?: RequestInit) =>
-      new Response("{}", { headers: { "content-type": "application/json" } }),
+  const fetch = vi.fn<typeof globalThis.fetch>(
+    async () => new Response("{}", { headers: { "content-type": "application/json" } }),
   );
   vi.stubGlobal("fetch", fetch);
   return fetch;

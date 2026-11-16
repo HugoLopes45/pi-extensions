@@ -164,7 +164,7 @@ describe("updateSetting", () => {
     const temporary = `${file}.${process.pid}.tmp`;
     writeFileSync(temporary, "");
     chmodSync(temporary, 0o444);
-    expect(() => updateSetting(file, "enabled", false)).toThrow();
+    expect(() => updateSetting(file, "enabled", false)).toThrow(/EACCES/);
     expect(readdirSync(agentDir)).toEqual(["context-kit.json"]);
     expect(readFileSync(file, "utf8")).toBe("{}");
   });

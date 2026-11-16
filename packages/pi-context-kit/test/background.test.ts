@@ -20,7 +20,7 @@ describe("BackgroundHandoff", () => {
     const t = new Transcript();
     const leaf = t.user("hi");
     const background = new BackgroundHandoff();
-    const run = vi.fn(async () => NOTE);
+    const run = vi.fn<() => Promise<Note>>(async () => NOTE);
     expect(background.start(null, leaf, run, () => {})).toBe(true);
     expect(background.start(null, leaf, run, () => {})).toBe(false);
     expect(run).toHaveBeenCalledTimes(1);
@@ -52,7 +52,7 @@ describe("BackgroundHandoff", () => {
     ["ready", NOTE],
     [undefined, undefined],
   ])("reports the note as %s once it settles, and tells the listener", async (state, note) => {
-    const settled = vi.fn();
+    const settled = vi.fn<() => void>();
     const background = new BackgroundHandoff(settled);
     let finish = (_: typeof NOTE | undefined) => {};
     background.start(
