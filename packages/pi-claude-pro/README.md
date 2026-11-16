@@ -1,7 +1,5 @@
 # pi-claude-pro: use your Claude Pro, Max or Ultra plan in Pi
 
-English | [简体中文](https://github.com/HugoLopes45/pi-extensions/blob/main/packages/pi-claude-pro/README.zh-CN.md)
-
 [![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/pi-claude-pro)](https://www.npmjs.com/package/pi-claude-pro)
 [![Pi package](https://img.shields.io/badge/pi.dev-package-blue)](https://pi.dev/packages/pi-claude-pro)
@@ -14,7 +12,7 @@ English | [简体中文](https://github.com/HugoLopes45/pi-extensions/blob/main/
 pi install npm:pi-claude-pro
 ```
 
-No Anthropic API key. No Claude Code install. No extra npm dependencies: it uses the Pi packages you already have. This package is unofficial: read [Risks and limits](#risks-and-limits) before you use it.
+No Anthropic API key. No Claude Code install. No extra npm dependencies: it uses the Pi packages you already have. This package is unofficial: read [Limits](#limits) before you use it.
 
 ## Why pi-claude-pro
 
@@ -40,7 +38,7 @@ The footer shows **Claude plan** when the extension is active. Run `/claude-pro`
 
 Use only one extension that handles the `anthropic` provider. Remove other Claude subscription extensions first.
 
-## Your usage in the footer
+## Footer
 
 | Footer                                           | Meaning                                                        |
 | ------------------------------------------------ | -------------------------------------------------------------- |
@@ -56,7 +54,7 @@ Use only one extension that handles the `anthropic` provider. Remove other Claud
 
 When Anthropic bills a request as extra usage, the footer shows it even if your plan limits are not reached. The extension then warns once per session.
 
-## The `/claude-pro` command
+## Commands
 
 Run `/claude-pro` to see the current model, whether its requests use your plan, and the usage of each limit with its reset time. When requests are billed as extra usage, the command tells you the likely cause.
 
@@ -70,27 +68,11 @@ Run `/claude-pro` to see the current model, whether its requests use your plan, 
 - Anthropic can bill a request as extra usage when the system prompt looks like a third-party app. Pi's documentation section can cause this, so the extension moves it.
 - Requests that use an Anthropic API key are not changed.
 
-## Risks and limits
+## Limits
 
 - **Unofficial.** Anthropic does not support this package. Using a subscription outside Claude Code can break the Anthropic Consumer Terms. You accept this risk.
-- **Server contract.** Requests work only while Anthropic accepts the Claude Code identity that this package sends. Anthropic does not publish this contract and can change it at any time. The offline tests cannot detect such a change. `npm run check:live` tests the current contract; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Server contract.** Requests work only while Anthropic accepts the Claude Code identity that this package sends. Anthropic does not publish this contract and can change it at any time. The offline tests cannot detect such a change. `check:live` tests the current contract; see [CONTRIBUTING.md](https://github.com/HugoLopes45/pi-extensions/blob/main/CONTRIBUTING.md).
 - **Pi versions.** The extension does not enforce a Pi version. CI tests Pi 1.0.3, the lockfile baseline and the latest published Pi packages, on pull requests and on pushes to `main`. A future Pi API change can still break it.
-
-## FAQ
-
-**Can I use my Claude subscription in Pi without an API key?** Yes. See [Quick start](#quick-start). Requests count against your subscription limits.
-
-**Do I need Claude Code?** No. The extension does not run or call Claude Code.
-
-**Does it work on a plan without a 5-hour limit, such as Ultra?** Yes. When Anthropic sends no 5-hour window, the footer shows only the weekly limit.
-
-**Can I use Claude Fable in Pi?** Yes. On Max and Ultra, Fable counts against your plan, up to 50% of your weekly limit. On Pro, Anthropic bills Fable as paid usage credits. The extension sends Claude Code 2.1.322, and Fable 5.2 requires 2.1.321 or later. When you use Fable, the footer also shows the weekly Fable limit. When it is spent, switch to another model to continue on your plan.
-
-**Why does Anthropic bill my Claude subscription as extra usage in Pi?** Anthropic bills a request as extra usage when a plan limit is spent, when the model needs usage credits on your plan, or when the system prompt looks like a third-party app. Pi's documentation section can cause the last one, so the extension moves it out of the system prompt. Run `/claude-pro` to see your limits and the likely causes.
-
-**How do I see my Claude usage limits in Pi?** The footer shows the 5-hour and weekly usage after each request. Run `/claude-pro` for each limit with its reset time.
-
-**Is it allowed by Anthropic?** It is unofficial and can break the Anthropic Consumer Terms. See [Risks and limits](#risks-and-limits).
 
 ## Troubleshooting
 
@@ -108,17 +90,33 @@ Run `/claude-pro` to see the current model, whether its requests use your plan, 
 
 **No `Claude plan` in the footer**: run `/login` again and select **Anthropic (Claude Pro/Max)**, not the API key. Then run `pi list` and check that no other extension handles Claude.
 
+## FAQ
+
+**Can I use my Claude subscription in Pi without an API key?** Yes. See [Quick start](#quick-start). Requests count against your subscription limits.
+
+**Do I need Claude Code?** No. The extension does not run or call Claude Code.
+
+**Does it work on a plan without a 5-hour limit, such as Ultra?** Yes. When Anthropic sends no 5-hour window, the footer shows only the weekly limit.
+
+**Can I use Claude Fable in Pi?** Yes. On Max and Ultra, Fable counts against your plan, up to 50% of your weekly limit. On Pro, Anthropic bills Fable as paid usage credits. The extension sends Claude Code 2.1.322, and Fable 5.2 requires 2.1.321 or later. When you use Fable, the footer also shows the weekly Fable limit. When it is spent, switch to another model to continue on your plan.
+
+**Why does Anthropic bill my Claude subscription as extra usage in Pi?** Anthropic bills a request as extra usage when a plan limit is spent, when the model needs usage credits on your plan, or when the system prompt looks like a third-party app. Pi's documentation section can cause the last one, so the extension moves it out of the system prompt. Run `/claude-pro` to see your limits and the likely causes.
+
+**How do I see my Claude usage limits in Pi?** The footer shows the 5-hour and weekly usage after each request. Run `/claude-pro` for each limit with its reset time.
+
+**Is it allowed by Anthropic?** It is unofficial and can break the Anthropic Consumer Terms. See [Limits](#limits).
+
 ## Update, try or remove
 
 ```bash
-pi update --extensions          # update
-pi -e npm:pi-claude-pro         # try for one session without installing
-pi remove npm:pi-claude-pro     # remove
+pi update npm:pi-claude-pro    # update, then restart Pi
+pi -e npm:pi-claude-pro        # try for one session without installing
+pi remove npm:pi-claude-pro    # remove, then restart Pi
 ```
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks, pull requests and releases. Report bugs on [GitHub Issues](https://github.com/HugoLopes45/pi-extensions/issues), and vulnerabilities through [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](https://github.com/HugoLopes45/pi-extensions/blob/main/CONTRIBUTING.md) for setup, checks and releases. Report bugs on [GitHub Issues](https://github.com/HugoLopes45/pi-extensions/issues), and vulnerabilities through [SECURITY.md](https://github.com/HugoLopes45/pi-extensions/blob/main/SECURITY.md).
 
 ## License
 

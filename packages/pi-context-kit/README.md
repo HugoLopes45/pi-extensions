@@ -1,16 +1,14 @@
 # pi-context-kit: long Pi sessions that stay sharp
 
-English | [简体中文](https://github.com/HugoLopes45/pi-extensions/blob/main/packages/pi-context-kit/README.zh-CN.md)
-
 [![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/pi-context-kit)](https://www.npmjs.com/package/pi-context-kit)
 [![Pi package](https://img.shields.io/badge/pi.dev-package-blue)](https://pi.dev/packages/pi-context-kit)
 [![Node.js](https://img.shields.io/node/v/pi-context-kit)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/npm/l/pi-context-kit)](LICENSE)
 
-Pi compaction and context management for the [Pi coding agent](https://github.com/earendil-works/pi). pi-context-kit clears stale file reads and old tool outputs out of the context window, writes the handoff summary in the background before Pi needs it, and keeps the original text of the current branch one `recall` search away.
+**Pi compaction and context management for the [Pi coding agent](https://github.com/earendil-works/pi).** pi-context-kit clears stale file reads and old tool outputs out of the context window, writes the handoff summary in the background before Pi needs it, and keeps the original text of the current branch one `recall` search away.
 
-```sh
+```bash
 pi install npm:pi-context-kit
 ```
 
@@ -88,17 +86,7 @@ You need Pi 1.0.3 or later and Node.js 22.19 or later.
 3. Look at the footer. It shows `Context 0% · cleanup at 75%` when the extension is active.
 4. Work as usual. Type `/context-kit` to change the settings.
 
-## Update, try or remove
-
-```sh
-pi update npm:pi-context-kit    # update, then restart Pi
-pi -e npm:pi-context-kit        # try for one session without installing
-pi remove npm:pi-context-kit    # remove, then restart Pi
-```
-
-After an update, Pi shows what changed, from [CHANGELOG.md](CHANGELOG.md).
-
-## Use it
+## Footer
 
 You do not need to configure anything. pi-context-kit shows its state in Pi's footer:
 
@@ -110,6 +98,8 @@ You do not need to configure anything. pi-context-kit shows its state in Pi's fo
 | `Context cleanup off`                            | You turned automatic cleanup off.                                                          |
 
 After pi-context-kit shortens old outputs, Pi shows a notice, for example: `pi-context-kit freed 17% of the context (34k tokens). The agent can still look up what was removed.`
+
+## Commands
 
 To change the settings, type `/context-kit` and press Enter. Select a line with the arrow keys and press Enter to change its value. The change is saved at once and applies from the next turn. Press Escape to close the panel.
 
@@ -123,7 +113,7 @@ The panel does not show the Cleanup method line when `advanced.methodOrder` is i
 
 Outside the interactive mode, `/context-kit` shows the current settings in one line.
 
-## How it works during a session
+## How it works
 
 ```text
  Every turn ends
@@ -317,7 +307,7 @@ These settings belong to Pi, not to pi-context-kit. Put them in the `compaction`
 
 pi-context-kit has no setting per model. To start earlier for one model only, make Pi's limit smaller for this model with `compaction.modelOverrides`, for example `{ "compaction": { "modelOverrides": { "provider/model-id": { "reserveTokens": 80000 } } } }`. With a 200,000-token window, this model then starts at 120,000 tokens at the latest. The model key must be the exact `provider/modelId`. To see the IDs, type `pi --list-models`.
 
-## Recipes
+### Recipes
 
 | I want to...                                     | `context-kit.json`                                        |
 | ------------------------------------------------ | --------------------------------------------------------- |
@@ -370,21 +360,20 @@ Yes. Type `/compact` and the focus, for example `/compact keep the database migr
 **The model forgot a detail. What can I do?**
 Ask the model to use the `recall` tool, for example: "Use recall to find the error message from the first test run."
 
-## Development
+## Update, try or remove
 
-```sh
-pnpm install
-pnpm run check
+```bash
+pi update npm:pi-context-kit    # update, then restart Pi
+pi -e npm:pi-context-kit        # try for one session without installing
+pi remove npm:pi-context-kit    # remove, then restart Pi
 ```
 
-The tests run offline with Pi's faux provider. They do not call a real model.
-Development uses Pi `1.5.2`. The oldest supported version is Pi `1.0.3`. CI checks the locked dependencies on Node 22 and 24, and Pi `1.0.3` and latest Pi on Node 24.
-Host-provided peer dependencies use `"*"`, as required by Pi's package guide. This is not a guarantee that every Pi version works.
+After an update, Pi shows what changed, from [CHANGELOG.md](CHANGELOG.md).
 
-## Contributing and releases
+## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks, pull requests and releases. Report vulnerabilities through [SECURITY.md](SECURITY.md), not public issues.
+See [CONTRIBUTING.md](https://github.com/HugoLopes45/pi-extensions/blob/main/CONTRIBUTING.md) for setup, checks and releases. Report bugs on [GitHub Issues](https://github.com/HugoLopes45/pi-extensions/issues), and vulnerabilities through [SECURITY.md](https://github.com/HugoLopes45/pi-extensions/blob/main/SECURITY.md).
 
 ## License
 
-MIT
+[MIT](LICENSE)
