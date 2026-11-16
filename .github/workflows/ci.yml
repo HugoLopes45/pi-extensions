@@ -160,6 +160,8 @@ jobs:
         run: |
           packages='[]'
           for manifest in packages/*/package.json; do
+            # A private package is shared code bundled into the extensions, never published.
+            if [ "$(jq -r '.private // false' "$manifest")" = true ]; then continue; fi
             package=$(jq -r .name "$manifest")
             version=$(jq -r .version "$manifest")
             status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.npmjs.org/$package/$version")
