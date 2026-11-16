@@ -18,7 +18,7 @@ To try a package in Pi, run `pi -e ./packages/<package>` from the repository roo
 
 `pnpm run verify` runs `pnpm check` (oxfmt in check mode, then oxlint with type-aware rules through `oxlint-tsgolint`), then each package's `check` script (TypeScript with the shared root `tsconfig.json`, then Vitest offline tests). The tests use fake providers and never call a real model.
 
-Lint rules apply to source and tests alike, including the `typescript/no-unsafe-*` rules. In `packages/*/test/**`, only `no-console`, `no-base-to-string` and `promise/no-callback-in-promise` are off. In `packages/*/scripts/**`, `no-console` is off. One root `.oxlintrc.json` lints every package. Cyclomatic complexity is limited to 10 in pi-context-kit and pi-claude-pro, and to 20 in pi-onlooker. Split a function that is too complex. Inline `oxlint-disable` and `eslint-disable` comments are rejected.
+Lint rules apply to source and tests alike, including the `typescript/no-unsafe-*` rules. In `packages/*/test/**`, only `no-console`, `no-base-to-string` and `promise/no-callback-in-promise` are off. In `packages/*/scripts/**`, `no-console` is off. One root `.oxlintrc.json` lints every package. Cyclomatic complexity is limited to 10, and to 20 in pi-onlooker. Split a function that is too complex. Inline `oxlint-disable` and `eslint-disable` comments are rejected.
 
 Each package must declare `"type": "module"` in its `package.json`; otherwise, TypeScript `NodeNext` treats its `.ts` files as CommonJS and rejects `import` and `export`.
 
@@ -60,10 +60,9 @@ Write one paragraph per line. Use `bash` for shell code blocks. Link to files ou
 1. Create `packages/<extension>/` with the same layout as the other packages: `extensions/index.ts` as the entry, modules in `src/`, tests in `test/`, and `README.md`, `CHANGELOG.md` and `LICENSE`.
 2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, `engines`, the `pi` manifest and the Pi peer dependencies at `"*"`.
 3. Add `tsconfig.json` with `{"extends": "../../tsconfig.json", "include": ["extensions", "src", "test"]}`, and adjust `include` to the folders of the package.
-4. In `.oxlintrc.json`, add `packages/<extension>/**` to the `files` of the override that limits `eslint/complexity` to 10.
-5. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new. Add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
-6. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
-7. Run `pnpm install` and `pnpm run verify`.
+4. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new. Add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
+5. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
+6. Run `pnpm install` and `pnpm run verify`.
 
 The first npm version of a new package is published by hand, because the trusted publisher is configured in the package settings on npmjs.com, which exist only after a first publication. After it, configure the trusted publisher as described in [Releases](#releases); later versions are published by CI.
 
