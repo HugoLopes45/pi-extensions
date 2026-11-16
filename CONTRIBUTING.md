@@ -58,9 +58,9 @@ Write one paragraph per line. Use `bash` for shell code blocks. Link to files ou
 ## Add an extension
 
 1. Create `packages/<extension>/` with the same layout as the other packages: `extensions/index.ts` as the entry, modules in `src/`, tests in `test/`, and `README.md`, `CHANGELOG.md` and `LICENSE`.
-2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, `engines`, the `pi` manifest and the Pi peer dependencies at `"*"`.
+2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, the `pi` manifest and the Pi peer dependencies at `"*"`. Set `engines.pi` to the oldest supported Pi, for example `">=1.5.1"`: CI checks the package on that version and on the latest.
 3. Add `tsconfig.json` with `{"extends": "../../tsconfig.json", "include": ["extensions", "src", "test"]}`, and adjust `include` to the folders of the package.
-4. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new. Add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
+4. In `.github/workflows/ci.yml`, add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
 5. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
 6. Run `pnpm install` and `pnpm run verify`.
 

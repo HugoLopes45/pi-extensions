@@ -47,13 +47,29 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm run verify
 
+  # Each package declares its oldest supported Pi in engines.pi. It is checked on that version and on the latest.
+  pi-versions:
+    name: Pi versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: versions
+        run: |
+          versions=$(jq --slurp --compact-output '[.[] | if (.engines.pi // "") | test("^>=[0-9]+\\.[0-9]+\\.[0-9]+$") then .engines.pi | ltrimstr(">=") else error("\(.name) needs engines.pi set to \">=X.Y.Z\"") end] + ["latest"] | unique' packages/*/package.json)
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
   pi-compat:
     name: Pi ${{ matrix.pi }}
+    needs: pi-versions
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        pi: [1.0.3, 1.5.1, latest]
+        pi: ${{ fromJSON(needs.pi-versions.outputs.versions) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -74,13 +90,25 @@ jobs:
           pnpm install --no-frozen-lockfile --ignore-scripts
         env:
           PI_VERSION: ${{ matrix.pi }}
-      # Oldest supported Pi per package: 1.0.3 for pi-context-kit and pi-claude-pro, 1.5.1 for pi-onlooker.
-      - if: matrix.pi == '1.0.3'
-        run: pnpm --filter pi-context-kit --filter pi-claude-pro run check
-      - if: matrix.pi == '1.5.1'
-        run: pnpm --filter pi-onlooker run check
+      - if: matrix.pi != 'latest'
+        name: Check the packages whose oldest supported Pi is ${{ matrix.pi }}
+        run: |
+          filters=$(jq --raw-output --arg pi ">=$PI_VERSION" 'select(.engines.pi == $pi) | "--filter=\(.name)"' packages/*/package.json)
+          pnpm $filters run check
+        env:
+          PI_VERSION: ${{ matrix.pi }}
       - if: matrix.pi == 'latest'
         run: pnpm run verify
+
+  # The matrix changes with engines.pi, so the main ruleset requires this job instead of each version.
+  pi-compat-result:
+    name: Pi compatibility
+    needs: pi-compat
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - if: needs.pi-compat.result != 'success'
+        run: exit 1
 
   workflow-security:
     name: Workflow security
