@@ -48,10 +48,7 @@ export interface ResolveLayeredOptionsInput<Config> {
   /** Keys resolved, in order: each key is merged across every layer before the next key. */
   optionKeys: readonly (keyof Config)[];
   /** Layers lowest precedence first. */
-  layers: readonly (readonly [
-    LayeredSettingScope,
-    LayeredSettingLayer<Config>,
-  ])[];
+  layers: readonly (readonly [LayeredSettingScope, LayeredSettingLayer<Config>])[];
   merge?: LayeredSettingMerges<Config> | undefined;
 }
 /** Effective settings and the source that supplied each key. */
@@ -115,25 +112,18 @@ export interface RewriteNamespaceDocumentInput {
  * lock and writer they use.
  * @returns The replacement file text.
  */
-export function rewriteNamespaceDocument(
-  input: RewriteNamespaceDocumentInput,
-): string {
+export function rewriteNamespaceDocument(input: RewriteNamespaceDocumentInput): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse((input.current ?? "{}").replace(/^\uFEFF/, ""));
   } catch (cause) {
-    throw input.invalid(
-      "malformed",
-      cause instanceof Error ? cause : undefined,
-    );
+    throw input.invalid("malformed", cause instanceof Error ? cause : undefined);
   }
   if (!isRecord(parsed)) throw input.invalid("root", undefined);
   const stored = parsed[input.namespace];
-  if (stored !== undefined && !isRecord(stored))
-    throw input.invalid("namespace", undefined);
+  if (stored !== undefined && !isRecord(stored)) throw input.invalid("namespace", undefined);
   const updated = input.update({ ...stored });
-  if (Object.keys(updated).length === 0 && !input.keepEmpty)
-    delete parsed[input.namespace];
+  if (Object.keys(updated).length === 0 && !input.keepEmpty) delete parsed[input.namespace];
   else parsed[input.namespace] = updated;
   return `${JSON.stringify(parsed, null, 2)}\n`;
 }
@@ -187,10 +177,7 @@ export interface LayeredSettingsSession {
   sessionManager: Pick<SessionManager, "getBranch">;
 }
 /** Effective settings that survive unreadable layers; `invalid` lists each layer left out. */
-export interface LenientLayeredSettings<
-  Options,
-  Config,
-> extends ResolvedLayeredSettings<Config> {
+export interface LenientLayeredSettings<Options, Config> extends ResolvedLayeredSettings<Config> {
   /** Usable authored options per scope; an unreadable scope or session entry authors nothing. */
   authored: { global: Options; project: Options; session: Options };
   /** Errors of the layers left out, in the order global, project, session. */
@@ -229,9 +216,7 @@ export interface SessionLayeredSettings<
   /** Replay only the selected branch's last complete override snapshot. */
   readOverrides(manager: Pick<SessionManager, "getBranch">): Static<S>;
   /** Like `readSettings`, but an unreadable layer is left out and listed in `invalid`. */
-  readSettingsLeniently(
-    session: LayeredSettingsSession,
-  ): LenientLayeredSettings<Static<S>, Config>;
+  readSettingsLeniently(session: LayeredSettingsSession): LenientLayeredSettings<Static<S>, Config>;
   /** Write one change; a session change is appended to the session as an entry through `pi`. */
   writeChange(
     pi: Pick<ExtensionAPI, "appendEntry">,
@@ -290,15 +275,8 @@ export function defineLayeredSettings<
   type OptionKey = keyof Options & keyof Config & string;
   type Layers = LayeredSettingsLayers<Options>;
   type Change = LayeredSettingChange<Options>;
-  const {
-    namespace,
-    label,
-    schema,
-    defaults,
-    sessionEntryType,
-    merge,
-    keepEmptyNamespace,
-  } = definition;
+  const { namespace, label, schema, defaults, sessionEntryType, merge, keepEmptyNamespace } =
+    definition;
   if (!Value.Check(schema, {}))
     throw new Error(`${label} settings schema must make every option optional`);
   const keySchema = Type.KeyOf(schema);
@@ -311,21 +289,16 @@ export function defineLayeredSettings<
     return Value.Check(keySchema, input);
   }
   // Native settings contain arbitrary authored JSON; this guard validates it with the option schema before use.
-  function isOptions(
-    value: unknown,
-  ): value is Options & LayeredSettingLayer<Config> {
+  function isOptions(value: unknown): value is Options & LayeredSettingLayer<Config> {
     return Value.Check(schema, value);
   }
   // Session entry data is arbitrary JSON; this guard validates the versioned envelope before replay.
-  function isSessionData(
-    value: unknown,
-  ): value is { version: 1; overrides: Options } {
+  function isSessionData(value: unknown): value is { version: 1; overrides: Options } {
     return Value.Check(sessionSchema, value);
   }
 
   function optionKey(input: string): OptionKey {
-    if (!isOptionKey(input))
-      throw new Error(`Unknown ${label} option: ${input}`);
+    if (!isOptionKey(input)) throw new Error(`Unknown ${label} option: ${input}`);
     return input;
   }
   const optionKeys = Object.keys(schema.properties).map(optionKey);
@@ -334,9 +307,7 @@ export function defineLayeredSettings<
   function checkedEmptyOptions(): Options {
     const empty: unknown = {};
     if (!isOptions(empty))
-      throw new Error(
-        `${label} settings schema must make every option optional`,
-      );
+      throw new Error(`${label} settings schema must make every option optional`);
     return empty;
   }
 
@@ -366,13 +337,9 @@ export function defineLayeredSettings<
   function readOverrides(manager: Pick<SessionManager, "getBranch">): Options {
     const entry = manager
       .getBranch()
-      .findLast(
-        (item) =>
-          item.type === "custom" && item.customType === sessionEntryType,
-      );
+      .findLast((item) => item.type === "custom" && item.customType === sessionEntryType);
     if (!entry || entry.type !== "custom") return noOptions();
-    if (!isSessionData(entry.data))
-      throw new Error(`Invalid ${label} session settings`);
+    if (!isSessionData(entry.data)) throw new Error(`Invalid ${label} session settings`);
     return structuredClone(entry.data.overrides);
   }
 
@@ -383,16 +350,13 @@ export function defineLayeredSettings<
       try {
         if (scope === "project" && !manager.isProjectTrusted()) continue;
         const document =
-          scope === "global"
-            ? manager.getGlobalSettings()
-            : manager.getProjectSettings();
+          scope === "global" ? manager.getGlobalSettings() : manager.getProjectSettings();
         layers[scope] = parseOptions(
           Object.getOwnPropertyDescriptor(document, namespace)?.value,
           scope,
         );
       } catch (cause) {
-        layers[scope] =
-          cause instanceof Error ? cause : new Error(String(cause));
+        layers[scope] = cause instanceof Error ? cause : new Error(String(cause));
       }
     }
     return layers;
@@ -406,17 +370,9 @@ export function defineLayeredSettings<
     if (authored.global instanceof Error) throw authored.global;
     const trusted = session.settingsManager.isProjectTrusted();
     if (trusted && authored.project instanceof Error) throw authored.project;
-    const layers: (readonly [
-      LayeredSettingScope,
-      LayeredSettingLayer<Config>,
-    ])[] = [
+    const layers: (readonly [LayeredSettingScope, LayeredSettingLayer<Config>])[] = [
       ["global", authored.global],
-      [
-        "project",
-        trusted && !(authored.project instanceof Error)
-          ? authored.project
-          : noOptions(),
-      ],
+      ["project", trusted && !(authored.project instanceof Error) ? authored.project : noOptions()],
     ];
     if (sessionEntryType !== undefined)
       layers.push(["session", readOverrides(session.sessionManager)]);
@@ -435,20 +391,15 @@ export function defineLayeredSettings<
     change: Change,
     isCurrent: () => boolean,
   ): Promise<Options | undefined> {
-    const untrusted = () =>
-      new Error(`${label} project settings require a trusted project`);
+    const untrusted = () => new Error(`${label} project settings require a trusted project`);
     if (scope === "project" && !manager.isProjectTrusted()) throw untrusted();
-    const candidate: unknown = Object.getOwnPropertyDescriptor(
-      manager,
-      "storage",
-    )?.value;
+    const candidate: unknown = Object.getOwnPropertyDescriptor(manager, "storage")?.value;
     if (!Value.Check(storageSchema, candidate)) {
       throw new Error(
         `Unsupported Pi settings backend: ${label} cannot safely write scoped settings`,
       );
     }
-    const storage: Parameters<typeof SettingsManager.fromStorage>[0] =
-      candidate;
+    const storage: Parameters<typeof SettingsManager.fromStorage>[0] = candidate;
     await manager.flush();
     if (!isCurrent()) return undefined;
     if (scope === "project" && !manager.isProjectTrusted()) throw untrusted();
@@ -461,13 +412,10 @@ export function defineLayeredSettings<
         invalid: (reason, cause) =>
           reason === "malformed" && cause
             ? cause
-            : new Error(
-                `Invalid ${scope} settings document; refusing to overwrite it`,
-              ),
+            : new Error(`Invalid ${scope} settings document; refusing to overwrite it`),
         update: (stored) => {
           const next = { ...stored };
-          if (change.action === "inherit")
-            Reflect.deleteProperty(next, change.key);
+          if (change.action === "inherit") Reflect.deleteProperty(next, change.key);
           else Object.assign(next, change.patch);
           updated = parseOptions(next, scope);
           return next;
@@ -493,9 +441,7 @@ export function defineLayeredSettings<
     session: LayeredSettingsSession,
   ): LenientLayeredSettings<Options, Config> {
     // Pi reads an unloadable file as empty, so only its recorded error shows the problem.
-    const invalid: Error[] = session.settingsManager
-      .drainErrors()
-      .map((entry) => entry.error);
+    const invalid: Error[] = session.settingsManager.drainErrors().map((entry) => entry.error);
     const layers = readLayers(session.settingsManager);
     const usable = (layer: Options | Error): Options => {
       if (!(layer instanceof Error)) return layer;
@@ -538,8 +484,7 @@ export function defineLayeredSettings<
     if (scope !== "session")
       return writeSettings(session.settingsManager, scope, change, isCurrent);
     const overrides = readOverrides(session.sessionManager);
-    if (change.action === "inherit")
-      Reflect.deleteProperty(overrides, change.key);
+    if (change.action === "inherit") Reflect.deleteProperty(overrides, change.key);
     else Object.assign(overrides, change.patch);
     pi.appendEntry(sessionEntry, { version: 1, overrides });
     return overrides;
@@ -564,7 +509,5 @@ export function layeredSettingsSession(
 export function layeredMenuScopes(
   manager: Pick<SettingsManager, "isProjectTrusted">,
 ): LayeredSettingScope[] {
-  return manager.isProjectTrusted()
-    ? ["session", "project", "global"]
-    : ["session", "global"];
+  return manager.isProjectTrusted() ? ["session", "project", "global"] : ["session", "global"];
 }
