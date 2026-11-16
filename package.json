@@ -1,6 +1,7 @@
 {
   "name": "@hugolopes45/pi-extensions",
   "private": true,
+  "type": "module",
   "scripts": {
     "check": "oxfmt --check && oxlint",
     "verify": "pnpm check && pnpm --recursive run check",
