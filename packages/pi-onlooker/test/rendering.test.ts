@@ -465,7 +465,7 @@ describe("untrusted text", () => {
 
   it("keeps a line break in an Intervention", () => {
     const intervention = renderOnlookerIntervention(
-      { severity: "concern", message: "first\r\n\r\nsecond" },
+      { severity: "concern", message: "first\r\nsecond" },
       { expanded: true, outputPad: 1 },
       tagged,
     );
