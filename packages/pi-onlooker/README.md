@@ -95,7 +95,7 @@ You can also write them in Pi's `settings.json` (`~/.pi/agent/settings.json` or 
 
 | Key             | Default           | Meaning                                                                                                 |
 | --------------- | ----------------- | ------------------------------------------------------------------------------------------------------- |
-| `name`          | `"Onlooker"`      | Display name, such as `"Marcel"` or `"Inspector gadget"`.                                               |
+| `name`          | `"Onlooker"`      | Display name in the footer, status and findings, such as `"Reviewer"`.                                  |
 | `enabled`       | `false`           | Onlooker on or off.                                                                                     |
 | `model`         | the agent's model | `"provider/model-id"` for Reviews and `onlooker_ask`.                                                   |
 | `thinkingLevel` | `"high"`          | `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` or `"max"`. Never copied from the agent. |
@@ -106,9 +106,9 @@ Other limits are fixed: at most 4 findings per Review, 1 Corrective Turn per req
 
 ### Display name
 
-Open `/onlooker`, select `name`, and enter Marcel or Inspector gadget. Spaces are allowed; blank names, surrounding whitespace and control characters are rejected. Enter `inherit` to remove the selected scope’s override.
+Open `/onlooker`, select `name`, and enter a name such as `Reviewer` or `Code reviewer`. Spaces are allowed; blank names, surrounding whitespace and control characters are rejected. Enter `inherit` to remove the selected scope’s override.
 
-To save a name globally, run `/onlooker set name "Inspector gadget" --global`. The name appears in the footer, status and findings. Renaming keeps the private session and earlier findings’ attribution unchanged. The menu title, `/onlooker` command and `onlooker_ask` tool identifier stay fixed.
+To save a name globally, run `/onlooker set name "Code reviewer" --global`. The name appears in the footer, status and findings. Renaming keeps the private session and earlier findings’ attribution unchanged. The menu title, `/onlooker` command and `onlooker_ask` tool identifier stay fixed.
 
 ### `reviewEvery`
 
