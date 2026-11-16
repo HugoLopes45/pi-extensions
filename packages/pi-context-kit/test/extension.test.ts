@@ -20,10 +20,12 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionUIContext,
+  initTheme,
   ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { createMenuTui, keys, menuDriver } from "pi-hl-utils/testing/menu-ui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const sessions: { dispose(): void }[] = [];
@@ -31,7 +33,17 @@ const sessions: { dispose(): void }[] = [];
 afterEach(() => {
   for (const session of sessions.splice(0)) session.dispose();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
+
+/** Replaces the context-kit namespace of Pi's settings.json. */
+function writeContextKitSettings(agentDir: string, options: unknown) {
+  writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ "context-kit": options }));
+}
+
+function readJson(path: string): unknown {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
 
 async function start(
   responses: FauxResponseStep[],
@@ -47,14 +59,13 @@ async function start(
   writeFileSync(join(cwd, "b.ts"), "export const b = 2;\n".repeat(1_000));
   // The extension finds its settings file through Pi's agent directory.
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-  if (contextKit !== undefined)
-    writeFileSync(join(agentDir, "context-kit.json"), JSON.stringify(contextKit));
-  // 0.3 read its settings from Pi's settings file.
-  if (legacyContextKit !== undefined)
-    writeFileSync(
-      join(agentDir, "settings.json"),
-      JSON.stringify({ contextKit: legacyContextKit }),
-    );
+  const agentSettings = {
+    ...(contextKit === undefined ? {} : { "context-kit": contextKit }),
+    // The 0.3 block, which the extension imports once.
+    ...(legacyContextKit === undefined ? {} : { contextKit: legacyContextKit }),
+  };
+  if (Object.keys(agentSettings).length > 0)
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify(agentSettings));
   const faux = fauxProvider({
     models: [{ id: "faux-1", contextWindow, maxTokens: 4_096, reasoning: true }],
   });
@@ -138,7 +149,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: 8_000, advanced: { methodOrder: [] } },
+      { threshold: 8_000, methodOrder: [] },
     );
     const notify = vi.fn<ExtensionUIContext["notify"]>();
     const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
@@ -174,42 +185,42 @@ describe("pi-context-kit inside Pi", () => {
     expect(notify.mock.calls).toEqual([
       [
         expect.stringMatching(
-          /^pi-context-kit: automatic cleanup at 75% full, with trim first\. Settings: .+context-kit\.json$/,
+          /^pi-context-kit: automatic cleanup at 75%, with frugal\. Settings: \/context-kit$/,
         ),
         "info",
       ],
     ]);
   });
 
-  it("moves the 0.3 settings of a trusted project to the project file", async () => {
-    const { session, cwd, agentDir } = await start([fauxAssistantMessage("done")]);
-    mkdirSync(join(cwd, ".pi"));
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
-    );
+  it("imports context-kit.json into the global namespace and renames the file", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000, advanced: { background: false } }));
     const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
-    const file = join(cwd, ".pi", "context-kit.json");
     expect(notify.mock.calls).toEqual([
-      [expect.stringContaining(`moved its settings to ${file}.`), "info"],
+      [
+        `pi-context-kit moved its settings into Pi's settings.json under "context-kit". The 0.3 "contextKit" entry is no longer read. ${file} was renamed to ${file}.migrated.`,
+        "info",
+      ],
     ]);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-      strategy: "pi-summary",
+    expect(existsSync(file)).toBe(false);
+    expect(readJson(join(agentDir, "settings.json"))).toEqual({
+      "context-kit": { threshold: 8_000, background: false },
     });
-    expect(existsSync(join(agentDir, "context-kit.json"))).toBe(false);
   });
 
-  it("ignores the settings of a project that Pi does not trust", async () => {
-    const { session, cwd } = await start([fauxAssistantMessage("done")]);
-    mkdirSync(join(cwd, ".pi"));
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
+  it("imports the 0.3 contextKit block when no context-kit.json exists", async () => {
+    const { session, agentDir } = await start(
+      [fauxAssistantMessage("done")],
+      200_000,
+      true,
+      undefined,
+      1_000,
+      { thresholdTokens: 8_000, asyncEnabled: false },
     );
-    session.settingsManager.setProjectTrusted(false);
     const notify = vi.fn<ExtensionUIContext["notify"]>();
     const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
     await session.bindExtensions({
@@ -219,80 +230,111 @@ describe("pi-context-kit inside Pi", () => {
         setStatus,
       },
     });
-    expect(notify).not.toHaveBeenCalled();
-    expect(existsSync(join(cwd, ".pi", "context-kit.json"))).toBe(false);
-    writeFileSync(join(cwd, ".pi", "context-kit.json"), JSON.stringify({ enabled: false }));
-    await session.prompt("Hi");
+    // 8,000 of 200,000 tokens.
     expect(setStatus).toHaveBeenLastCalledWith(
       "context-kit",
-      expect.stringMatching(/ · cleanup at 75%$/),
+      expect.stringMatching(/ · cleanup at 4%$/),
     );
-  });
-
-  it("warns when it cannot move the 0.3 settings and moves them at the next start", async () => {
-    const { session, agentDir, cwd } = await start([], 200_000, true, undefined, 1_000, {
-      thresholdTokens: 8_000,
-    });
-    mkdirSync(join(cwd, ".pi"));
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
-    );
-    const projectFile = join(cwd, ".pi", "context-kit.json");
-    const notify = vi.fn<ExtensionUIContext["notify"]>();
-    const file = join(agentDir, "context-kit.json");
-    // A read-only file where the new file is written first makes the write fail once.
-    const temporary = `${file}.${process.pid}.tmp`;
-    writeFileSync(temporary, "");
-    chmodSync(temporary, 0o444);
-    await session.bindExtensions({
-      uiContext: { ...session.extensionRunner.getUIContext(), notify },
-    });
     expect(notify.mock.calls).toEqual([
       [
-        expect.stringMatching(
-          new RegExp(`saving ${file} failed .+Defaults apply until it works\\.`),
-        ),
-        "warning",
+        `pi-context-kit moved its settings into Pi's settings.json under "context-kit". The 0.3 "contextKit" entry is no longer read.`,
+        "info",
       ],
     ]);
-    expect(existsSync(projectFile)).toBe(false);
-    notify.mockClear();
-    await session.bindExtensions({
-      uiContext: { ...session.extensionRunner.getUIContext(), notify },
-    });
-    expect(notify.mock.calls).toEqual([
-      [expect.stringContaining(`moved its settings to ${file}.`), "info"],
-      [expect.stringContaining(`moved its settings to ${projectFile}.`), "info"],
-    ]);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-      threshold: 8_000,
+    expect(readJson(join(agentDir, "settings.json"))).toEqual({
+      contextKit: { thresholdTokens: 8_000, asyncEnabled: false },
+      "context-kit": { threshold: 8_000, background: false },
     });
   });
 
-  it("waits to move the 0.3 settings while Pi's settings cannot be read", async () => {
-    const { session, agentDir, cwd } = await start([]);
-    writeFileSync(join(agentDir, "settings.json"), "{ broken");
-    mkdirSync(join(cwd, ".pi"));
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
-    );
-    const projectFile = join(cwd, ".pi", "context-kit.json");
+  it("keeps an existing context-kit namespace and leaves context-kit.json in place", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")], 200_000, true, {
+      threshold: 9_000,
+    });
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000 }));
     const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
     expect(notify).not.toHaveBeenCalled();
-    expect(existsSync(projectFile)).toBe(false);
-    writeFileSync(join(agentDir, "settings.json"), "{}");
-    notify.mockClear();
+    expect(readJson(file)).toEqual({ threshold: 8_000 });
+    expect(readJson(join(agentDir, "settings.json"))).toEqual({
+      "context-kit": { threshold: 9_000 },
+    });
+  });
+
+  it("imports a trusted project's context-kit.json into the project namespace", async () => {
+    const { session, cwd } = await start([fauxAssistantMessage("done")]);
+    mkdirSync(join(cwd, ".pi"));
+    const file = join(cwd, ".pi", "context-kit.json");
+    writeFileSync(file, JSON.stringify({ strategy: "frugal" }));
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
     expect(notify.mock.calls).toEqual([
-      [expect.stringContaining(`moved its settings to ${projectFile}.`), "info"],
+      [expect.stringContaining(`${file} was renamed to ${file}.migrated.`), "info"],
     ]);
+    expect(readJson(join(cwd, ".pi", "settings.json"))).toEqual({
+      "context-kit": { strategy: "frugal" },
+    });
+    expect(existsSync(`${file}.migrated`)).toBe(true);
+  });
+
+  it("ignores the context-kit.json of a project that Pi does not trust", async () => {
+    const { session, cwd } = await start([fauxAssistantMessage("done")]);
+    mkdirSync(join(cwd, ".pi"));
+    const file = join(cwd, ".pi", "context-kit.json");
+    writeFileSync(file, JSON.stringify({ strategy: "frugal" }));
+    session.settingsManager.setProjectTrusted(false);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(`${file}.migrated`)).toBe(false);
+  });
+
+  it("writes an imported scope in one settings write", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    writeFileSync(
+      join(agentDir, "context-kit.json"),
+      JSON.stringify({ threshold: 8_000, strategy: "frugal" }),
+    );
+    const flush = vi.spyOn(SettingsManager.prototype, "flush");
+    await session.bindExtensions({
+      uiContext: {
+        ...session.extensionRunner.getUIContext(),
+        notify: vi.fn<() => void>(),
+      },
+    });
+    // Each settings write flushes once before it locks the file.
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(readJson(join(agentDir, "settings.json"))).toEqual({
+      "context-kit": { threshold: 8_000, strategy: "frugal" },
+    });
+  });
+
+  it("moves the 0.3 block of a trusted project into the project namespace", async () => {
+    const { session, cwd } = await start([fauxAssistantMessage("done")]);
+    mkdirSync(join(cwd, ".pi"));
+    writeFileSync(
+      join(cwd, ".pi", "settings.json"),
+      JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
+    );
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [expect.stringContaining("moved its settings into Pi's settings.json"), "info"],
+    ]);
+    expect(readJson(join(cwd, ".pi", "settings.json"))).toEqual({
+      contextKit: { methodOrder: ["soft"] },
+      "context-kit": { strategy: "pi-summary" },
+    });
   });
 
   it("keeps the global 0.3 threshold for a project that did not set one", async () => {
@@ -309,17 +351,323 @@ describe("pi-context-kit inside Pi", () => {
       join(cwd, ".pi", "settings.json"),
       JSON.stringify({ contextKit: { prune: { enabled: false } } }),
     );
-    const statuses: string[] = [];
-    const setStatus = (key: string, text: string | undefined) => {
-      if (key === "context-kit") statuses.push(text ?? "");
-    };
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), setStatus },
     });
-    expect(JSON.parse(readFileSync(join(cwd, ".pi", "context-kit.json"), "utf8"))).toEqual({
-      advanced: { prune: { enabled: false } },
+    expect(readJson(join(cwd, ".pi", "settings.json"))).toEqual({
+      contextKit: { prune: { enabled: false } },
+      "context-kit": { pruneEnabled: false },
     });
-    expect(statuses.at(-1)).toMatch(/ · cleanup at 70%$/);
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "context-kit",
+      expect.stringMatching(/ · cleanup at 70%$/),
+    );
+  });
+
+  it("moves the settings at the next start after a failed write", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000 }));
+    const settingsFile = join(agentDir, "settings.json");
+    writeFileSync(settingsFile, "{}");
+    chmodSync(settingsFile, 0o444);
+    await session.bindExtensions({
+      uiContext: {
+        ...session.extensionRunner.getUIContext(),
+        notify: vi.fn<() => void>(),
+      },
+    });
+    chmodSync(settingsFile, 0o644);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [expect.stringContaining(`${file} was renamed to ${file}.migrated.`), "info"],
+    ]);
+    expect(readJson(settingsFile)).toEqual({
+      "context-kit": { threshold: 8_000 },
+    });
+  });
+
+  it("leaves no namespace after a failed write, and imports at the next start", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000 }));
+    const settingsFile = join(agentDir, "settings.json");
+    writeFileSync(settingsFile, "{}");
+    chmodSync(settingsFile, 0o444);
+    const failed = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify: failed },
+    });
+    expect(failed.mock.calls).toEqual([
+      [
+        expect.stringMatching(
+          /^pi-context-kit: moving settings failed \(.+\)\. Defaults apply until it works\.$/,
+        ),
+        "warning",
+      ],
+    ]);
+    expect(readJson(settingsFile)).toEqual({});
+    expect(readJson(file)).toEqual({ threshold: 8_000 });
+    chmodSync(settingsFile, 0o644);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [expect.stringContaining(`${file} was renamed to ${file}.migrated.`), "info"],
+    ]);
+    expect(readJson(settingsFile)).toEqual({
+      "context-kit": { threshold: 8_000 },
+    });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("warns and imports nothing when a project context-kit.json is not valid JSON", async () => {
+    const { session, cwd } = await start([fauxAssistantMessage("done")]);
+    mkdirSync(join(cwd, ".pi"));
+    writeFileSync(join(cwd, ".pi", "context-kit.json"), "{ broken");
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [
+        expect.stringMatching(
+          /^pi-context-kit: moving settings failed \(.+ is not valid JSON \(.+\)\)\. Defaults apply until it works\.$/,
+        ),
+        "warning",
+      ],
+    ]);
+    expect(existsSync(join(cwd, ".pi", "settings.json"))).toBe(false);
+  });
+
+  it("imports nothing when one option is invalid, and keeps the file", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000, strategy: "nope" }));
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [
+        expect.stringMatching(
+          /^pi-context-kit: moving settings failed \(.+\)\. Defaults apply until it works\.$/,
+        ),
+        "warning",
+      ],
+    ]);
+    expect(notify.mock.calls[0]?.[0]).toContain(`${file} is invalid (`);
+    expect(readJson(file)).toEqual({ threshold: 8_000, strategy: "nope" });
+    expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
+  });
+
+  it("keeps context-kit.json when the settings write fails", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000 }));
+    // A read-only settings.json makes the write fail.
+    const settingsFile = join(agentDir, "settings.json");
+    writeFileSync(settingsFile, "{}");
+    chmodSync(settingsFile, 0o444);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [
+        expect.stringMatching(
+          /^pi-context-kit: moving settings failed \(.+\)\. Defaults apply until it works\.$/,
+        ),
+        "warning",
+      ],
+    ]);
+    expect(readJson(file)).toEqual({ threshold: 8_000 });
+    expect(existsSync(`${file}.migrated`)).toBe(false);
+  });
+
+  it("keeps the imported options when the rename fails, and does not import again", async () => {
+    const { session, agentDir } = await start([fauxAssistantMessage("done")]);
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000, advanced: { background: false } }));
+    // A directory at the rename target makes the rename fail after the write.
+    mkdirSync(`${file}.migrated`);
+    const failed = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify: failed },
+    });
+    expect(failed.mock.calls).toEqual([
+      [
+        expect.stringMatching(
+          /^pi-context-kit: settings were imported, but renaming .+ failed \(.+\)\. The file stays in place and is not imported again\.$/,
+        ),
+        "warning",
+      ],
+    ]);
+    const settingsFile = join(agentDir, "settings.json");
+    expect(readJson(settingsFile)).toEqual({
+      "context-kit": { threshold: 8_000, background: false },
+    });
+    expect(readJson(file)).toEqual({
+      threshold: 8_000,
+      advanced: { background: false },
+    });
+    const flush = vi.spyOn(SettingsManager.prototype, "flush");
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(flush).not.toHaveBeenCalled();
+    expect(readJson(settingsFile)).toEqual({
+      "context-kit": { threshold: 8_000, background: false },
+    });
+  });
+
+  it("waits to import while Pi's settings.json cannot be read", async () => {
+    const { session, agentDir } = await start([]);
+    const settingsFile = join(agentDir, "settings.json");
+    writeFileSync(settingsFile, "{ broken");
+    const file = join(agentDir, "context-kit.json");
+    writeFileSync(file, JSON.stringify({ threshold: 8_000 }));
+    await session.bindExtensions({
+      uiContext: {
+        ...session.extensionRunner.getUIContext(),
+        notify: vi.fn<() => void>(),
+      },
+    });
+    expect(readFileSync(settingsFile, "utf8")).toBe("{ broken");
+    expect(existsSync(file)).toBe(true);
+    writeFileSync(settingsFile, "{}");
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [expect.stringContaining(`${file} was renamed to ${file}.migrated.`), "info"],
+    ]);
+  });
+
+  it("turns cleanup off in the global settings with /context-kit off --global", async () => {
+    const { session, agentDir } = await start([]);
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), setStatus },
+    });
+    await session.prompt("/context-kit off --global");
+    expect(readJson(join(agentDir, "settings.json"))).toEqual({
+      "context-kit": { enabled: false },
+    });
+    expect(setStatus).toHaveBeenLastCalledWith("context-kit", "Context cleanup off");
+  });
+
+  it("shows the strategy's effective method order and background in the /context-kit menu", async () => {
+    initTheme("dark");
+    const { session } = await start([], 200_000, true, { strategy: "frugal" });
+    const screens: string[] = [];
+    const uiContext = session.extensionRunner.getUIContext();
+    await session.bindExtensions({
+      mode: "tui",
+      uiContext: {
+        ...uiContext,
+        // The menu is read and closed with Escape, so the command returns.
+        custom: (factory) =>
+          new Promise((resolve) => {
+            const { tui, keybindings } = createMenuTui();
+            void Promise.resolve(factory(tui, uiContext.theme, keybindings, resolve)).then(
+              (component) => {
+                screens.push(menuDriver(() => component).screen());
+                menuDriver(() => component).press(keys.escape);
+              },
+            );
+          }),
+      },
+    });
+    await session.prompt("/context-kit");
+    expect(screens).toHaveLength(1);
+    // The global strategy supplies both values, so both name that scope.
+    expect(screens[0]).toMatch(/methodOrder \[global\].*shake, handoff, soft/);
+    expect(screens[0]).toMatch(/background \[global\].*off/);
+  });
+
+  it("reports a failed /context-kit change as an error notice", async () => {
+    const { session, agentDir } = await start([]);
+    const settingsFile = join(agentDir, "settings.json");
+    writeFileSync(settingsFile, "{}");
+    // A read-only settings.json makes the write fail.
+    chmodSync(settingsFile, 0o444);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    await session.prompt("/context-kit off --global");
+    expect(notify).toHaveBeenLastCalledWith(expect.stringMatching(/^pi-context-kit: .+/), "error");
+  });
+
+  it("applies a session override to the status without writing settings", async () => {
+    const { session, agentDir } = await start([]);
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), setStatus },
+    });
+    await session.prompt("/context-kit set threshold 8000");
+    // 8,000 of 200,000 tokens.
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "context-kit",
+      expect.stringMatching(/ · cleanup at 4%$/),
+    );
+    expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
+  });
+
+  it("reports an invalid context-kit setting at start and again on /context-kit", async () => {
+    const { session } = await start([], 200_000, true, { maxTokens: 8_000 });
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    await session.prompt("/context-kit");
+    const warning = [
+      expect.stringMatching(
+        /^pi-context-kit settings need attention: .+\. Type \/context-kit to see them\.$/,
+      ),
+      "warning",
+    ];
+    expect(notify.mock.calls).toEqual([
+      warning,
+      warning,
+      [
+        expect.stringMatching(
+          /^pi-context-kit: automatic cleanup at 75%, with balanced\. Settings: \/context-kit$/,
+        ),
+        "info",
+      ],
+    ]);
+  });
+
+  it("reports an unreadable session override and keeps the other settings", async () => {
+    const { session } = await start([], 200_000, true, { strategy: "frugal" });
+    session.sessionManager.appendCustomEntry("pi-context-kit-settings", {
+      version: 2,
+    });
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    await session.prompt("/context-kit");
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^pi-context-kit settings need attention: Invalid context-kit session settings\. /,
+      ),
+      "warning",
+    );
+    expect(notify).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^pi-context-kit: automatic cleanup at .+, with frugal\./),
+      "info",
+    );
   });
 
   it("updates the status after a compaction at turn end", async () => {
@@ -338,11 +686,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 10_000,
-        advanced: {
-          background: false,
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        background: false,
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     const compacted = () =>
@@ -362,70 +708,6 @@ describe("pi-context-kit inside Pi", () => {
     expect(statuses.at(-1)).toEqual([expect.stringMatching(/^Context \d% · cleanup at 5%$/), true]);
   });
 
-  it("reports an invalid settings file at start and again on /context-kit", async () => {
-    const { session, cwd } = await start([], 200_000, true, {});
-    const file = join(cwd, ".pi", "context-kit.json");
-    mkdirSync(join(cwd, ".pi"));
-    writeFileSync(file, "{ broken");
-    const notify = vi.fn<ExtensionUIContext["notify"]>();
-    await session.bindExtensions({
-      uiContext: { ...session.extensionRunner.getUIContext(), notify },
-    });
-    await session.prompt("/context-kit");
-    const warning = [
-      expect.stringMatching(
-        /^pi-context-kit settings need attention: .+context-kit\.json is not valid JSON .+, file ignored\. Type \/context-kit to see them\.$/,
-      ),
-      "warning",
-    ];
-    expect(notify.mock.calls).toEqual([
-      warning,
-      warning,
-      [expect.stringMatching(/^pi-context-kit: automatic cleanup/), "info"],
-    ]);
-  });
-
-  it("moves 0.3 settings to context-kit.json once and keeps their behavior", async () => {
-    const { session, agentDir } = await start(
-      [fauxAssistantMessage("done"), fauxAssistantMessage("done")],
-      200_000,
-      true,
-      undefined,
-      1_000,
-      { thresholdTokens: 8_000, asyncEnabled: false },
-    );
-    const notify = vi.fn<ExtensionUIContext["notify"]>();
-    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
-    await session.bindExtensions({
-      uiContext: { ...session.extensionRunner.getUIContext(), notify },
-    });
-    await session.prompt("Hi");
-    await session.bindExtensions({
-      uiContext: {
-        ...session.extensionRunner.getUIContext(),
-        notify,
-        setStatus,
-      },
-    });
-    await session.prompt("Again");
-    // 8,000 of 200,000 tokens.
-    expect(setStatus).toHaveBeenLastCalledWith(
-      "context-kit",
-      expect.stringMatching(/ · cleanup at 4%$/),
-    );
-    const file = join(agentDir, "context-kit.json");
-    expect(notify.mock.calls).toEqual([
-      [
-        `pi-context-kit moved its settings to ${file}. The "contextKit" entry in Pi's settings.json is no longer used.`,
-        "info",
-      ],
-    ]);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-      threshold: 8_000,
-      advanced: { background: false },
-    });
-  });
-
   it("replaces an older read when that brings the context below the threshold", async () => {
     const { session } = await start(
       [
@@ -435,7 +717,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: 8_000, advanced: { methodOrder: [] } },
+      { threshold: 8_000, methodOrder: [] },
     );
     await session.prompt("Read b.ts twice");
     const edits = session.sessionManager
@@ -459,7 +741,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: `${percent}%`, advanced: { methodOrder: [] } },
+      { threshold: `${percent}%`, methodOrder: [] },
     );
     await session.prompt("Read b.ts twice");
     expect(
@@ -477,7 +759,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: 1_000, advanced: { methodOrder: [] } },
+      { threshold: 1_000, methodOrder: [] },
     );
     await session.prompt("Read a.ts twice");
     expect(
@@ -531,7 +813,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: 13_000, advanced: { background: false } },
+      { threshold: 13_000, background: false },
     );
     await session.prompt(`Remember ${"history ".repeat(1_500)}`);
     await session.prompt("Continue");
@@ -599,12 +881,10 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: "pi",
-        advanced: {
-          background: true,
-          supersedeReads: false,
-          prune: { enabled: false },
-          progressRatio: 1,
-        },
+        background: true,
+        supersedeReads: false,
+        pruneEnabled: false,
+        progressRatio: 1,
       },
     );
     await session.prompt("Read the file");
@@ -660,11 +940,9 @@ describe("pi-context-kit inside Pi", () => {
         true,
         {
           threshold: "pi",
-          advanced: {
-            supersedeReads: false,
-            prune: { enabled: false },
-            progressRatio: 1,
-          },
+          supersedeReads: false,
+          pruneEnabled: false,
+          progressRatio: 1,
         },
       );
       await session.prompt("Read b.ts three times");
@@ -672,8 +950,7 @@ describe("pi-context-kit inside Pi", () => {
       try {
         if (action === "reload") await session.reload();
         else if (action === "disable" || action === "abort") {
-          if (action === "disable")
-            writeFileSync(join(agentDir, "context-kit.json"), JSON.stringify({ enabled: false }));
+          if (action === "disable") writeContextKitSettings(agentDir, { enabled: false });
           await session.prompt("Continue");
         } else {
           const target = session.sessionManager
@@ -729,11 +1006,11 @@ describe("pi-context-kit inside Pi", () => {
         true,
         {
           threshold,
-          advanced: {
-            supersedeReads: false,
-            prune: { enabled: false },
-            shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-          },
+          supersedeReads: false,
+          pruneEnabled: false,
+          shakeProtectTokens: 0,
+          shakeMinSavings: 1,
+          shakeBlockMinTokens: 10,
         },
       );
       writeFileSync(join(cwd, "b.ts"), `<log>${"b".repeat(19_000)}</log>`);
@@ -761,13 +1038,13 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: 20_000, advanced: { background: false } },
+      { threshold: 20_000, background: false },
     );
     await session.prompt("Start");
     const tokens = session.getContextUsage()?.tokens;
     if (tokens == null) throw new Error("missing context usage");
     await session.prompt("x".repeat((18_000 - tokens) * 4));
-    writeFileSync(join(agentDir, "context-kit.json"), JSON.stringify({ threshold: 20_000 }));
+    writeContextKitSettings(agentDir, { threshold: 20_000 });
     await session.prompt("Continue");
     expect(notes).toBe(0);
   });
@@ -800,7 +1077,8 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 20_000,
-        advanced: { supersedeReads: false, prune: { enabled: false } },
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt("Start");
@@ -854,7 +1132,7 @@ describe("pi-context-kit inside Pi", () => {
     expect(kept?.type === "message" && kept.message.role).toBe("assistant");
   });
 
-  it("does nothing when contextKit.enabled is false", async () => {
+  it("does nothing when context-kit enabled is false", async () => {
     const { session } = await start(
       [
         fauxAssistantMessage(fauxToolCall("read", { path: "a.ts" })),
@@ -890,7 +1168,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { advanced: { methodOrder: ["soft", "handoff"] } },
+      { methodOrder: ["soft", "handoff"] },
     );
     await session.prompt("Hi");
     await session.prompt("Again");
@@ -920,11 +1198,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          background: false,
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        background: false,
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt(`Read b.ts then a.ts. ${"history ".repeat(5_000)}`);
@@ -962,11 +1238,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          background: false,
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        background: false,
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt(`Read b.ts then a.ts. ${"history ".repeat(5_000)}`);
@@ -1003,11 +1277,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: "pi",
-        advanced: {
-          background: false,
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        background: false,
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt(`Read b.ts. ${"history ".repeat(4_500)}`);
@@ -1044,11 +1316,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          background: true,
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        background: true,
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt("Read b.ts three times");
@@ -1097,7 +1367,8 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 12_000,
-        advanced: { supersedeReads: false, prune: { enabled: false } },
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt("Read b.ts twice, then a.ts");
@@ -1147,7 +1418,8 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 12_000,
-        advanced: { supersedeReads: false, prune: { enabled: false } },
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     try {
@@ -1191,12 +1463,10 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          methodOrder: order,
-          background: false,
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        methodOrder: order,
+        background: false,
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt(`Read b.ts then a.ts. ${"history ".repeat(5_000)}`);
@@ -1220,7 +1490,7 @@ describe("pi-context-kit inside Pi", () => {
       Array.from({ length: 4 }, () => reply),
       200_000,
       true,
-      { threshold: 13_000, advanced: { methodOrder: ["soft"] } },
+      { threshold: 13_000, methodOrder: ["soft"] },
       50_000,
     );
     await session.prompt("Hi");
@@ -1257,11 +1527,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          methodOrder: ["soft"],
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        methodOrder: ["soft"],
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt("Hi");
@@ -1294,7 +1562,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 12_000,
-        advanced: { methodOrder: ["soft"], supersedeReads: false, prune: { enabled: false } },
+        methodOrder: ["soft"],
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt("Hi");
@@ -1330,11 +1600,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          methodOrder: ["soft"],
-          supersedeReads: false,
-          prune: { enabled: false },
-        },
+        methodOrder: ["soft"],
+        supersedeReads: false,
+        pruneEnabled: false,
       },
     );
     await session.prompt(`Read b.ts then a.ts. ${"history ".repeat(5_000)}`);
@@ -1353,7 +1621,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       40_000,
       true,
-      { advanced: { background: false } },
+      { background: false },
     );
     await session.prompt(`Remember ${"history ".repeat(1_500)}`);
     await session.prompt("Continue");
@@ -1375,7 +1643,7 @@ describe("pi-context-kit inside Pi", () => {
       ],
       200_000,
       true,
-      { threshold: 4_000, advanced: { background: false, progressRatio: 1 } },
+      { threshold: 4_000, background: false, progressRatio: 1 },
     );
     await session.prompt("Read a.ts then b.ts");
 
@@ -1411,7 +1679,8 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 4_000,
-        advanced: { background: false, progressRatio: 1 },
+        background: false,
+        progressRatio: 1,
       },
     );
     await session.prompt("Read b.ts then a.ts");
@@ -1450,11 +1719,11 @@ describe("pi-context-kit inside Pi", () => {
         true,
         {
           threshold: 18_000,
-          advanced: {
-            background: false,
-            prune: { enabled: false },
-            shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-          },
+          background: false,
+          pruneEnabled: false,
+          shakeProtectTokens: 0,
+          shakeMinSavings: 1,
+          shakeBlockMinTokens: 10,
         },
       );
       await session.prompt("Generate the source");
@@ -1483,12 +1752,12 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 8_000,
-        advanced: {
-          methodOrder: ["shake", "soft", "handoff"],
-          background: false,
-          prune: { enabled: false },
-          shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-        },
+        methodOrder: ["shake", "soft", "handoff"],
+        background: false,
+        pruneEnabled: false,
+        shakeProtectTokens: 0,
+        shakeMinSavings: 1,
+        shakeBlockMinTokens: 10,
       },
     );
     await session.prompt("Inspect the file");
@@ -1513,11 +1782,13 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 8_000,
-        advanced: {
-          background: false,
-          prune: { protectTokens: 0, minSavings: 1, minTokens: 50 },
-          shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-        },
+        background: false,
+        pruneProtectTokens: 0,
+        pruneMinSavings: 1,
+        pruneMinTokens: 50,
+        shakeProtectTokens: 0,
+        shakeMinSavings: 1,
+        shakeBlockMinTokens: 10,
       },
     );
     await session.prompt("Read b.ts");
@@ -1547,11 +1818,11 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 11_000,
-        advanced: {
-          background: false,
-          prune: { enabled: false },
-          shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-        },
+        background: false,
+        pruneEnabled: false,
+        shakeProtectTokens: 0,
+        shakeMinSavings: 1,
+        shakeBlockMinTokens: 10,
       },
     );
     await session.prompt("Read b.ts twice");
@@ -1581,12 +1852,12 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 8_000,
-        advanced: {
-          methodOrder: ["soft", "shake", "handoff"],
-          background: false,
-          prune: { enabled: false },
-          shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-        },
+        methodOrder: ["soft", "shake", "handoff"],
+        background: false,
+        pruneEnabled: false,
+        shakeProtectTokens: 0,
+        shakeMinSavings: 1,
+        shakeBlockMinTokens: 10,
       },
     );
     await session.prompt("Inspect the file");
@@ -1630,12 +1901,12 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 18_000,
-        advanced: {
-          methodOrder: [first, second, third],
-          background: false,
-          prune: { enabled: false },
-          shake: { protectTokens: 0, minSavings: 1, blockMinTokens: 10 },
-        },
+        methodOrder: [first, second, third],
+        background: false,
+        pruneEnabled: false,
+        shakeProtectTokens: 0,
+        shakeMinSavings: 1,
+        shakeBlockMinTokens: 10,
       },
     );
     await session.prompt("Generate the source");
@@ -1689,11 +1960,9 @@ describe("pi-context-kit inside Pi", () => {
       true,
       {
         threshold: 13_000,
-        advanced: {
-          background: false,
-          progressRatio: 1,
-          prune: { enabled: false },
-        },
+        background: false,
+        progressRatio: 1,
+        pruneEnabled: false,
       },
       8_000,
     );
@@ -1778,7 +2047,7 @@ describe("pi-context-kit inside Pi", () => {
       200_000,
       true,
       {
-        advanced: { background: false },
+        background: false,
       },
     );
     await session.prompt("Read a.ts");

@@ -1,10 +1,9 @@
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_CONFIG } from "../src/config.ts";
 import { contextTokens } from "../src/context.ts";
 import { planMaintenance } from "../src/maintain.ts";
-import { filler, Transcript } from "./fixtures.ts";
+import { DEFAULT_CONFIG, filler, Transcript } from "./fixtures.ts";
 
 function staleSession() {
   const t = new Transcript();

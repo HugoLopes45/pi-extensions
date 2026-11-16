@@ -5,7 +5,17 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@earendil-works/pi-ai";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+
+import { contextKitConfig, contextKitSettings } from "../src/context-kit-settings.ts";
+
+/** The config a session with no settings resolves to. */
+export const DEFAULT_CONFIG = contextKitConfig(
+  contextKitSettings.readSettings({
+    settingsManager: SettingsManager.inMemory(),
+    sessionManager: SessionManager.inMemory("/work"),
+  }),
+).config;
 
 let clock = 1_700_000_000_000;
 let callCounter = 0;
