@@ -97,6 +97,8 @@ export const contextKitSettings = defineLayeredSettings({
   schema: contextKitOptionsSchema,
   defaults: contextKitDefaults,
   sessionEntryType: "pi-context-kit-settings",
+  // The namespace marks a scope as moved, so the 0.3 block is not imported again.
+  keepEmptyNamespace: true,
 });
 
 /** The schema accepts only these three forms, so each one maps without a failure path. */

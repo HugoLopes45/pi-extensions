@@ -247,6 +247,55 @@ describe("pi-context-kit inside Pi", () => {
     });
   });
 
+  it("does not import the 0.3 block again after the user inherits every imported setting", async () => {
+    const { session, agentDir } = await start(
+      [fauxAssistantMessage("done")],
+      200_000,
+      true,
+      undefined,
+      1_000,
+      { thresholdTokens: 8_000, asyncEnabled: false },
+    );
+    await session.bindExtensions({
+      uiContext: {
+        ...session.extensionRunner.getUIContext(),
+        notify: vi.fn<() => void>(),
+      },
+    });
+    await session.prompt("/context-kit inherit threshold --global");
+    await session.prompt("/context-kit inherit background --global");
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(readJson(join(agentDir, "settings.json"))).toEqual({
+      contextKit: { thresholdTokens: 8_000, asyncEnabled: false },
+      "context-kit": {},
+    });
+  });
+
+  it("imports an empty project 0.3 block once", async () => {
+    const { session, cwd } = await start([fauxAssistantMessage("done")]);
+    mkdirSync(join(cwd, ".pi"));
+    writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ contextKit: {} }));
+    await session.bindExtensions({
+      uiContext: {
+        ...session.extensionRunner.getUIContext(),
+        notify: vi.fn<() => void>(),
+      },
+    });
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(readJson(join(cwd, ".pi", "settings.json"))).toEqual({
+      contextKit: {},
+      "context-kit": {},
+    });
+  });
+
   it("keeps an existing context-kit namespace and leaves context-kit.json in place", async () => {
     const { session, agentDir } = await start([fauxAssistantMessage("done")], 200_000, true, {
       threshold: 9_000,
