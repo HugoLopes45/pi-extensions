@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -317,11 +317,22 @@ it("shows status through Pi UI without adding model or session context", async (
 it("persists a session display name through the shared set command", async () => {
   const { runtime, agentDir } = await session(false);
   const path = join(agentDir, "settings.json");
-  const before = await readFile(path, "utf8");
-  const modified = (await stat(path, { bigint: true })).mtimeNs;
+  async function readState() {
+    const handle = await open(path, "r");
+    try {
+      return {
+        content: await handle.readFile("utf8"),
+        modified: (await handle.stat({ bigint: true })).mtimeNs,
+      };
+    } finally {
+      await handle.close();
+    }
+  }
+  const before = await readState();
   await runtime.session.prompt('/hl-lsp set name "Language tools"');
-  expect(await readFile(path, "utf8")).toBe(before);
-  expect((await stat(path, { bigint: true })).mtimeNs).toBe(modified);
+  const after = await readState();
+  expect(after.content).toBe(before.content);
+  expect(after.modified).toBe(before.modified);
   expect(runtime.session.sessionManager.getBranch().at(-1)).toMatchObject({
     type: "custom",
     customType: "hl-lsp-settings",
