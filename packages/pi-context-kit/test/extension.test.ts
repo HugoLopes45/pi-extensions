@@ -1272,6 +1272,39 @@ describe("pi-context-kit inside Pi", () => {
     expect(request).toContain("Old goal");
   });
 
+  it("bounds an early summary's output by the room the retained context leaves", async () => {
+    const main = [
+      fauxAssistantMessage("hello"),
+      fauxAssistantMessage(fauxToolCall("read", { path: "b.ts" })),
+      fauxAssistantMessage("done"),
+    ];
+    let summaryOptions: SimpleStreamOptions | undefined;
+    const reply: FauxResponseStep = (context, options) => {
+      if (JSON.stringify(context.messages.at(-1)).includes("<conversation>")) {
+        summaryOptions = options;
+        return fauxAssistantMessage("## Goal\nPi summary");
+      }
+      const next = main.shift();
+      if (!next) throw new Error("unexpected request");
+      return next;
+    };
+    const { session } = await start(
+      Array.from({ length: 6 }, () => reply),
+      200_000,
+      true,
+      {
+        threshold: 12_000,
+        advanced: { methodOrder: ["soft"], supersedeReads: false, prune: { enabled: false } },
+      },
+    );
+    await session.prompt("Hi");
+    await session.prompt(`Read b.ts. ${"history ".repeat(5_000)}`);
+    // The room under 12,000 * progressRatio 0.8 = 9,600 tokens, after the retained system prompt
+    // and recent turns, is below the model's 4,096-token maximum.
+    expect(summaryOptions?.maxTokens).toBeGreaterThan(0);
+    expect(summaryOptions?.maxTokens).toBeLessThan(4_096);
+  });
+
   it("does not retry a failed early summary every turn", async () => {
     const main = [
       fauxAssistantMessage(fauxToolCall("read", { path: "b.ts" })),

@@ -170,7 +170,8 @@ export default function contextKit(pi: ExtensionAPI): void {
     const keptEntryId = recentStart(ctx, keepRecentTokens);
     if (!keptEntryId) return undefined;
     const retained = keptTokens(ctx, keptEntryId);
-    if (!fits("", retained, limit, config.progressRatio)) return undefined;
+    const availableTokens = Math.floor(limit * config.progressRatio - retained);
+    if (availableTokens <= 0) return undefined;
     const start = input.entries.findIndex((entry) => entry.sourceEntry.id === keptEntryId);
     // As in Pi, the previous summary goes to the update prompt, not into the history.
     const previous = input.entries.findIndex(
@@ -188,8 +189,13 @@ export default function contextKit(pi: ExtensionAPI): void {
       undefined,
       source?.type === "compaction" ? source.summary : undefined,
       pi.getThinkingLevel(),
-      // The registry resolves auth per request, as for handoff notes.
-      (model, context, options) => ctx.modelRegistry.streamSimple(model, context, options),
+      // The registry resolves auth per request, as for handoff notes. Pi caps the summary only by
+      // the model, so a longer one would be generated and then rejected by `fits` below.
+      (model, context, options) =>
+        ctx.modelRegistry.streamSimple(model, context, {
+          ...options,
+          maxTokens: Math.min(model.maxTokens, availableTokens),
+        }),
       undefined,
       undefined,
       undefined,

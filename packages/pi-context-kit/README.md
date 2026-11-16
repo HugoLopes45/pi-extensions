@@ -337,6 +337,7 @@ pi-context-kit has no setting per model. To start earlier for one model only, ma
 - **If Pi's compaction is off** (`compaction.enabled: false`), pi-context-kit changes the context only when you run `/compact`. Then it writes a handoff note, as with compaction on. `threshold` is ignored, because pi-context-kit edits the context automatically only at a threshold.
 - **Manual compaction and errors.** When you type `/compact`, when the context is too large for the model, or when Pi compacts before a turn, `shake` cannot run. pi-context-kit uses a ready handoff note, or Pi's summary.
 - **The method order stops at `soft`.** The methods after `soft` do not run.
+- **Summary requests skip session hooks.** Handoff notes and early summaries go to the model directly, as Pi's own compaction summaries do. The `context` and `before_provider_request` hooks of other extensions do not change these requests. If an extension removes sensitive text with these hooks, that text can still reach the model in a summary request.
 - **Subagents** read the same settings files. They show no warnings and no status, because they have no screen.
 
 ## Troubleshooting
