@@ -1,5 +1,9 @@
-// Model tool arguments and JSON Schemas are untyped JSON by nature. Every read narrows with isEntry/Array.isArray before use, and the table test in test/null-optional-arguments.test.ts exercises each shape.
+// Model tool arguments and JSON Schemas are untyped JSON by nature. Every read narrows with isRecord/Array.isArray before use, and the table test in test/null-optional-arguments.test.ts exercises each shape.
 import { Value } from "typebox/value";
+
+import { isRecord } from "./record.js";
+
+type Entry = Readonly<Record<string, unknown>>;
 
 /**
  * Models trained on tool schemas that declare an optional parameter as `T | null` habitually pass
@@ -22,16 +26,10 @@ import { Value } from "typebox/value";
  * - Required `null`s are never repaired; validation reports them as before.
  */
 
-type Entry = Readonly<Record<string, unknown>>;
-
-function isEntry(value: unknown): value is Entry {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function satisfies(schema: unknown, value: unknown): boolean {
   try {
     // A malformed schema throws and counts as unsatisfied.
-    return isEntry(schema) && Value.Check(schema, value);
+    return isRecord(schema) && Value.Check(schema, value);
   } catch {
     return false;
   }
@@ -40,7 +38,7 @@ function satisfies(schema: unknown, value: unknown): boolean {
 /** Whether `null` is a legal value of `schema`; an unevaluable schema counts as legal, keeping `null`. */
 function acceptsNull(schema: unknown): boolean {
   // A reference cannot be resolved against its parent here, so it is kept, as Pi's own handling does.
-  if (!isEntry(schema) || typeof schema.$ref === "string") return true;
+  if (!isRecord(schema) || typeof schema.$ref === "string") return true;
   try {
     // A malformed schema throws and keeps the null.
     return Value.Check(schema, null);
@@ -76,29 +74,32 @@ function normalizeElements(schema: Entry, items: readonly unknown[]): unknown {
   return copy ?? items;
 }
 
+const DROP = Symbol("drop");
+
+function normalizeProperty(propertySchema: unknown, current: unknown, required: boolean): unknown {
+  if (current === null && !required && !acceptsNull(propertySchema)) return DROP;
+  return normalize(propertySchema, current);
+}
+
 function normalizeProperties(schema: Entry, value: Entry): unknown {
   const { properties } = schema;
-  if (!isEntry(properties)) return value;
+  if (!isRecord(properties)) return value;
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
   let copy: Record<string, unknown> | undefined;
   for (const [key, propertySchema] of Object.entries(properties)) {
     if (!Object.hasOwn(value, key)) continue;
     const current = value[key];
-    if (current === null && !required.has(key) && !acceptsNull(propertySchema)) {
-      copy ??= { ...value };
-      delete copy[key];
-      continue;
-    }
-    const normalized = normalize(propertySchema, current);
+    const normalized = normalizeProperty(propertySchema, current, required.has(key));
     if (normalized === current) continue;
     copy ??= { ...value };
-    copy[key] = normalized;
+    if (normalized === DROP) delete copy[key];
+    else copy[key] = normalized;
   }
   return copy ?? value;
 }
 
 function normalize(schema: unknown, value: unknown): unknown {
-  if (!isEntry(schema)) return value;
+  if (!isRecord(schema)) return value;
   let next = value;
   if (Array.isArray(schema.allOf)) {
     for (const member of schema.allOf) next = normalize(member, next);
@@ -107,7 +108,7 @@ function normalize(schema: unknown, value: unknown): unknown {
     if (Array.isArray(union)) next = normalizeUnion(union, next);
   }
   if (Array.isArray(next)) return normalizeElements(schema, next);
-  return isEntry(next) ? normalizeProperties(schema, next) : next;
+  return isRecord(next) ? normalizeProperties(schema, next) : next;
 }
 
 /**

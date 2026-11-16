@@ -5,8 +5,8 @@ import { describe, expect, test } from "vitest";
 import {
   acceptNullForOptionalArguments,
   omitNullOptionalArguments,
-} from "../../src/utils/null-optional-arguments.js";
-import { anyInstance } from "../fixtures/matchers.js";
+} from "../src/null-optional-arguments.js";
+import { anyInstance } from "../testing/matchers.js";
 
 const Point = Type.Object({ x: Type.Integer(), label: Type.Optional(Type.String()) });
 

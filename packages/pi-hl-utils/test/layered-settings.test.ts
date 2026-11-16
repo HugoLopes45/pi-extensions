@@ -1,12 +1,13 @@
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   defineLayeredSettings,
+  layeredMenuScopes,
   resolveLayeredOptions,
   rewriteNamespaceDocument,
-} from "../../src/utils/layered-settings.js";
+} from "../src/layered-settings.js";
 
 const schema = Type.Object(
   {
@@ -30,9 +31,18 @@ const defaults: Config = { enabled: false, limit: 3, tools: { read: true } };
 const sessionEntryType = "test-settings";
 
 const merge = {
-  tools: (current: Config["tools"], next: Config["tools"]) => ({ ...current, ...next }),
+  tools: (current: Config["tools"], next: Config["tools"]) => ({
+    ...current,
+    ...next,
+  }),
 };
-const definition = { namespace: "demo", label: "Demo", schema, defaults, merge };
+const definition = {
+  namespace: "demo",
+  label: "Demo",
+  schema,
+  defaults,
+  merge,
+};
 const define = () => defineLayeredSettings({ ...definition, sessionEntryType });
 const defineWithoutSession = () => defineLayeredSettings(definition);
 
@@ -44,7 +54,10 @@ function storageHarness(global = "{}", project = "{}", trusted = true) {
       if (next !== undefined) documents[scope] = next;
     },
   };
-  return { documents, manager: SettingsManager.fromStorage(storage, { projectTrusted: trusted }) };
+  return {
+    documents,
+    manager: SettingsManager.fromStorage(storage, { projectTrusted: trusted }),
+  };
 }
 
 const errorMessage = (value: Error | Options) => (value instanceof Error ? value.message : "");
@@ -73,8 +86,16 @@ describe("layered settings resolution", () => {
       settingsManager: manager,
       sessionManager: branch({ version: 1, overrides: { enabled: false } }),
     });
-    expect(resolved.settings).toEqual({ enabled: false, limit: 7, tools: { read: true } });
-    expect(resolved.sources).toEqual({ enabled: "session", limit: "project", tools: "default" });
+    expect(resolved.settings).toEqual({
+      enabled: false,
+      limit: 7,
+      tools: { read: true },
+    });
+    expect(resolved.sources).toEqual({
+      enabled: "session",
+      limit: "project",
+      tools: "default",
+    });
   });
 
   it("ignores untrusted project settings and an absent session layer", () => {
@@ -102,7 +123,10 @@ describe("layered settings resolution", () => {
     expect(errorMessage(layers.global)).toContain("Invalid global Demo settings/limit");
     expect(errorMessage(layers.project)).toContain("Invalid project Demo settings");
     expect(() =>
-      settings.readSettings({ settingsManager: manager, sessionManager: branch() }),
+      settings.readSettings({
+        settingsManager: manager,
+        sessionManager: branch(),
+      }),
     ).toThrow("Invalid global Demo settings");
   });
 
@@ -113,7 +137,10 @@ describe("layered settings resolution", () => {
     );
     const resolved = define().readSettings({
       settingsManager: manager,
-      sessionManager: branch({ version: 1, overrides: { tools: { grep: true } } }),
+      sessionManager: branch({
+        version: 1,
+        overrides: { tools: { grep: true } },
+      }),
     });
     expect(resolved.settings.tools).toEqual({
       read: false,
@@ -173,7 +200,11 @@ describe("layered settings resolution", () => {
       limit: 8,
       tools: { read: true, a: true, b: true },
     });
-    expect(resolved.sources).toEqual({ enabled: "global", limit: "global", tools: "session" });
+    expect(resolved.sources).toEqual({
+      enabled: "global",
+      limit: "global",
+      tools: "session",
+    });
   });
 });
 
@@ -273,9 +304,120 @@ describe("rewriteNamespaceDocument", () => {
 
   it("reports why a document cannot be rewritten", () => {
     const rewrite = (current: string) => () =>
-      rewriteNamespaceDocument({ current, namespace: "demo", invalid, update: (o) => o });
+      rewriteNamespaceDocument({
+        current,
+        namespace: "demo",
+        invalid,
+        update: (o) => o,
+      });
     expect(rewrite("{")).toThrow("malformed");
     expect(rewrite("[]")).toThrow("root");
     expect(rewrite('{"demo":[]}')).toThrow("namespace");
+  });
+});
+
+describe("layered settings lenient reads", () => {
+  it("keeps the valid layers and defaults, and lists each unreadable layer", () => {
+    const { manager } = storageHarness(
+      JSON.stringify({ demo: { enabled: true } }),
+      JSON.stringify({ demo: { limit: 0 } }),
+    );
+    const resolved = define().readSettingsLeniently({
+      settingsManager: manager,
+      sessionManager: branch({ version: 2, overrides: {} }),
+    });
+    expect(resolved.settings).toEqual({
+      enabled: true,
+      limit: 3,
+      tools: { read: true },
+    });
+    expect(resolved.invalid.map((error) => error.message)).toEqual([
+      expect.stringMatching(/^Invalid project Demo settings\/limit/),
+      "Invalid Demo session settings",
+    ]);
+    expect(resolved.authored).toEqual({
+      global: { enabled: true },
+      project: {},
+      session: {},
+    });
+  });
+
+  it("lists a settings file Pi could not load, and keeps its defaults", () => {
+    const { manager } = storageHarness("{ broken", "{}");
+    const resolved = define().readSettingsLeniently({
+      settingsManager: manager,
+      sessionManager: branch(),
+    });
+    expect(resolved.settings).toEqual(defaults);
+    expect(resolved.invalid.map((error) => error.message)).toEqual([expect.stringMatching(/JSON/)]);
+  });
+});
+
+describe("layered settings session writes", () => {
+  it("stores a session change as a session entry and leaves the files untouched", async () => {
+    const { documents, manager } = storageHarness();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    await define().writeChange(
+      { appendEntry },
+      { settingsManager: manager, sessionManager: branch() },
+      "session",
+      { action: "set", key: "limit", patch: { limit: 5 } },
+      () => true,
+    );
+    expect(appendEntry).toHaveBeenCalledWith("test-settings", {
+      version: 1,
+      overrides: { limit: 5 },
+    });
+    expect(documents.global).toBe("{}");
+  });
+
+  it("replays the earlier overrides and drops an inherited key", async () => {
+    const { manager } = storageHarness();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    await define().writeChange(
+      { appendEntry },
+      {
+        settingsManager: manager,
+        sessionManager: branch({
+          version: 1,
+          overrides: { enabled: true, limit: 2 },
+        }),
+      },
+      "session",
+      { action: "inherit", key: "enabled" },
+      () => true,
+    );
+    expect(appendEntry).toHaveBeenCalledWith("test-settings", {
+      version: 1,
+      overrides: { limit: 2 },
+    });
+  });
+  it("writes nothing when the session changed before the change was applied", async () => {
+    const { documents, manager } = storageHarness();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    const result = await define().writeChange(
+      { appendEntry },
+      { settingsManager: manager, sessionManager: branch() },
+      "session",
+      { action: "set", key: "limit", patch: { limit: 5 } },
+      () => false,
+    );
+    expect(result).toBeUndefined();
+    expect(appendEntry).not.toHaveBeenCalled();
+    expect(documents.global).toBe("{}");
+  });
+});
+
+describe("layered menu scopes", () => {
+  it("offers the project scope only while the project is trusted", () => {
+    expect(layeredMenuScopes(storageHarness("{}", "{}", true).manager)).toEqual([
+      "session",
+      "project",
+      "global",
+    ]);
+    expect(layeredMenuScopes(storageHarness("{}", "{}", false).manager)).toEqual([
+      "session",
+      "global",
+    ]);
   });
 });

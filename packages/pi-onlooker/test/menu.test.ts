@@ -1,8 +1,11 @@
 import { initTheme } from "@earendil-works/pi-coding-agent";
+import { SettingsMenu } from "pi-hl-utils/settings-menu";
+import { createMenuTui, keys, menuDriver } from "pi-hl-utils/testing/menu-ui";
+import { expectLinesFitWidth } from "pi-hl-utils/testing/ui-testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
-  OnlookerSettingsMenu,
+  onlookerMenuSpec,
   type OnlookerMenuHost,
   type OnlookerMenuView,
   type OnlookerScopedOptions,
@@ -14,8 +17,6 @@ import type {
   OnlookerSettingScope,
   OnlookerSettingSource,
 } from "../src/onlooker-settings.js";
-import { createMenuTui, keys, menuDriver } from "./fixtures/menu-ui.js";
-import { expectLinesFitWidth } from "./fixtures/ui-testing.js";
 
 const defaults = {
   enabled: false,
@@ -68,8 +69,8 @@ function createHost({ paused = false, failWith }: { paused?: boolean; failWith?:
 function createMenu(options: Parameters<typeof createHost>[0] = {}) {
   const fixture = createHost(options);
   const { tui } = createMenuTui();
-  const done = vi.fn<ConstructorParameters<typeof OnlookerSettingsMenu>[2]>();
-  const menu = new OnlookerSettingsMenu(fixture.host, { tui, theme: plainTheme }, done);
+  const done = vi.fn<() => void>();
+  const menu = new SettingsMenu(onlookerMenuSpec(fixture.host), { tui, theme: plainTheme }, done);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   return { ...fixture, menu, done, settle, ...menuDriver(() => menu) };
 }

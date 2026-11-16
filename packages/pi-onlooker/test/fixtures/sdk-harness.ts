@@ -25,9 +25,8 @@ import {
   type ExtensionError,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
+import { recordToolOutputs } from "pi-hl-utils/testing/tool-testing";
 import { onTestFinished } from "vitest";
-
-import { recordToolOutputs } from "./tool-testing.js";
 
 interface HarnessOptions {
   contextSettings?: unknown;

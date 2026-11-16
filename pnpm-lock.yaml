@@ -224,7 +224,35 @@ importers:
         specifier: ^5.0.3
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.0))
 
+  packages/pi-hl-utils:
+    devDependencies:
+      '@earendil-works/pi-ai':
+        specifier: ^1.5.2
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(undici@8.12.3)(ws@8.23.0)
+      '@earendil-works/pi-coding-agent':
+        specifier: ^1.5.2
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
+      '@earendil-works/pi-tui':
+        specifier: ^1.5.2
+        version: 1.5.2
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      typebox:
+        specifier: ^1.4.3
+        version: 1.4.7
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.3
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.0))
+
   packages/pi-onlooker:
+    dependencies:
+      pi-hl-utils:
+        specifier: workspace:*
+        version: link:../pi-hl-utils
     devDependencies:
       '@earendil-works/pi-agent-core':
         specifier: ^1.5.2

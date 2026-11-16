@@ -9,6 +9,8 @@ import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-a
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
+import { isRecord } from "../src/record.js";
+
 /** The part of a Pi tool definition these test helpers read. */
 export interface ToolUnderTest {
   readonly name: string;
@@ -35,19 +37,15 @@ export function withoutPreparedArguments(factory: ExtensionFactory): ExtensionFa
   };
 }
 
-function isEntry(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** Top-level optional parameters of `schema` that reject `null`, in declaration order. */
 export function optionalParametersRejectingNull(schema: TSchema): string[] {
-  const { properties, required } = isEntry(schema) ? schema : {};
-  if (!isEntry(properties)) return [];
+  const { properties, required } = isRecord(schema) ? schema : {};
+  if (!isRecord(properties)) return [];
   const requiredNames = new Set(Array.isArray(required) ? required : []);
   return Object.entries(properties)
     .filter(
       ([name, property]) =>
-        !requiredNames.has(name) && !(isEntry(property) && Value.Check(property, null)),
+        !requiredNames.has(name) && !(isRecord(property) && Value.Check(property, null)),
     )
     .map(([name]) => name);
 }
@@ -60,7 +58,7 @@ function isJsonValue(value: unknown): value is JsonValue {
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return isEntry(value) && Object.values(value).every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 
 /** A schema's own value, which JSON Schema keywords such as `const` and `enum` hold as JSON. */
@@ -70,7 +68,13 @@ function json(value: unknown): JsonValue {
 }
 
 function sample(schema: unknown): JsonValue {
-  if (!isEntry(schema)) return null;
+  if (!isRecord(schema)) return null;
+  const keyword = sampleKeyword(schema);
+  return keyword === undefined ? sampleType(schema) : keyword;
+}
+
+/** A sample from a value or composition keyword, or `undefined` when the schema has none. */
+function sampleKeyword(schema: Record<string, unknown>): JsonValue | undefined {
   if ("const" in schema) return json(schema.const);
   if (Array.isArray(schema.enum)) return json(schema.enum[0]);
   for (const union of [schema.anyOf, schema.oneOf]) {
@@ -84,6 +88,10 @@ function sample(schema: unknown): JsonValue {
       }),
     );
   }
+  return undefined;
+}
+
+function sampleType(schema: Record<string, unknown>): JsonValue {
   switch (schema.type) {
     case "string":
       return "x".repeat(typeof schema.minLength === "number" ? Math.max(1, schema.minLength) : 1);
@@ -93,14 +101,18 @@ function sample(schema: unknown): JsonValue {
     case "boolean":
       return true;
     case "array":
-      return typeof schema.minItems === "number" && schema.minItems > 0
-        ? Array.from({ length: schema.minItems }, () => sample(schema.items))
-        : [];
+      return sampleArray(schema);
     case "object":
       return sampleRequiredArguments(schema);
     default:
       return null;
   }
+}
+
+function sampleArray(schema: Record<string, unknown>): JsonValue {
+  return typeof schema.minItems === "number" && schema.minItems > 0
+    ? Array.from({ length: schema.minItems }, () => sample(schema.items))
+    : [];
 }
 
 /**
@@ -109,9 +121,9 @@ function sample(schema: unknown): JsonValue {
  * the schema; pass explicit arguments for such a tool.
  */
 export function sampleRequiredArguments(schema: TSchema): ToolCall["arguments"] {
-  const { properties, required } = isEntry(schema) ? schema : {};
+  const { properties, required } = isRecord(schema) ? schema : {};
   const result: ToolCall["arguments"] = {};
-  if (isEntry(properties) && Array.isArray(required)) {
+  if (isRecord(properties) && Array.isArray(required)) {
     for (const name of required) {
       if (typeof name === "string") result[name] = sample(properties[name]);
     }
@@ -176,7 +188,11 @@ export function toolDeclarations(
   tools: readonly { name: string; description: string; parameters: unknown }[],
 ): string {
   return JSON.stringify(
-    tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+    tools.map(({ name, description, parameters }) => ({
+      name,
+      description,
+      parameters,
+    })),
     undefined,
     2,
   );

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,7 +30,7 @@ import {
   recordToolOutputs,
   toolOutputViolations,
   type ToolOutputDeclaration,
-} from "../fixtures/tool-testing.js";
+} from "../testing/tool-testing.js";
 
 const Output = Type.Object({ count: Type.Integer(), label: Type.String() });
 const typed = { name: "typed", outputSchema: Output };
@@ -38,7 +38,9 @@ const untyped = { name: "untyped" };
 
 describe("toolOutputViolations", () => {
   test("flags structuredContent from a tool that declares no outputSchema", () => {
-    const [violation, ...rest] = toolOutputViolations(untyped, { structuredContent: { count: 1 } });
+    const [violation, ...rest] = toolOutputViolations(untyped, {
+      structuredContent: { count: 1 },
+    });
     expect(violation).toMatch(/no outputSchema.*codemode scripts would get the text/);
     expect(rest).toEqual([]);
     expect(toolOutputViolations(untyped, { structuredContent: {}, isError: true })).toHaveLength(1);
@@ -56,7 +58,9 @@ describe("toolOutputViolations", () => {
   });
 
   test("lists every schema violation by instance path", () => {
-    const violations = toolOutputViolations(typed, { structuredContent: { count: "x" } });
+    const violations = toolOutputViolations(typed, {
+      structuredContent: { count: "x" },
+    });
     // The missing `label` is reported at the root, the wrong `count` at its path.
     expect(violations).toHaveLength(2);
     expect(violations.some((line) => /^structuredContent \/ .*label/.test(line))).toBe(true);
@@ -67,7 +71,9 @@ describe("toolOutputViolations", () => {
 describe("expectToolOutputMatches", () => {
   test("passes a conforming result", () => {
     expect(() =>
-      expectToolOutputMatches(typed, { structuredContent: { count: 1, label: "a" } }),
+      expectToolOutputMatches(typed, {
+        structuredContent: { count: 1, label: "a" },
+      }),
     ).not.toThrow();
   });
 
@@ -85,14 +91,10 @@ describe("expectToolOutputMatches", () => {
   });
 });
 
-const directories: string[] = [];
 const sessions: AgentSession[] = [];
 
-afterEach(async () => {
+afterEach(() => {
   for (const session of sessions.splice(0)) session.dispose();
-  await Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
-  );
 });
 
 const retired = new Set<string>();
@@ -119,7 +121,11 @@ const tools = [
     description: "Sets structuredContent without an outputSchema.",
     parameters: Type.Object({}),
     async execute() {
-      return { content: text("ok"), details: undefined, structuredContent: { count: 1 } };
+      return {
+        content: text("ok"),
+        details: undefined,
+        structuredContent: { count: 1 },
+      };
     },
   }),
   defineTool({
@@ -139,7 +145,11 @@ const tools = [
     parameters: Type.Object({}),
     outputSchema: Output,
     async execute() {
-      return { content: text("ok"), details: undefined, structuredContent: { count: "x" } };
+      return {
+        content: text("ok"),
+        details: undefined,
+        structuredContent: { count: "x" },
+      };
     },
   }),
   defineTool({
@@ -180,7 +190,6 @@ async function playSession(before: ExtensionFactory[], turns: readonly Assistant
     retired.has(name) ? undefined : running?.getToolDefinition(name);
   const recorder = recordToolOutputs(lookup);
   const cwd = await mkdtemp(join(tmpdir(), "pi-utils-tool-output-"));
-  directories.push(cwd);
   const agentDir = join(cwd, "agent");
   await mkdir(agentDir);
   const model = getBuiltinModel("deepseek", "deepseek-flash");
@@ -199,7 +208,12 @@ async function playSession(before: ExtensionFactory[], turns: readonly Assistant
     noThemes: true,
     noContextFiles: true,
     extensionFactories: [
-      { name: "codemode", factory: createCodemodeExtension(), builtin: true, replaceable: true },
+      {
+        name: "codemode",
+        factory: createCodemodeExtension(),
+        builtin: true,
+        replaceable: true,
+      },
       (pi) => {
         for (const tool of tools) pi.registerTool(tool);
       },

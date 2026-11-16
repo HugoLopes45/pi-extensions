@@ -2,11 +2,11 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { describe, expect, test } from "vitest";
 
-import { acceptNullForOptionalArguments } from "../../src/utils/null-optional-arguments.js";
+import { acceptNullForOptionalArguments } from "../src/null-optional-arguments.js";
 import {
   expectNullOptionalArgumentsOmitted,
   sampleRequiredArguments,
-} from "../fixtures/tool-testing.js";
+} from "../testing/tool-testing.js";
 
 const parameters = Type.Object({
   path: Type.String({ minLength: 3 }),

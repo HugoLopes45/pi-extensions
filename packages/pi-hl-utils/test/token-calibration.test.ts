@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { calibratedFactor } from "../../src/utils/token-calibration.js";
+import { calibratedFactor } from "../src/token-calibration.js";
 
 describe("token estimate calibration", () => {
   it("rises to the reported ratio in quarter steps", () => {

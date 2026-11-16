@@ -1,5 +1,7 @@
 import type { AgentSession, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+import { errorText } from "./errors.ts";
+
 /** Native session identity only; callers validate the capabilities they require. */
 export type DiscoverPiAgentSessionResult =
   | { readonly ok: true; readonly session: AgentSession }
@@ -32,7 +34,7 @@ export function discoverPiAgentSession(
   } catch (cause) {
     return {
       ok: false,
-      warning: `getAllTools capture failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      warning: `getAllTools capture failed: ${errorText(cause)}`,
     };
   } finally {
     Object.defineProperty(prototype, "getAllTools", descriptor);

@@ -1,27 +1,22 @@
 import { stripVTControlCharacters } from "node:util";
 
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import {
-  stripTerminalSequences,
-  TuiMainScreen,
-  type Component,
-  type Terminal,
-} from "@earendil-works/pi-tui";
+import { stripTerminalSequences, type Component } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   cycleDisplay,
   effectiveWithSource,
-  errorText,
   ModelPicker,
   nextCycleValue,
-  scopeRow,
   SettingsMenu,
   ValueInput,
+  type SettingsMenuSpec,
   type SettingsMenuTheme,
-  type SettingsMenuUi,
-} from "../../src/utils/settings-menu.js";
-import { escapeTaggedTheme, expectLinesFitWidth, readableTags } from "../fixtures/ui-testing.js";
+  type SettingsMenuView,
+} from "../src/settings-menu.js";
+import { createMenuTui, menuDriver } from "../testing/menu-ui.js";
+import { escapeTaggedTheme, expectLinesFitWidth, readableTags } from "../testing/ui-testing.js";
 
 const enter = "\r";
 const down = "\x1b[B";
@@ -39,13 +34,6 @@ function screen(component: Component): string[] {
 function type(component: Component, text: string): void {
   for (const character of text) component.handleInput?.(character);
 }
-
-describe("errorText", () => {
-  it("returns an Error's message and stringifies anything else", () => {
-    expect(errorText(new Error("boom"))).toBe("boom");
-    expect(errorText("plain")).toBe("plain");
-  });
-});
 
 describe("nextCycleValue", () => {
   it("advances and wraps", () => {
@@ -127,67 +115,40 @@ describe("cycleDisplay", () => {
   });
 });
 
-/** A terminal that never touches the process TTY. */
-class QuietTerminal implements Terminal {
-  start(): void {}
-  stop(): void {}
-  async drainInput(): Promise<void> {}
-  write(): void {}
-  get columns(): number {
-    return 100;
-  }
-  get rows(): number {
-    return 40;
-  }
-  get kittyProtocolActive(): boolean {
-    return false;
-  }
-  moveBy(): void {}
-  hideCursor(): void {}
-  showCursor(): void {}
-  clearLine(): void {}
-  clearFromCursor(): void {}
-  clearScreen(): void {}
-  setTitle(): void {}
-  setProgress(): void {}
-  setProgramStatus(): void {}
-}
+const headline = `Test ${escapeTaggedTheme.fg("accent", "ready")} with a long status line that has to wrap at narrow widths`;
 
-function createUi(): SettingsMenuUi {
-  const tui = new TuiMainScreen(new QuietTerminal());
-  vi.spyOn(tui, "requestRender").mockImplementation(() => {});
-  return {
-    tui,
-    theme: escapeTaggedTheme,
+/** A two-row menu: the Scope row, then one cycled `footer` row whose changes reach `apply`. */
+function createMenu(apply: (scope: string, value: string) => Promise<void> = async () => {}) {
+  const { tui } = createMenuTui();
+  const spec: SettingsMenuSpec<SettingsMenuView, string> = {
+    title: "Test settings",
+    read: () => ({ headline: [headline], scopes: ["session", "global"] }),
+    rows: () => [
+      { kind: "scope" },
+      {
+        kind: "cycle",
+        id: "footer",
+        label: "footer",
+        description: "Shows the footer",
+        values: ["inherit", "on", "off"],
+        own: undefined,
+        inEffect: "on · default",
+        source: "default",
+        change: (value) => value,
+      },
+    ],
+    apply,
   };
-}
-
-class TestMenu extends SettingsMenu {
-  readonly changes: string[] = [];
-  headlineLines = [
-    `Test ${escapeTaggedTheme.fg("accent", "ready")} with a long status line that has to wrap at narrow widths`,
-  ];
-
-  constructor(ui: SettingsMenuUi) {
-    super("Test settings", ui, () => {});
-    this.setList([scopeRow("session", ["session", "global"])], (id, value) => {
-      this.changes.push(`${id}=${value}`);
-    });
-  }
-  protected headline(): readonly string[] {
-    return this.headlineLines;
-  }
-  refresh(): void {}
-  fail(message: string): void {
-    this.run(() => Promise.reject(new Error(message)));
-  }
+  const menu = new SettingsMenu(spec, { tui, theme: escapeTaggedTheme }, () => {});
+  return { menu, ...menuDriver(() => menu) };
 }
 
 describe("SettingsMenu", () => {
   const tags = (line: string | undefined) => readableTags(line ?? "").trimEnd();
 
   it("frames an accent title, the headline, and Pi's settings list between borders", () => {
-    const lines = new TestMenu(createUi()).render(80);
+    const { menu } = createMenu();
+    const lines = menu.render(80);
     expect(tags(lines[1])).toBe(" <accent><b>Test settings</b></accent>");
     expect(tags(lines[2])).toContain("Test <accent>ready</accent>");
     expect(tags(lines.at(0))).toMatch(/^<border>─+<\/border>$/);
@@ -197,21 +158,49 @@ describe("SettingsMenu", () => {
     );
   });
 
-  it("changes a row with Enter and reports the proposed value", () => {
-    const menu = new TestMenu(createUi());
-    menu.handleInput(enter);
-    expect(menu.changes).toEqual(["scope=global"]);
+  it("writes a cycled row's next value to the selected scope", async () => {
+    const apply = vi.fn<(scope: string, value: string) => Promise<void>>(async () => {});
+    const { menu, goTo, press } = createMenu(apply);
+    goTo("footer");
+    press(enter);
+    await menu.settled();
+    expect(apply).toHaveBeenCalledWith("session", "on");
+  });
+
+  it("keeps the selected row after an edit", async () => {
+    const { menu, goTo, press, screen } = createMenu();
+    goTo("footer");
+    press(enter);
+    await menu.settled();
+    expect(screen()).toMatch(/→ footer/);
+  });
+
+  it("writes to the scope chosen in the Scope row", async () => {
+    const apply = vi.fn<(scope: string, value: string) => Promise<void>>(async () => {});
+    const { menu, goTo, press } = createMenu(apply);
+    goTo("Scope");
+    press(enter);
+    goTo("footer");
+    press(enter);
+    await menu.settled();
+    expect(apply).toHaveBeenCalledWith("global", "on");
   });
 
   it("shows a failed edit with a failure mark, then clears it on the next edit", async () => {
-    const menu = new TestMenu(createUi());
-    menu.fail("Settings are read-only");
+    const apply = vi
+      .fn<(scope: string, value: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("Settings are read-only"))
+      .mockResolvedValue(undefined);
+    const { menu, goTo, press } = createMenu(apply);
+    goTo("footer");
+    press(enter);
     await menu.settled();
     const lines = menu.render(120);
     expect(lines.map(tags)).toContain(" <error>✗</error> <error>Settings are read-only</error>");
     for (const width of [40, 120])
       expectLinesFitWidth(menu.render(width), width, { piThemedBody: true });
-    menu.fail("Second");
+    press(enter);
+    await menu.settled();
     expect(menu.render(120).map(tags).join("\n")).not.toContain("read-only");
   });
 });

@@ -23,10 +23,10 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it, vi } from "vitest";
+import { anyInstance, stringContaining } from "pi-hl-utils/testing/matchers";
 
 import "./fixtures/observer-extension.js";
-import { anyInstance, stringContaining } from "./fixtures/matchers.js";
+import { onTestFinished, expect, it, vi } from "vitest";
 
 /**
  * Pi 1.1 stamps each assistant message with the wall-clock `durationMs` of its call. Two runtimes

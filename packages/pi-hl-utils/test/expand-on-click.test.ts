@@ -9,8 +9,8 @@ import {
 } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { expandMessageOnClick } from "../../src/utils/expand-on-click.js";
-import { expectClickToggles, keybindingHints } from "../fixtures/ui-testing.js";
+import { expandMessageOnClick } from "../src/expand-on-click.js";
+import { expectClickToggles, keybindingHints } from "../testing/ui-testing.js";
 
 beforeAll(() => initTheme("dark"));
 

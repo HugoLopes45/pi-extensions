@@ -12,6 +12,7 @@ import {
   truncateLine,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { isMissingFileError } from "pi-hl-utils/errors";
 
 /** Directories whose content is credentials or VCS internals (remote URLs can hold tokens). */
 const deniedDirectories = new Set([".git", ".ssh", ".aws", ".gnupg", ".kube", ".docker"]);
@@ -106,7 +107,7 @@ export function createProtectedReadTools(
     const journal = observedJournal();
     if (journal) {
       const journalPath = await realpath(journal).catch((error: unknown) => {
-        if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
+        if (isMissingFileError(error)) return undefined;
         throw error;
       });
       if (real === journalPath) return undefined;

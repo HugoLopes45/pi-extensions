@@ -1,5 +1,4 @@
 import type { Context, Tool } from "@earendil-works/pi-ai";
-
 import {
   combineEvidence,
   evidenceItemsCost,
@@ -9,7 +8,7 @@ import {
   type Evidence,
   type EvidenceItem,
   type ProjectionOptions,
-} from "./utils/evidence.js";
+} from "pi-hl-utils/evidence";
 
 export {
   capText,
@@ -22,7 +21,7 @@ export {
   type EvidenceBlock,
   type EvidenceMessage,
   type ProjectionOptions,
-} from "./utils/evidence.js";
+} from "pi-hl-utils/evidence";
 
 /** Marks text shortened to fit the Context Seed budget. */
 const omissionMarker = (omitted: number) =>
@@ -58,7 +57,7 @@ export function projectObservedSetup(
 }
 
 /** A Context Seed: the Observed Setup and the observed messages that fit its token budget. */
-export interface ContextSeed extends Evidence {
+interface ContextSeed extends Evidence {
   observedSetup: ObservedSetup;
   /** Zero-based positions of the kept observed messages, ascending. */
   kept: number[];

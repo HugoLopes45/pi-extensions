@@ -10,6 +10,15 @@ import type {
   AgentSession,
   AgentSessionRuntime,
 } from "@earendil-works/pi-coding-agent";
+import { errorText } from "pi-hl-utils/errors";
+import {
+  cappedResults,
+  evidenceText,
+  evidenceTools,
+  type EvidenceMessage,
+} from "pi-hl-utils/evidence";
+import { acceptNullForOptionalArguments } from "pi-hl-utils/null-optional-arguments";
+import { calibratedFactor } from "pi-hl-utils/token-calibration";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
@@ -43,14 +52,6 @@ import {
   type OnlookerSessionOptions,
 } from "./onlooker-session.js";
 import { seedBudget, sessionTokenLimit, type OnlookerConfig } from "./onlooker-settings.js";
-import {
-  cappedResults,
-  evidenceText,
-  evidenceTools,
-  type EvidenceMessage,
-} from "./utils/evidence.js";
-import { acceptNullForOptionalArguments } from "./utils/null-optional-arguments.js";
-import { calibratedFactor } from "./utils/token-calibration.js";
 
 /** Delivery authority supplied by the native session owner. */
 export type OnlookerMode = "interactive" | "headless-root";
@@ -256,7 +257,7 @@ function priced(runtime: AgentSessionRuntime): boolean {
 
 /** Pi declines without a model call when the recent history it keeps is the whole session. */
 function declinedCompaction(cause: unknown): boolean {
-  const message = cause instanceof Error ? cause.message : String(cause);
+  const message = errorText(cause);
   return /^(?:Nothing to compact|Already compacted)\b/.test(message);
 }
 
@@ -543,7 +544,7 @@ export class OnlookerObserver {
       .then(() => this.compactAfter(review))
       .catch((cause) => {
         if (review.epoch === this.epoch && !this.closed && this.sameObservation(review))
-          this.fail(cause instanceof Error ? cause.message : String(cause));
+          this.fail(errorText(cause));
       })
       .finally(() => {
         if (this.running !== operation) return;
@@ -1061,7 +1062,7 @@ export class OnlookerObserver {
         this.config.enabled &&
         this.sameObservation(consultation)
       )
-        this.fail(cause instanceof Error ? cause.message : String(cause));
+        this.fail(errorText(cause));
       throw cause;
     } finally {
       clearTimeout(timer);

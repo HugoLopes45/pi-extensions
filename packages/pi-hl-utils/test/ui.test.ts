@@ -20,13 +20,13 @@ import {
   previewBody,
   toolHeader,
   widgetLines,
-} from "../../src/utils/ui.js";
+} from "../src/ui.js";
 import {
   escapeTaggedTheme,
   expectLinesFitWidth,
   readableTags,
   taggedTheme,
-} from "../fixtures/ui-testing.js";
+} from "../testing/ui-testing.js";
 
 beforeAll(() => {
   initTheme("dark");

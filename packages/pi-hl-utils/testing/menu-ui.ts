@@ -4,7 +4,7 @@ import { TuiMainScreen, type Component, type Terminal } from "@earendil-works/pi
 import { vi } from "vitest";
 
 // Pi exports its KeybindingsManager as a type only; tests construct the real class.
-import { KeybindingsManager } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
+import { KeybindingsManager } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
 
 export const keys = {
   up: "\x1b[A",

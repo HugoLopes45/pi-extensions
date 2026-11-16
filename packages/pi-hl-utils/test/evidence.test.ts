@@ -14,9 +14,9 @@ import {
   shortenEvidence,
   toolCallRef,
   type EvidenceItem,
-} from "../../src/utils/evidence.js";
-import { stringContaining } from "../fixtures/matchers.js";
-import { loadStoredMessages } from "../fixtures/stored-session.js";
+} from "../src/evidence.js";
+import { stringContaining } from "../testing/matchers.js";
+import { loadStoredMessages } from "../testing/stored-session.js";
 
 const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" } as const;
 const assistant = (content: Extract<Message, { role: "assistant" }>["content"]) => ({

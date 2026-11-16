@@ -5,6 +5,20 @@ import {
   type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+import {
+  callDurationFooter,
+  COLLAPSED_LINES,
+  appendDurationFooter,
+  CollapsedPreview,
+  customMessageBox,
+  joinInline,
+  previewBody,
+  statusMark,
+  summaryExpandHint,
+  toolHeader,
+  type DurationContext,
+  type StatusKind,
+} from "pi-hl-utils/ui";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
@@ -20,25 +34,11 @@ import {
 } from "./onlooker-contract.js";
 import {
   onlookerAppliedChangeSchema,
-  onlookerOptionKeys,
   onlookerOptionsSchema,
+  onlookerSettings,
   onlookerSettingSourceSchema,
   type OnlookerOptions,
 } from "./onlooker-settings.js";
-import {
-  callDurationFooter,
-  COLLAPSED_LINES,
-  appendDurationFooter,
-  CollapsedPreview,
-  customMessageBox,
-  joinInline,
-  previewBody,
-  statusMark,
-  summaryExpandHint,
-  toolHeader,
-  type DurationContext,
-  type StatusKind,
-} from "./utils/ui.js";
 
 /** Theme operations used by Onlooker transcript and footer renderers. */
 export type OnlookerRenderTheme = Pick<Theme, "fg" | "bg" | "bold">;
@@ -323,9 +323,9 @@ function detailLines(entry: OnlookerStatusEntry, theme: OnlookerRenderTheme): st
   const lines: string[] = [];
   if (entry.settings) {
     const settings = entry.settings;
-    const width = Math.max(...onlookerOptionKeys.map((key) => key.length));
+    const width = Math.max(...onlookerSettings.optionKeys.map((key) => key.length));
     lines.push("");
-    for (const key of onlookerOptionKeys) {
+    for (const key of onlookerSettings.optionKeys) {
       const source = entry.sources?.[key] ?? "default";
       lines.push(
         `  ${paint(key.padEnd(width))}  ${paint(formatOnlookerOption(settings, key))}  ${theme.fg(source === "default" ? "dim" : "accent", `[${source}]`)}`,

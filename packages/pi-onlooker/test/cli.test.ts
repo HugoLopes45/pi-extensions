@@ -5,9 +5,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { arrayContaining, objectContaining } from "pi-hl-utils/testing/matchers";
 import { expect, it } from "vitest";
-
-import { arrayContaining, objectContaining } from "./fixtures/matchers.js";
 
 const execute = promisify(execFile);
 const cli = fileURLToPath(

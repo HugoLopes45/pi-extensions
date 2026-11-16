@@ -21,7 +21,7 @@ import { onTestFinished, describe, expect, it } from "vitest";
 
 import { onlookerGuidance } from "../src/onlooker-guidance.js";
 import { createOnlookerSession, disposeOnlookerSession } from "../src/onlooker-session.js";
-import { onlookerPrompt, readOnlookerSettings } from "../src/onlooker-settings.js";
+import { onlookerPrompt, onlookerSettings } from "../src/onlooker-settings.js";
 
 const fixture = fileURLToPath(new URL("./fixtures/session-extension.ts", import.meta.url));
 const adviceTool = defineTool({
@@ -149,7 +149,7 @@ describe("private Onlooker native sessions", () => {
         .filter((name) => name === "alpha" || name === "beta");
       expect(fixtureSkills).toEqual(skills);
       const runtime = await createOnlookerSession(observed, {
-        config: readOnlookerSettings(observed).settings,
+        config: onlookerSettings.readSettings(observed).settings,
         adviceTool,
       });
       onTestFinished(() => disposeOnlookerSession(runtime));
@@ -177,7 +177,7 @@ describe("private Onlooker native sessions", () => {
       undefined,
       [{ name: "codemode", factory: createCodemodeExtension(), builtin: true }],
     );
-    const settings = readOnlookerSettings(observed).settings;
+    const settings = onlookerSettings.readSettings(observed).settings;
     const config = {
       ...settings,
     };
@@ -206,7 +206,7 @@ describe("private Onlooker native sessions", () => {
       if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previous;
     });
-    const config = readOnlookerSettings(observed).settings;
+    const config = onlookerSettings.readSettings(observed).settings;
     const runtime = await createOnlookerSession(observed, {
       config,
       adviceTool,
@@ -226,7 +226,7 @@ describe("private Onlooker native sessions", () => {
     await writeFile(join(dir, ".env"), "SYNTHETIC-GUIDANCE-SECRET");
     await symlink(".env", join(dir, "ONLOOKER.md"));
     const outcome = await createOnlookerSession(observed, {
-      config: readOnlookerSettings(observed).settings,
+      config: onlookerSettings.readSettings(observed).settings,
       adviceTool,
     }).then(
       (runtime) => {
@@ -266,7 +266,7 @@ describe("private Onlooker native sessions", () => {
     const { observed, dir } = await observedFixture();
     await writeFile(join(dir, ".env"), "TOKEN=SECRET-VALUE\n");
     const runtime = await createOnlookerSession(observed, {
-      config: readOnlookerSettings(observed).settings,
+      config: onlookerSettings.readSettings(observed).settings,
       adviceTool,
     });
     onTestFinished(() => disposeOnlookerSession(runtime));
@@ -282,7 +282,7 @@ describe("private Onlooker native sessions", () => {
 
   it("bounds cancelled creation and shuts down late startup without retaining its signal", async () => {
     const { observed } = await observedFixture();
-    const config = readOnlookerSettings(observed).settings;
+    const config = onlookerSettings.readSettings(observed).settings;
     await expect(
       createOnlookerSession(observed, {
         config,
@@ -336,7 +336,7 @@ describe("private Onlooker native sessions", () => {
     const { observed } = await observedFixture();
     await observed.modelRuntime.setRuntimeApiKey("onlooker-fixture", "runtime-only-key");
     const config = {
-      ...readOnlookerSettings(observed).settings,
+      ...onlookerSettings.readSettings(observed).settings,
       model: "onlooker-fixture/alternate",
       thinkingLevel: "high" as const,
     };

@@ -1,5 +1,5 @@
 // The probe tool receives arbitrary JSON arguments, as a model call delivers them.
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,17 +29,13 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { afterEach, expect, test } from "vitest";
 
-import { acceptNullForOptionalArguments } from "../../src/utils/null-optional-arguments.js";
-import { toolDeclarations } from "../fixtures/tool-testing.js";
+import { acceptNullForOptionalArguments } from "../src/null-optional-arguments.js";
+import { toolDeclarations } from "../testing/tool-testing.js";
 
-const directories: string[] = [];
 const sessions: AgentSession[] = [];
 
-afterEach(async () => {
+afterEach(() => {
   for (const session of sessions.splice(0)) session.dispose();
-  await Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
-  );
 });
 
 const ProbeParameters = Type.Object(
@@ -74,7 +70,6 @@ async function run(
   viaScript: boolean,
 ): Promise<Run> {
   const cwd = await mkdtemp(join(tmpdir(), "pi-utils-null-optional-"));
-  directories.push(cwd);
   const agentDir = join(cwd, "agent");
   await mkdir(agentDir);
   const executed: unknown[] = [];
@@ -105,7 +100,12 @@ async function run(
     noThemes: true,
     noContextFiles: true,
     extensionFactories: [
-      { name: "codemode", factory: createCodemodeExtension(), builtin: true, replaceable: true },
+      {
+        name: "codemode",
+        factory: createCodemodeExtension(),
+        builtin: true,
+        replaceable: true,
+      },
       (pi) => pi.registerTool(wrap ? acceptNullForOptionalArguments(probe) : probe),
       (pi) =>
         pi.registerProvider("deepseek", {
@@ -142,7 +142,9 @@ async function run(
     ...calls.map((call) =>
       fauxAssistantMessage(
         viaScript
-          ? fauxToolCall("codemode", { code: `return await tools.probe(${JSON.stringify(call)});` })
+          ? fauxToolCall("codemode", {
+              code: `return await tools.probe(${JSON.stringify(call)});`,
+            })
           : fauxToolCall("probe", call),
         { stopReason: "toolUse" },
       ),

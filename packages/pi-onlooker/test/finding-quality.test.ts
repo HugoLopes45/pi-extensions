@@ -1,11 +1,7 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { onTestFinished, expect, it } from "vitest";
 
-import {
-  onlookerPrompt,
-  readOnlookerSettings,
-  type OnlookerConfig,
-} from "../src/onlooker-settings.js";
+import { onlookerPrompt, onlookerSettings, type OnlookerConfig } from "../src/onlooker-settings.js";
 import {
   activeFixture,
   effectful,
@@ -25,7 +21,7 @@ async function observe(
 ) {
   const session = await activeFixture();
   const settings: OnlookerConfig = {
-    ...readOnlookerSettings(session).settings,
+    ...onlookerSettings.readSettings(session).settings,
     enabled: true,
     catchUpThreshold: 1,
     ...config,

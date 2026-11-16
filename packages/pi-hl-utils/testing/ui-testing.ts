@@ -1,7 +1,12 @@
-import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 
-import type { UiTheme } from "../../src/utils/ui.js";
+import type { UiTheme } from "../src/ui.js";
+
+/** Pi 1.5's `KeybindingHints`, declared here because Pi 1.0.3 does not export the type. */
+interface KeybindingHints {
+  keyText(keybinding: string): string;
+  keyHint(keybinding: string, description: string): string;
+}
 
 /**
  * Stand-in for the `keyText`/`keyHint` Pi injects into tool render contexts and message and entry
@@ -77,29 +82,47 @@ export const escapeTaggedTheme: UiTheme = {
  * when it wraps or truncates are dropped.
  */
 export function readableTags(line: string): string {
-  const foreground: string[] = [];
-  const background: string[] = [];
-  return line.replace(ESCAPE_SEQUENCE, (_sequence, parameters: string | undefined) => {
-    if (parameters === undefined) return "";
-    const code = Number(parameters);
-    if (code >= FOREGROUND_BASE && code < BACKGROUND_BASE) {
-      const token = tokenAt(code - FOREGROUND_BASE) ?? `unregistered:${code}`;
-      foreground.push(token);
-      return `<${token}>`;
-    }
-    if (code >= BACKGROUND_BASE && code < BACKGROUND_BASE + 100) {
-      const token = tokenAt(code - BACKGROUND_BASE) ?? `unregistered:${code}`;
-      background.push(token);
-      return `<bg:${token}>`;
-    }
-    if (parameters === "39") return `</${foreground.pop() ?? "?"}>`;
-    if (parameters === "49") return `</bg:${background.pop() ?? "?"}>`;
-    if (parameters === "1") return "<b>";
-    if (parameters === "22") return "</b>";
-    if (parameters === "9") return "<s>";
-    if (parameters === "29") return "</s>";
-    return "";
-  });
+  const stacks: ColourStacks = { foreground: [], background: [] };
+  return line.replace(ESCAPE_SEQUENCE, (_sequence, parameters: string | undefined) =>
+    parameters === undefined ? "" : readableTag(parameters, stacks),
+  );
+}
+
+interface ColourStacks {
+  foreground: string[];
+  background: string[];
+}
+
+const STYLE_TAGS = new Map([
+  ["1", "<b>"],
+  ["22", "</b>"],
+  ["9", "<s>"],
+  ["29", "</s>"],
+]);
+
+function readableTag(parameters: string, stacks: ColourStacks): string {
+  const opened = openedColour(Number(parameters));
+  if (opened) {
+    stacks[opened.layer].push(opened.token);
+    return opened.layer === "foreground" ? `<${opened.token}>` : `<bg:${opened.token}>`;
+  }
+  if (parameters === "39") return `</${stacks.foreground.pop() ?? "?"}>`;
+  if (parameters === "49") return `</bg:${stacks.background.pop() ?? "?"}>`;
+  return STYLE_TAGS.get(parameters) ?? "";
+}
+
+function openedColour(code: number): { layer: keyof ColourStacks; token: string } | undefined {
+  if (code >= FOREGROUND_BASE && code < BACKGROUND_BASE)
+    return {
+      layer: "foreground",
+      token: tokenAt(code - FOREGROUND_BASE) ?? `unregistered:${code}`,
+    };
+  if (code >= BACKGROUND_BASE && code < BACKGROUND_BASE + 100)
+    return {
+      layer: "background",
+      token: tokenAt(code - BACKGROUND_BASE) ?? `unregistered:${code}`,
+    };
+  return undefined;
 }
 
 function isColourParameter(code: number): boolean {

@@ -5,12 +5,21 @@ import type {
   ExtensionContext,
   ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
+import { errorText } from "pi-hl-utils/errors";
+import { expandEntryOnClick, expandMessageOnClick } from "pi-hl-utils/expand-on-click";
+import { layeredMenuScopes } from "pi-hl-utils/layered-settings";
+import { acceptNullForOptionalArguments } from "pi-hl-utils/null-optional-arguments";
+import { discoverPiAgentSession } from "pi-hl-utils/pi-agent-session-discovery";
+import { registerSettingsCommand } from "pi-hl-utils/settings-command";
+import { SettingsMenu } from "pi-hl-utils/settings-menu";
+import { noticeText } from "pi-hl-utils/ui";
 import { Type } from "typebox";
 
-import { completeOnlookerCommandArguments, parseOnlookerCommand } from "../src/onlooker-command.js";
+import { onlookerCommandSpec } from "../src/onlooker-command.js";
 import {
-  OnlookerSettingsMenu,
+  onlookerMenuSpec,
   type OnlookerMenuHost,
+  type OnlookerMenuView,
   type OnlookerScopedOptions,
 } from "../src/onlooker-menu.js";
 import { OnlookerObserver } from "../src/onlooker-observer.js";
@@ -28,20 +37,13 @@ import {
 } from "../src/onlooker-rendering.js";
 import { isOnlookerSession } from "../src/onlooker-session.js";
 import {
-  readOnlookerLayers,
-  readOnlookerOverrides,
-  readOnlookerSettings,
-  writeOnlookerSettings,
+  onlookerSettings,
   type OnlookerLayers,
   type OnlookerChange,
   type OnlookerAppliedChange,
   type OnlookerSettingScope,
 } from "../src/onlooker-settings.js";
 import { TROUBLESHOOTING_HINT } from "../src/troubleshooting-skill.js";
-import { expandEntryOnClick, expandMessageOnClick } from "../src/utils/expand-on-click.js";
-import { acceptNullForOptionalArguments } from "../src/utils/null-optional-arguments.js";
-import { discoverPiAgentSession } from "../src/utils/pi-agent-session-discovery.js";
-import { noticeText } from "../src/utils/ui.js";
 
 const askToolParameters = Type.Object(
   { message: Type.String({ minLength: 1 }) },
@@ -122,7 +124,11 @@ export default function onlooker(pi: ExtensionAPI): void {
         renderResult: (result, options, theme, context) =>
           renderOnlookerAskResult(
             result.content.map((item) => (item.type === "text" ? item.text : "")).join(""),
-            { expanded: options.expanded, isPartial: options.isPartial, isError: context.isError },
+            {
+              expanded: options.expanded,
+              isPartial: options.isPartial,
+              isError: context.isError,
+            },
             theme,
             context,
           ),
@@ -138,7 +144,7 @@ export default function onlooker(pi: ExtensionAPI): void {
           } catch (cause) {
             // Caller cancellation is not a malfunction the Skill diagnoses.
             if (signal?.aborted) throw cause;
-            const text = cause instanceof Error ? cause.message : String(cause);
+            const text = errorText(cause);
             throw new Error(`${text}\n\n${TROUBLESHOOTING_HINT}`, { cause });
           }
         },
@@ -182,7 +188,7 @@ export default function onlooker(pi: ExtensionAPI): void {
     const found = discoverPiAgentSession(pi, piSdk.AgentSession);
     if (found.ok) {
       observed = found.session;
-      layers = readOnlookerLayers(observed.settingsManager);
+      layers = onlookerSettings.readLayers(observed.settingsManager);
       await refresh(ctx);
     } else {
       error = found.warning;
@@ -215,7 +221,7 @@ export default function onlooker(pi: ExtensionAPI): void {
   async function refresh(ctx: ExtensionContext): Promise<void> {
     if (!observed || privateSession) return;
     try {
-      const { settings } = readOnlookerSettings(observed, layers);
+      const { settings } = onlookerSettings.readSettings(observed, layers);
       displayName = settings.name;
       if (observer) observer.configure(settings);
       else
@@ -237,7 +243,7 @@ export default function onlooker(pi: ExtensionAPI): void {
         );
       setAskToolAvailable(settings.enabled);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = errorText(cause);
       setAskToolAvailable(true);
       await observer?.dispose();
       observer = undefined;
@@ -247,7 +253,7 @@ export default function onlooker(pi: ExtensionAPI): void {
 
   /** Current effective settings and live Onlooker state, as recorded in status entries. */
   function statusData(subject: AgentSession): OnlookerStatusEntry {
-    const resolved = readOnlookerSettings(subject, layers);
+    const resolved = onlookerSettings.readSettings(subject, layers);
     const live = observer?.status ?? idleStatus(resolved.settings.enabled);
     return { ...resolved, ...live, error: error ?? live.lastError };
   }
@@ -259,8 +265,13 @@ export default function onlooker(pi: ExtensionAPI): void {
       if (changes.length) entry.changes = [...changes];
       pi.appendEntry("pi-onlooker-status", entry);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
-      pi.appendEntry("pi-onlooker-status", { state: "paused", error, usage: null, cost: null });
+      error = errorText(cause);
+      pi.appendEntry("pi-onlooker-status", {
+        state: "paused",
+        error,
+        usage: null,
+        cost: null,
+      });
     }
     if (error) ctx.ui.notify(noticeText(displayName, error), "error");
   }
@@ -273,24 +284,16 @@ export default function onlooker(pi: ExtensionAPI): void {
     change: OnlookerChange,
     isCurrent: () => boolean,
   ): Promise<OnlookerAppliedChange | undefined> {
-    if (scope === "session") {
-      const overrides = readOnlookerOverrides(subject.sessionManager);
-      if (change.action === "inherit") delete overrides[change.key];
-      else Object.assign(overrides, change.patch);
-      pi.appendEntry("pi-onlooker-settings", { version: 1, overrides });
-    } else {
-      const updated = await writeOnlookerSettings(
-        subject.settingsManager,
-        scope,
-        change,
-        isCurrent,
-      );
-      if (!isCurrent() || !updated) return undefined;
-      layers[scope] = updated;
-    }
+    const updated = await onlookerSettings.writeChange(pi, subject, scope, change, isCurrent);
+    if (!isCurrent() || !updated) return undefined;
+    if (scope !== "session") layers[scope] = updated;
     error = undefined;
     await refresh(ctx);
-    return { scope, key: change.key, options: change.action === "inherit" ? {} : change.patch };
+    return {
+      scope,
+      key: change.key,
+      options: change.action === "inherit" ? {} : change.patch,
+    };
   }
 
   /** The settings menu's view of this extension's settings authority. */
@@ -304,16 +307,14 @@ export default function onlooker(pi: ExtensionAPI): void {
       view() {
         const data = statusData(subject);
         const authored: Partial<OnlookerScopedOptions> = {
-          session: readOnlookerOverrides(subject.sessionManager),
+          session: onlookerSettings.readOverrides(subject.sessionManager),
         };
         if (!(layers.project instanceof Error)) authored.project = layers.project;
         if (!(layers.global instanceof Error)) authored.global = layers.global;
         return {
           headline: onlookerStatusHeadline(data, theme),
           paused: data.state === "paused",
-          scopes: subject.settingsManager.isProjectTrusted()
-            ? ["session", "project", "global"]
-            : ["session", "global"],
+          scopes: layeredMenuScopes(subject.settingsManager),
           settings: data.settings ?? {},
           sources: data.sources ?? {},
           authored,
@@ -342,10 +343,10 @@ export default function onlooker(pi: ExtensionAPI): void {
   async function openMenu(ctx: ExtensionContext, subject: AgentSession): Promise<void> {
     const applied: OnlookerAppliedChange[] = [];
     let discarded = false;
-    let menu: OnlookerSettingsMenu | undefined;
+    let menu: SettingsMenu<OnlookerMenuView, OnlookerChange> | undefined;
     await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-      const opened = new OnlookerSettingsMenu(
-        menuHost(ctx, subject, theme, applied),
+      const opened = new SettingsMenu(
+        onlookerMenuSpec(menuHost(ctx, subject, theme, applied)),
         {
           tui,
           theme,
@@ -372,39 +373,52 @@ export default function onlooker(pi: ExtensionAPI): void {
     if (!discarded && observed === subject && applied.length) status(ctx, applied);
   }
 
-  pi.registerCommand("onlooker", {
+  registerSettingsCommand(pi, {
+    name: "onlooker",
     description: "Onlooker settings menu, or on, off, inherit, set, and status",
-    getArgumentCompletions: completeOnlookerCommandArguments,
-    async handler(args, ctx) {
+    optionKeys: onlookerSettings.optionKeys,
+    parse: onlookerCommandSpec,
+    start(ctx) {
       if (privateSession) {
         pi.appendEntry("pi-onlooker-status", {
           state: "private",
           error: "Private Onlooker Sessions cannot create another Onlooker",
         });
-        return;
+        return undefined;
       }
       const subject = observed;
       let stamp = generation;
       const isCurrent = () => generation === stamp && observed === subject;
       let applied: OnlookerAppliedChange | undefined;
-      try {
+      const showStatus = () => {
+        if (isCurrent()) status(ctx, applied ? [applied] : []);
+      };
+      // Checked before the parse, so an unavailable session is reported before a usage error.
+      const requireSubject = (): AgentSession => {
         if (!subject) throw new Error(error ?? "Onlooker session is unavailable");
-        const command = parseOnlookerCommand(args);
-        if (command.action === "menu" && ctx.mode === "tui") {
+        return subject;
+      };
+      return {
+        check: requireSubject,
+        status: showStatus,
+        async menu() {
+          const session = requireSubject();
           // Opening fails closed to the status entry when settings cannot be read.
-          statusData(subject);
-          await openMenu(ctx, subject);
-          return;
-        }
-        if (command.action !== "status" && command.action !== "menu") {
+          statusData(session);
+          await openMenu(ctx, session);
+        },
+        async change(command) {
+          const session = requireSubject();
           stamp = ++generation;
-          applied = await applyChange(ctx, subject, command.scope, command, isCurrent);
-        }
-      } catch (cause) {
-        if (!isCurrent()) return;
-        error = cause instanceof Error ? cause.message : String(cause);
-      }
-      if (isCurrent()) status(ctx, applied ? [applied] : []);
+          applied = await applyChange(ctx, session, command.scope, command, isCurrent);
+          showStatus();
+        },
+        fail(cause) {
+          if (!isCurrent()) return;
+          error = errorText(cause);
+          showStatus();
+        },
+      };
     },
   });
 }
