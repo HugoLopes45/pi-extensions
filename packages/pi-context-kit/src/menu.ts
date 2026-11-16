@@ -42,7 +42,7 @@ const descriptions = {
   threshold:
     "Where cleanup starts: a token count, a percentage such as 75% of each window, or pi for Pi's own limit.",
   strategy:
-    "Summary notes writes notes ahead of time. Trim first shortens old outputs without a model call. pi-summary uses Pi's own summary.",
+    "balanced writes notes ahead of time. frugal shortens old outputs without a model call. pi-summary uses Pi's own summary.",
   methodOrder:
     "What to try, in order, when the context stays above the threshold after pruning. Overrides strategy.",
   background: "Writes the handoff note in the background, before the threshold.",
