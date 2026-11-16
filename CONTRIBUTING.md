@@ -51,7 +51,7 @@ A package README has these sections, in this order. Leave out a section only whe
 9. `## Troubleshooting`: a message or symptom in bold, then the fix.
 10. `## FAQ`.
 11. `## Update, try or remove`.
-12. `## Contributing` and `## License`, with the same text in each package.
+12. `## Contributing`, `## Author` and `## License`, with the same text in each package.
 
 Write one paragraph per line. Use `bash` for shell code blocks. Link to files outside the package with absolute GitHub URLs, because npm shows the README without the repository. When behavior changes, update the README and the `Unreleased` section of `CHANGELOG.md` in the same pull request.
 

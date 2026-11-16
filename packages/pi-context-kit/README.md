@@ -374,6 +374,10 @@ After an update, Pi shows what changed, from [CHANGELOG.md](CHANGELOG.md).
 
 See [CONTRIBUTING.md](https://github.com/HugoLopes45/pi-extensions/blob/main/CONTRIBUTING.md) for setup, checks and releases. Report bugs on [GitHub Issues](https://github.com/HugoLopes45/pi-extensions/issues), and vulnerabilities through [SECURITY.md](https://github.com/HugoLopes45/pi-extensions/blob/main/SECURITY.md).
 
+## Author
+
+Built by [Hugo Lopes](https://github.com/HugoLopes45), a senior frontend developer based in Paris, passionate about AI and agent harnesses.
+
 ## License
 
 [MIT](LICENSE)

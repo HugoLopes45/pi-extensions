@@ -33,3 +33,7 @@ Imported packages are snapshots of tracked files at a source commit, without loc
 `pi-context-kit` commit `6d7330ff09b61ae801c90735a920beb26e506aa4` is ported afterward by cherry-pick.
 
 Do not commit credentials, environment files, session journals or local agent settings.
+
+## Author
+
+Built by [Hugo Lopes](https://github.com/HugoLopes45), a senior frontend developer based in Paris, passionate about AI and agent harnesses.
