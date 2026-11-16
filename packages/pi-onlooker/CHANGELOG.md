@@ -2,6 +2,12 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 0.1.1
+
+### Patch Changes
+
+- The README installs from npm and uses neutral display name examples.
+
 ## 0.1.0 - 2026-11-16
 
 - First release. A second AI model checks the Pi agent's work and tells it when it breaks your instructions, repeats a failure or claims work it did not do. It works in a private session and reports Blockers, Concerns and Nits, each with evidence.
