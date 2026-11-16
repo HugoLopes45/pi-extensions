@@ -9,8 +9,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
-// Pi exports its KeybindingsManager as a type only; tests construct the real class.
-import { KeybindingsManager } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/keybindings.js";
 import {
   cycleDisplay,
   effectiveWithSource,
@@ -160,7 +158,6 @@ function createUi(): SettingsMenuUi {
   vi.spyOn(tui, "requestRender").mockImplementation(() => {});
   return {
     tui,
-    keybindings: new KeybindingsManager(),
     theme: escapeTaggedTheme,
   };
 }

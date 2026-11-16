@@ -2,7 +2,6 @@ import {
   DynamicBorder,
   getSelectListTheme,
   getSettingsListTheme,
-  type KeybindingsManager,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -140,7 +139,6 @@ export class ModelPicker implements Component {
 /** Native UI collaborators a settings menu needs, as supplied by `ctx.ui.custom`. */
 export interface SettingsMenuUi {
   tui: TUI;
-  keybindings: KeybindingsManager;
   theme: SettingsMenuTheme;
 }
 

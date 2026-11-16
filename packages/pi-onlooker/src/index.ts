@@ -343,12 +343,11 @@ export default function onlooker(pi: ExtensionAPI): void {
     const applied: OnlookerAppliedChange[] = [];
     let discarded = false;
     let menu: OnlookerSettingsMenu | undefined;
-    await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
+    await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
       const opened = new OnlookerSettingsMenu(
         menuHost(ctx, subject, theme, applied),
         {
           tui,
-          keybindings,
           theme,
         },
         () => done(),

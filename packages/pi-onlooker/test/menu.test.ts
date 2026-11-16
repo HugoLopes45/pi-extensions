@@ -67,13 +67,9 @@ function createHost({ paused = false, failWith }: { paused?: boolean; failWith?:
 
 function createMenu(options: Parameters<typeof createHost>[0] = {}) {
   const fixture = createHost(options);
-  const { tui, keybindings } = createMenuTui();
+  const { tui } = createMenuTui();
   const done = vi.fn<ConstructorParameters<typeof OnlookerSettingsMenu>[2]>();
-  const menu = new OnlookerSettingsMenu(
-    fixture.host,
-    { tui, keybindings, theme: plainTheme },
-    done,
-  );
+  const menu = new OnlookerSettingsMenu(fixture.host, { tui, theme: plainTheme }, done);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   return { ...fixture, menu, done, settle, ...menuDriver(() => menu) };
 }
