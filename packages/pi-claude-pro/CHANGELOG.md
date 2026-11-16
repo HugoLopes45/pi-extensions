@@ -2,6 +2,10 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## [Unreleased]
+
+- The documentation is in English only. The Simplified Chinese translation is removed.
+
 ## [1.4.2] - 2026-11-13
 
 - Documentation in Simplified Chinese: README, contribution guide and security policy. No change to the extension.

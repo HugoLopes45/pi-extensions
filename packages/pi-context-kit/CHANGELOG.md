@@ -6,6 +6,7 @@ Pi shows the entries newer than your installed version after `pi update`.
 
 - An early summary can no longer be longer than the room left under the threshold. Before, Pi could generate a longer summary that pi-context-kit then rejected.
 - The README states that handoff notes and summaries skip the `context` and `before_provider_request` hooks of other extensions, as Pi's own compaction summaries do.
+- The documentation is in English only. The Simplified Chinese translation is removed.
 
 ## [0.4.2] - 2026-11-13
 
