@@ -16,6 +16,7 @@ import {
   SettingsManager,
   type TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { errorText } from "pi-hl-utils/errors";
 import {
   layeredMenuScopes,
@@ -178,7 +179,7 @@ export default function contextKit(pi: ExtensionAPI): void {
   };
 
   const warn = (ctx: ExtensionContext, error: unknown, fallback: string, what = "handoff note") => {
-    const message = errorText(error);
+    const message = displayText(errorText(error));
     ctx.ui.notify(`pi-context-kit: ${what} failed (${message}). ${fallback}`, "warning");
   };
 
@@ -781,6 +782,22 @@ function parseImported(item: SettingsImport): ContextKitOptionsPatch {
     const message = errorText(error);
     throw new Error(`${item.file} is invalid (${message})`, { cause: error });
   }
+}
+
+/**
+ * Error and settings text without terminal controls: pi-tui writes notice text to the terminal as is.
+ * Keeps tabs and line breaks.
+ */
+function displayText(text: string): string {
+  return Array.from(stripTerminalSequences(text).replace(/\r\n?/g, "\n"))
+    .filter((char) => char === "\n" || char === "\t" || !isControlCharacter(char))
+    .join("");
+}
+
+/** C0, DEL and C1 controls. */
+function isControlCharacter(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f);
 }
 
 /** One-line status for modes without the settings menu. */

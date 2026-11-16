@@ -903,6 +903,33 @@ describe("pi-context-kit inside Pi", () => {
     expect(result.details).toBeDefined();
   });
 
+  it("shows a failed handoff's error text without terminal control sequences", async () => {
+    const { session } = await start([
+      fauxAssistantMessage(fauxToolCall("read", { path: "a.ts" })),
+      fauxAssistantMessage("hello"),
+      fauxAssistantMessage("again"),
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage:
+          "no tool\x1b]8;;https://evil.example\x07link\x1b]8;;\x07 \x1b]52;c;ZXZpbA==\x07ok\x9b\rnext",
+      }),
+      fauxAssistantMessage("## Goal\nPi summary"),
+    ]);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    await session.prompt("Hi");
+    await session.prompt("Again");
+    await session.compact();
+    expect(notify.mock.calls).toEqual([
+      [
+        "pi-context-kit: handoff note failed (no toollink ok\nnext). Pi's summary is used instead.",
+        "warning",
+      ],
+    ]);
+  });
+
   it("reuses a ready early note at manual compaction near the threshold", async () => {
     const noteMessages: number[] = [];
     const notes: string[] = [];
