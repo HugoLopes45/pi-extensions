@@ -1,6 +1,7 @@
+import { isRecord } from "pi-hl-utils/record";
+
 import {
   isMethod,
-  isRecord,
   isStrategy,
   type Method,
   STRATEGIES,
@@ -13,6 +14,97 @@ const NAMES = Object.keys(STRATEGIES).filter(isStrategy);
 
 /** Keys 0.3 had at the top level that 0.4 keeps under `advanced`, unchanged. */
 const ADVANCED = ["supersedeReads", "progressRatio", "prune", "shake"];
+
+/** What one scope has before the import: its namespace, its 0.4 file and its 0.3 block. */
+export interface ScopeSource {
+  /** Whether Pi's settings document of this scope already has the `context-kit` namespace. */
+  stored: boolean;
+  /** The scope's `context-kit.json`, when that file exists. */
+  file?: { path: string; content: Record<string, unknown> };
+  /** The 0.3 `contextKit` block of Pi's settings document, when it has one. */
+  legacy?: unknown;
+}
+
+/** Flat options to write to one scope's `context-kit` namespace, and the file they come from. */
+export interface SettingsImport {
+  scope: "global" | "project";
+  options: Record<string, unknown>;
+  /** Renamed to `.migrated` after the options are written. */
+  file?: string;
+}
+
+/**
+ * Plans the import of each scope that has no `context-kit` namespace yet. A scope imports its
+ * `context-kit.json` when that file exists, else its 0.3 block. The project block converts over
+ * the global settings as they are after this import, as 0.3 merged them.
+ */
+export function planSettingsImports(
+  global: ScopeSource,
+  project: ScopeSource | undefined,
+): SettingsImport[] {
+  const globalNested = nestedGlobal(global);
+  const imports: SettingsImport[] = [];
+  const globalImport = importOf("global", global, () => globalNested);
+  if (globalImport) imports.push(globalImport);
+  if (project) {
+    const projectImport = importOf("project", project, () =>
+      migrateProject(global.legacy ?? {}, project.legacy, globalNested),
+    );
+    if (projectImport) imports.push(projectImport);
+  }
+  return imports;
+}
+
+function nestedGlobal(global: ScopeSource): Record<string, unknown> {
+  if (global.file) return global.file.content;
+  return global.legacy === undefined ? {} : migrateLegacy(global.legacy);
+}
+
+function importOf(
+  scope: SettingsImport["scope"],
+  source: ScopeSource,
+  legacyNested: () => Record<string, unknown>,
+): SettingsImport | undefined {
+  if (source.stored) return undefined;
+  if (source.file)
+    return {
+      scope,
+      options: flattenSettings(source.file.content),
+      file: source.file.path,
+    };
+  if (source.legacy === undefined) return undefined;
+  return { scope, options: flattenSettings(legacyNested()) };
+}
+
+/**
+ * Converts 0.4 nested options, as `context-kit.json` and the 0.3 conversion write them, to the
+ * flat keys of the `context-kit` namespace. A nested key with an unknown name keeps its name, so
+ * the option schema rejects it.
+ */
+export function flattenSettings(nested: Record<string, unknown>): Record<string, unknown> {
+  const { $schema: _schema, advanced, ...flat } = nested;
+  if (advanced === undefined) return flat;
+  if (!isRecord(advanced)) return { ...flat, advanced };
+  const { prune, shake, ...options } = advanced;
+  return {
+    ...flat,
+    ...options,
+    ...prefixed("prune", prune),
+    ...prefixed("shake", shake),
+  };
+}
+
+/** `{ enabled }` under `prune` becomes `{ pruneEnabled }`; a value that is not an object is kept as it is. */
+function prefixed(prefix: string, value: unknown): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (!isRecord(value)) return { [prefix]: value };
+  return Object.fromEntries(
+    Object.entries(value).map(([key, option]) => [
+      prefix + key.charAt(0).toUpperCase() + key.slice(1),
+      option,
+    ]),
+  );
+}
 
 /**
  * Converts the 0.3 `contextKit` block of Pi's settings into the content of `context-kit.json`

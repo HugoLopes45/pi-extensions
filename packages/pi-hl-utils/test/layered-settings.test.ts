@@ -121,7 +121,7 @@ describe("layered settings resolution", () => {
     const layers = settings.readLayers(manager);
     expect(layers.global).toBeInstanceOf(Error);
     expect(errorMessage(layers.global)).toContain("Invalid global Demo settings/limit");
-    expect(errorMessage(layers.project)).toContain("Invalid project Demo settings");
+    expect(errorMessage(layers.project)).toBe("Invalid project Demo settings: unknown option nope");
     expect(() =>
       settings.readSettings({
         settingsManager: manager,
@@ -242,6 +242,21 @@ describe("layered settings writes", () => {
       () => true,
     );
     expect(JSON.parse(documents.global)).toEqual({ x: 1 });
+  });
+
+  it("keeps an empty namespace when the definition asks for it", async () => {
+    const { documents, manager } = storageHarness(JSON.stringify({ x: 1, demo: { limit: 4 } }));
+    const settings = defineLayeredSettings({
+      ...definition,
+      keepEmptyNamespace: true,
+    });
+    await settings.writeSettings(
+      manager,
+      "global",
+      { action: "inherit", key: "limit" },
+      () => true,
+    );
+    expect(JSON.parse(documents.global)).toEqual({ x: 1, demo: {} });
   });
 
   it("refuses invalid documents and invalid results without writing", async () => {

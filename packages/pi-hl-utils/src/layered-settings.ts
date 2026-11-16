@@ -97,6 +97,8 @@ export interface RewriteNamespaceDocumentInput {
   /** Current file text, or `undefined` when the file is absent. */
   current: string | undefined;
   namespace: string;
+  /** Keep an empty namespace instead of removing it. */
+  keepEmpty?: boolean;
   /** Receives a copy of the stored namespace options and returns its replacement. */
   update: (options: Record<string, unknown>) => Record<string, unknown>;
   /** Builds the error thrown instead of overwriting a document that cannot be safely rewritten. */
@@ -106,7 +108,8 @@ export interface RewriteNamespaceDocumentInput {
 /**
  * Rewrite one namespace of a Pi settings document, preserving every other setting. Strips a
  * leading BOM, refuses documents whose root or namespace is not an object, and removes an empty
- * namespace. Transport-independent: callers run it inside whichever lock and writer they use.
+ * namespace unless `keepEmpty` is set. Transport-independent: callers run it inside whichever
+ * lock and writer they use.
  * @returns The replacement file text.
  */
 export function rewriteNamespaceDocument(input: RewriteNamespaceDocumentInput): string {
@@ -120,7 +123,7 @@ export function rewriteNamespaceDocument(input: RewriteNamespaceDocumentInput): 
   const stored = parsed[input.namespace];
   if (stored !== undefined && !isRecord(stored)) throw input.invalid("namespace", undefined);
   const updated = input.update({ ...stored });
-  if (Object.keys(updated).length === 0) delete parsed[input.namespace];
+  if (Object.keys(updated).length === 0 && !input.keepEmpty) delete parsed[input.namespace];
   else parsed[input.namespace] = updated;
   return `${JSON.stringify(parsed, null, 2)}\n`;
 }
@@ -146,6 +149,8 @@ export interface LayeredSettingsDefinition<
   sessionEntryType?: Entry;
   /** Per-key merge hooks for keys that merge across layers instead of replacing. */
   merge?: Merge;
+  /** Keep the namespace in a settings document after its last option is removed. */
+  keepEmptyNamespace?: boolean;
 }
 
 /**
@@ -270,7 +275,8 @@ export function defineLayeredSettings<
   type OptionKey = keyof Options & keyof Config & string;
   type Layers = LayeredSettingsLayers<Options>;
   type Change = LayeredSettingChange<Options>;
-  const { namespace, label, schema, defaults, sessionEntryType, merge } = definition;
+  const { namespace, label, schema, defaults, sessionEntryType, merge, keepEmptyNamespace } =
+    definition;
   if (!Value.Check(schema, {}))
     throw new Error(`${label} settings schema must make every option optional`);
   const keySchema = Type.KeyOf(schema);
@@ -316,6 +322,10 @@ export function defineLayeredSettings<
     if (value === undefined) return noOptions();
     if (!isOptions(value)) {
       const issue = Value.Errors(schema, value)[0];
+      if (issue?.schemaPath === "#/additionalProperties")
+        throw new Error(
+          `Invalid ${source} ${label} settings: unknown option ${issue.instancePath.slice(1)}`,
+        );
       throw new Error(
         `Invalid ${source} ${label} settings${issue?.instancePath ?? ""}: ${issue?.message ?? "invalid options"}`,
       );
@@ -398,6 +408,7 @@ export function defineLayeredSettings<
       rewriteNamespaceDocument({
         current,
         namespace,
+        keepEmpty: keepEmptyNamespace === true,
         invalid: (reason, cause) =>
           reason === "malformed" && cause
             ? cause

@@ -92,6 +92,31 @@ describe("messages", () => {
       }),
     ).toEqual({ text: "Claude 5h 20% · 7d 50%", level: "success" });
   });
+
+  it("warns from the configured utilization", () => {
+    const limits = {
+      exhausted: false,
+      extraUsage: false,
+      windows: [{ name: "5h" as const, utilization: 0.55 }],
+    };
+    expect(footer(limits, Date.now(), { warnAt: 50 }).level).toBe("warning");
+    expect(footer(limits, Date.now(), { warnAt: 60 }).level).toBe("success");
+  });
+
+  it("shows and judges only the selected windows", () => {
+    const limits = {
+      exhausted: false,
+      extraUsage: false,
+      windows: [
+        { name: "5h" as const, utilization: 0.9 },
+        { name: "7d" as const, utilization: 0.2 },
+      ],
+    };
+    expect(footer(limits, Date.now(), { windows: ["7d"] })).toEqual({
+      text: "Claude 7d 20%",
+      level: "success",
+    });
+  });
 });
 
 describe("access footer", () => {

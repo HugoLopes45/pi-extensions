@@ -1,9 +1,8 @@
 import type { ProviderHeaders } from "@earendil-works/pi-ai";
+import { errorText } from "pi-hl-utils/errors";
 
 import { parseLimitHeaders, parseUsageBody, type Limits } from "./limits.ts";
 import { exhaustedMessage } from "./status.ts";
-
-const USAGE_CACHE_MS = 30_000;
 
 export interface RequestAuth {
   accessToken: string;
@@ -18,6 +17,8 @@ export interface RateLimitDeps {
   /** Returns the raw body of the usage endpoint. */
   fetchUsage: (auth: RequestAuth) => Promise<unknown>;
   onLimits: (limits: Limits) => void;
+  /** Age in milliseconds up to which a usage reply is reused; read on every lookup. */
+  usageCacheMs: () => number;
   now?: () => number;
 }
 
@@ -36,7 +37,7 @@ export function createRateLimits(deps: RateLimitDeps): (auth: RequestAuth) => Re
   let cache: { accessToken: string; at: number; body: unknown } | undefined;
 
   async function usage(auth: RequestAuth): Promise<Limits | undefined> {
-    if (cache?.accessToken !== auth.accessToken || now() - cache.at >= USAGE_CACHE_MS) {
+    if (cache?.accessToken !== auth.accessToken || now() - cache.at >= deps.usageCacheMs()) {
       const body = await deps.fetchUsage(auth);
       cache = { accessToken: auth.accessToken, at: now(), body };
     }
@@ -56,7 +57,7 @@ export function createRateLimits(deps: RateLimitDeps): (auth: RequestAuth) => Re
       try {
         return (await usage(auth)) ?? headerLimits;
       } catch (error) {
-        lookupError = error instanceof Error ? error.message : String(error);
+        lookupError = errorText(error);
         return headerLimits;
       }
     }

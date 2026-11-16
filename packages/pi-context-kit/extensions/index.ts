@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, renameSync } from "node:fs";
 
 import { type Api, getCurrentSystemMessage, type Message, type Model } from "@earendil-works/pi-ai";
 import {
@@ -10,15 +10,21 @@ import {
   generateSummaryWithUsage,
   getAgentDir,
   getLatestCompactionEntry,
-  getSettingsListTheme,
   type ProjectedSessionEntry,
   type SessionBeforeCompactEvent,
   type SessionEntry,
   SettingsManager,
-  type Theme,
   type TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
-import { Container, SettingsList, Text } from "@earendil-works/pi-tui";
+import { errorText } from "pi-hl-utils/errors";
+import {
+  layeredMenuScopes,
+  layeredSettingsSession,
+  type LayeredSettingScope,
+  type LayeredSettingSource,
+} from "pi-hl-utils/layered-settings";
+import { registerSettingsCommand } from "pi-hl-utils/settings-command";
+import { SettingsMenu } from "pi-hl-utils/settings-menu";
 import { Type } from "typebox";
 
 import {
@@ -27,14 +33,20 @@ import {
   firstEntryAfter,
   type Note,
 } from "../src/background.ts";
+import { contextKitCommandSpec } from "../src/command.ts";
 import {
   before,
   type ContextKitConfig,
   ownThreshold,
-  readConfig,
   speculationLead,
   writesHandoff,
 } from "../src/config.ts";
+import {
+  type ContextKitChange,
+  type ContextKitOptionsPatch,
+  contextKitConfig,
+  contextKitSettings,
+} from "../src/context-kit-settings.ts";
 import {
   applyEdits,
   contextTokens,
@@ -44,17 +56,15 @@ import {
 } from "../src/context.ts";
 import { handoffSummary } from "../src/handoff.ts";
 import { type MaintenancePlan, planMaintenance } from "../src/maintain.ts";
-import { migrateLegacy, migrateProject } from "../src/migrate.ts";
-import { requestNote } from "../src/note.ts";
-import { panelItems, settingValue, summaryText } from "../src/panel.ts";
-import { readEntry, searchEntries } from "../src/recall.ts";
 import {
-  createSettings,
-  loadSettings,
-  readSettingsFile,
-  saveSetting,
-  settingsPaths,
-} from "../src/settings-file.ts";
+  contextKitMenuSpec,
+  type ContextKitMenuHost,
+  type ContextKitMenuView,
+} from "../src/menu.ts";
+import { planSettingsImports, type ScopeSource, type SettingsImport } from "../src/migrate.ts";
+import { requestNote } from "../src/note.ts";
+import { readEntry, searchEntries } from "../src/recall.ts";
+import { readSettingsFile, settingsPaths } from "../src/settings-file.ts";
 import { freedNotice, statusText } from "../src/status.ts";
 
 // One closure per session: Pi and pi-subagents load the extension once per session in the same process.
@@ -79,17 +89,33 @@ export default function contextKit(pi: ExtensionAPI): void {
   const paths = (ctx: ExtensionContext) =>
     settingsPaths(getAgentDir(), ctx.cwd, ctx.isProjectTrusted());
 
-  /** Reads the settings files on each use, so a change applies at the next turn. */
-  const settings = (ctx: ExtensionContext): ContextKitConfig => {
-    const files = loadSettings(paths(ctx));
-    const { config, problems } = readConfig(files.raw);
-    const message = [...files.problems, ...problems].join("; ");
+  /** Warns once per distinct set of problems; the warning points to /context-kit. */
+  const report = (ctx: ExtensionContext, problems: string[]) => {
+    const message = problems.join("; ");
     if (message && message !== reported)
       ctx.ui.notify(
         `pi-context-kit settings need attention: ${message}. Type /context-kit to see them.`,
         "warning",
       );
     reported = message;
+  };
+
+  /** Reads Pi's settings files on each call, so a change applies at the next turn. */
+  const readSettingsOf = (ctx: ExtensionContext) => {
+    const session = layeredSettingsSession(ctx);
+    const lenient = contextKitSettings.readSettingsLeniently(session);
+    const { config, problems } = contextKitConfig(lenient);
+    return {
+      manager: session.settingsManager,
+      lenient,
+      config,
+      problems: [...lenient.invalid.map((error) => error.message), ...problems],
+    };
+  };
+
+  const settings = (ctx: ExtensionContext): ContextKitConfig => {
+    const { config, problems } = readSettingsOf(ctx);
+    report(ctx, problems);
     return config;
   };
 
@@ -152,7 +178,7 @@ export default function contextKit(pi: ExtensionAPI): void {
   };
 
   const warn = (ctx: ExtensionContext, error: unknown, fallback: string, what = "handoff note") => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     ctx.ui.notify(`pi-context-kit: ${what} failed (${message}). ${fallback}`, "warning");
   };
 
@@ -479,44 +505,61 @@ export default function contextKit(pi: ExtensionAPI): void {
     background.invalidate(epoch(branch), branch);
     showStatus(ctx);
   });
-  /** Writes the 0.3 settings of each scope to its own file, unless that file exists. */
-  const migrate = (ctx: ExtensionContext) => {
-    const { global, project } = paths(ctx);
-    const piSettings = SettingsManager.create(ctx.cwd, getAgentDir(), {
-      projectTrusted: ctx.isProjectTrusted(),
-    });
-    // Pi reports its own unreadable settings. The project file depends on the global block, so
-    // neither moves until Pi reads both.
-    if (piSettings.drainErrors().length > 0) return;
-    const oldGlobal: unknown = Reflect.get(piSettings.getGlobalSettings(), "contextKit");
-    const oldProject: unknown = Reflect.get(piSettings.getProjectSettings(), "contextKit");
-    const scopes = [
-      { old: oldGlobal, file: global, content: () => migrateLegacy(oldGlobal) },
-      {
-        old: oldProject,
-        file: project,
-        // Runs after the global file is written, which the project file then overrides.
-        content: () => migrateProject(oldGlobal, oldProject, readSettingsFile(global)),
-      },
-    ];
-    for (const { old, file, content } of scopes) {
-      if (old === undefined || !file) continue;
-      try {
-        if (!createSettings(file, content())) continue;
-      } catch (error) {
-        warn(ctx, error, "Defaults apply until it works.", `saving ${file}`);
-        // The project file depends on the global file, so both wait for the next start.
-        return;
-      }
-      ctx.ui.notify(
-        `pi-context-kit moved its settings to ${file}. The "contextKit" entry in Pi's settings.json is no longer used.`,
-        "info",
-      );
-    }
-  };
+  /** One settings write per scope: an invalid option throws before any write. */
+  async function importOptions(manager: SettingsManager, item: SettingsImport): Promise<void> {
+    const patch = parseImported(item);
+    // `key` is read only by `inherit`, so any option name serves for `set`.
+    await contextKitSettings.writeSettings(
+      manager,
+      item.scope,
+      { action: "set", key: "enabled", patch },
+      () => true,
+    );
+  }
 
-  pi.on("session_start", (_event, ctx) => {
-    migrate(ctx);
+  /** Imports each scope's context-kit.json or 0.3 block, unless that scope already has a namespace. */
+  async function migrate(ctx: ExtensionContext): Promise<void> {
+    const manager = layeredSettingsSession(ctx).settingsManager;
+    // Pi reports its own unreadable settings. The project import depends on the global one, so
+    // neither moves until Pi reads both.
+    if (manager.drainErrors().length > 0) return;
+    const { global, project } = paths(ctx);
+    try {
+      const imports = planSettingsImports(
+        scopeSource(manager.getGlobalSettings(), global),
+        project === undefined ? undefined : scopeSource(manager.getProjectSettings(), project),
+      );
+      const renamed: string[] = [];
+      for (const item of imports) {
+        await importOptions(manager, item);
+        if (item.file) {
+          try {
+            renameSync(item.file, `${item.file}.migrated`);
+          } catch (error) {
+            ctx.ui.notify(
+              `pi-context-kit: settings were imported, but renaming ${item.file} failed (${errorText(error)}). The file stays in place and is not imported again.`,
+              "warning",
+            );
+            return;
+          }
+          renamed.push(`${item.file} was renamed to ${item.file}.migrated.`);
+        }
+      }
+      if (imports.length > 0)
+        ctx.ui.notify(
+          [
+            'pi-context-kit moved its settings into Pi\'s settings.json under "context-kit". The 0.3 "contextKit" entry is no longer read.',
+            ...renamed,
+          ].join(" "),
+          "info",
+        );
+    } catch (error) {
+      warn(ctx, error, "Defaults apply until it works.", "moving settings");
+    }
+  }
+
+  pi.on("session_start", async (_event, ctx) => {
+    await migrate(ctx);
     showStatus(ctx);
   });
   // A compaction returned from turn_end emits no session_compact.
@@ -530,66 +573,81 @@ export default function contextKit(pi: ExtensionAPI): void {
     statusContext = undefined;
   });
 
-  /** Returns whether the setting was saved. */
-  const choose = (ctx: ExtensionContext, id: string, value: string) => {
-    try {
-      saveSetting(paths(ctx), id, settingValue(id, value));
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui.notify(`pi-context-kit: ${message}`, "error");
-      return false;
-    } finally {
+  /** Persists one change: the session's entries, or the scope's settings through Pi's backend. */
+  async function applyChange(
+    ctx: ExtensionContext,
+    scope: LayeredSettingScope,
+    change: ContextKitChange,
+  ): Promise<void> {
+    await contextKitSettings.writeChange(
+      pi,
+      layeredSettingsSession(ctx),
+      scope,
+      change,
+      () => true,
+    );
+  }
+
+  /** What the menu shows, read again after each change. */
+  const menuView = (ctx: ExtensionContext): ContextKitMenuView => {
+    const read = readSettingsOf(ctx);
+    return {
+      headline: [statusOf(ctx, read.config, liveTokens(ctx)) ?? "", ...read.problems],
+      scopes: layeredMenuScopes(read.manager),
+      // The strategy supplies the method order and background unless the scope sets them.
+      settings: {
+        ...read.lenient.settings,
+        background: read.config.background,
+        methodOrder: read.config.methodOrder,
+      },
+      sources: strategySources(read.lenient.sources),
+      authored: read.lenient.authored,
+    };
+  };
+
+  /** An unset background or method order comes from the strategy, so it shows where that is set. */
+  const strategySources = (sources: Record<string, LayeredSettingSource>) => {
+    const derived = (key: string): LayeredSettingSource => {
+      const own = sources[key] ?? "default";
+      return own === "default" ? (sources.strategy ?? "default") : own;
+    };
+    return {
+      ...sources,
+      background: derived("background"),
+      methodOrder: derived("methodOrder"),
+    };
+  };
+
+  const menuHost = (ctx: ExtensionContext): ContextKitMenuHost => ({
+    view: () => menuView(ctx),
+    apply: async (scope, change) => {
+      await applyChange(ctx, scope, change);
       showStatus(ctx);
-    }
-  };
+    },
+  });
 
-  const panelHeader = (ctx: ExtensionContext, theme: Theme) => {
-    const status = statusOf(ctx, settings(ctx), liveTokens(ctx)) ?? "";
-    const { global, project } = paths(ctx);
-    const files =
-      project && existsSync(project) ? `${global}, and for this project ${project}` : global;
-    return `${theme.fg("accent", theme.bold("pi-context-kit"))}  ${status}\n${theme.fg("dim", `Saved in ${files}`)}`;
-  };
-
-  pi.registerCommand("context-kit", {
+  registerSettingsCommand(pi, {
+    name: "context-kit",
     description: "Show and change pi-context-kit settings",
-    handler: async (_args, ctx) => {
+    optionKeys: contextKitSettings.optionKeys,
+    parse: contextKitCommandSpec,
+    start(ctx) {
       // The settings warning points here, so it shows again.
       reported = "";
-      const config = settings(ctx);
-      if (ctx.mode !== "tui") {
-        ctx.ui.notify(summaryText(config, paths(ctx).global), "info");
-        return;
-      }
-      await ctx.ui.custom<undefined>((tui, theme, _keybindings, done) => {
-        const items = panelItems(config);
-        const saved = new Map<string, string>(items.map((item) => [item.id, item.currentValue]));
-        const header = new Text(panelHeader(ctx, theme));
-        const list = new SettingsList(
-          items,
-          items.length,
-          getSettingsListTheme(),
-          (id, value) => {
-            // The list shows the new value before this runs.
-            if (choose(ctx, id, value)) saved.set(id, value);
-            else list.updateValue(id, saved.get(id) ?? value);
-            header.setText(panelHeader(ctx, theme));
-          },
-          () => done(undefined),
-        );
-        const container = new Container();
-        container.addChild(header);
-        container.addChild(list);
-        return {
-          render: (width: number) => container.render(width),
-          invalidate: () => container.invalidate(),
-          handleInput: (data: string) => {
-            list.handleInput(data);
-            tui.requestRender();
-          },
-        };
-      });
+      return {
+        status: () => ctx.ui.notify(summaryText(settings(ctx)), "info"),
+        async menu() {
+          await ctx.ui.custom<void>(
+            (tui, theme, _keybindings, done) =>
+              new SettingsMenu(contextKitMenuSpec(menuHost(ctx)), { tui, theme }, () => done()),
+          );
+        },
+        async change(command) {
+          await applyChange(ctx, command.scope, command);
+          showStatus(ctx);
+        },
+        fail: (cause) => ctx.ui.notify(`pi-context-kit: ${errorText(cause)}`, "error"),
+      };
     },
   });
 
@@ -703,4 +761,39 @@ function recentStart(ctx: ExtensionContext, keepRecentTokens: number): string | 
   }
   const cut = findCutPoint(entries, 0, entries.length, keepRecentTokens);
   return entries[cut.firstKeptEntryIndex]?.id;
+}
+
+/** The scope's document with its `context-kit` namespace, and its file when that file exists. */
+function scopeSource(document: object, path: string): ScopeSource {
+  const source: ScopeSource = {
+    stored: Reflect.get(document, "context-kit") !== undefined,
+    legacy: Reflect.get(document, "contextKit"),
+  };
+  return existsSync(path) ? { ...source, file: { path, content: readSettingsFile(path) } } : source;
+}
+
+/** Validates an import's options; an error names the `context-kit.json` they come from. */
+function parseImported(item: SettingsImport): ContextKitOptionsPatch {
+  try {
+    return contextKitSettings.parseOptions(item.options, item.scope);
+  } catch (error) {
+    if (!item.file) throw error;
+    const message = errorText(error);
+    throw new Error(`${item.file} is invalid (${message})`, { cause: error });
+  }
+}
+
+/** One-line status for modes without the settings menu. */
+function summaryText(config: ContextKitConfig): string {
+  if (!config.enabled) return "pi-context-kit: automatic cleanup off. Settings: /context-kit";
+  const at =
+    config.threshold === "pi"
+      ? "Pi's limit"
+      : "tokens" in config.threshold
+        ? `${config.threshold.tokens} tokens`
+        : `${config.threshold.percent}%`;
+  const method = config.customOrder
+    ? `custom methods (${config.methodOrder.join(", ") || "none"})`
+    : config.strategy;
+  return `pi-context-kit: automatic cleanup at ${at}, with ${method}. Settings: /context-kit`;
 }

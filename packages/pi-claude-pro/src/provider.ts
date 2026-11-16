@@ -25,6 +25,8 @@ export interface ProviderDeps {
   /** Full context windows from Pi's model catalog, keyed by model id. */
   contextWindows: ReadonlyMap<string, number>;
   watchRequest: (auth: RequestAuth) => RequestWatch;
+  /** The pinned Claude Code version; undefined learns the version a model requires. */
+  claudeCodeVersion: () => string | undefined;
 }
 
 export function isSubscriptionToken(apiKey: string | undefined): boolean {
@@ -39,6 +41,12 @@ export function isFirstParty(baseUrl: string): boolean {
   }
 }
 
+/** The version a 400 reply names as required; undefined for any other reply. */
+async function requiredVersion(response: Response): Promise<string | undefined> {
+  if (response.status !== 400) return undefined;
+  return REQUIRED_VERSION.exec(await response.clone().text())?.[1];
+}
+
 /**
  * Wraps Pi's Anthropic stream so subscription tokens are sent as Claude Code
  * requests. Requests with an API key pass through unchanged.
@@ -46,12 +54,14 @@ export function isFirstParty(baseUrl: string): boolean {
 export function createProviderStream(deps: ProviderDeps): StreamFn {
   // Anthropic names the Claude Code version a model requires, so the bundled
   // version never has to follow new models.
-  let version = BUNDLED_CLAUDE_CODE_VERSION;
+  let learned = BUNDLED_CLAUDE_CODE_VERSION;
   return (model, context, options) => {
     const accessToken = options?.apiKey;
     if (!accessToken || !isSubscriptionToken(accessToken))
       return deps.stream(model, context, options);
 
+    const pinned = deps.claudeCodeVersion();
+    const version = pinned ?? learned;
     const headers = clientHeaders(options.headers, version, options.sessionId);
     const firstParty = isFirstParty(model.baseUrl);
     const watch = deps.watchRequest({
@@ -88,13 +98,10 @@ export function createProviderStream(deps: ProviderDeps): StreamFn {
               ? JSON.stringify(addThreadBilling(JSON.parse(init.body), billing))
               : init?.body;
           let response = await send(body);
-          const required =
-            response.status === 400
-              ? REQUIRED_VERSION.exec(await response.clone().text())?.[1]
-              : undefined;
-          if (required && typeof body === "string") {
-            version = required;
-            const retried = billingHeader(version, userText, firstParty);
+          const required = await requiredVersion(response);
+          if (required && pinned === undefined && typeof body === "string") {
+            learned = required;
+            const retried = billingHeader(required, userText, firstParty);
             await response.body?.cancel();
             // Anthropic checks the billing version, so the user-agent can stay.
             response = await send(JSON.stringify(rewriteSystem(JSON.parse(body), retried)));

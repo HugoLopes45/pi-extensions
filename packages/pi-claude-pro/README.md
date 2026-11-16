@@ -1,10 +1,6 @@
 # pi-claude-pro: use your Claude Pro, Max or Ultra plan in Pi
 
-[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/pi-claude-pro)](https://www.npmjs.com/package/pi-claude-pro)
-[![Pi package](https://img.shields.io/badge/pi.dev-package-blue)](https://pi.dev/packages/pi-claude-pro)
-[![Node.js](https://img.shields.io/node/v/pi-claude-pro)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/npm/l/pi-claude-pro)](LICENSE)
+[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/pi-claude-pro)](https://www.npmjs.com/package/pi-claude-pro) [![Pi package](https://img.shields.io/badge/pi.dev-package-blue)](https://pi.dev/packages/pi-claude-pro) [![Node.js](https://img.shields.io/node/v/pi-claude-pro)](https://nodejs.org) [![License: MIT](https://img.shields.io/npm/l/pi-claude-pro)](LICENSE)
 
 **Use the Claude plan you already pay for in the [Pi](https://pi.dev) coding agent.** Log in once with your Claude account and run Claude Opus, Sonnet, Haiku and Fable in Pi. Requests count against your plan limits instead of an API key. The footer shows your 5-hour and weekly usage after each request, and warns you when Anthropic bills a request as extra usage.
 
@@ -56,7 +52,9 @@ When Anthropic bills a request as extra usage, the footer shows it even if your 
 
 ## Commands
 
-Run `/claude-pro` to see the current model, whether its requests use your plan, and the usage of each limit with its reset time. When requests are billed as extra usage, the command tells you the likely cause.
+Run `/claude-pro` to see the current model, whether its requests use your plan, and the usage of each limit with its reset time. When requests are billed as extra usage, the command tells you the likely cause. In the terminal interface, bare `/claude-pro` opens the settings menu under that report.
+
+Without the menu, use `/claude-pro status`, `/claude-pro on` and `/claude-pro off` (footer), `/claude-pro inherit [key]`, and `/claude-pro set <key> <JSON>`. Add `--global` or `--project` to write that scope. A change without a scope flag applies to the current session only. `inherit` without a key clears `footer`.
 
 ## How it works
 
@@ -67,6 +65,19 @@ Run `/claude-pro` to see the current model, whether its requests use your plan, 
 - The extension moves Pi's documentation section from the system prompt to the start of the first user message. Only complete `<docs>` blocks that start with `Pi documentation` are moved. Custom documentation, instructions, tools and skills stay in place, including prompts that other extensions return.
 - Anthropic can bill a request as extra usage when the system prompt looks like a third-party app. Pi's documentation section can cause this, so the extension moves it.
 - Requests that use an Anthropic API key are not changed.
+
+## Settings
+
+Set the options under the `claude-pro` key of `~/.pi/agent/settings.json`, or of `.pi/settings.json` in a trusted project. A session change lives in the session file and wins over both files. A missing option inherits the next layer down, then its default. An invalid settings layer is ignored: the other layers and the defaults apply, and a warning names the error once.
+
+| Option              | Allowed values                      | Default         | What it does                                                                                       |
+| ------------------- | ----------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
+| `footer`            | `true`, `false`                     | `true`          | `false` hides the usage footer.                                                                    |
+| `warnAt`            | A whole number, 1-100               | `80`            | Usage percentage from which the footer and `/claude-pro` show a warning.                           |
+| `extraUsageWarning` | `true`, `false`                     | `true`          | `false` stops the notice when Anthropic bills a request as extra usage.                            |
+| `claudeCodeVersion` | A version such as `2.1.400`         | Unset (bundled) | Claude Code version the requests claim. Setting it stops the automatic retry at a newer version.   |
+| `usageCacheSeconds` | A whole number, 0 or more           | `30`            | Seconds a usage reply is reused. `0` looks it up on every request.                                 |
+| `footerWindows`     | A list of `"5h"`, `"7d"`, `"Fable"` | All three       | Limits the footer shows and judges. Lists at least one window; set `footer` to `false` to hide it. |
 
 ## Limits
 

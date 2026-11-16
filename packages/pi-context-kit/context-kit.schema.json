@@ -2,11 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unpkg.com/pi-context-kit/context-kit.schema.json",
   "title": "pi-context-kit settings",
-  "description": "~/.pi/agent/context-kit.json, or .pi/context-kit.json in a trusted project.",
+  "description": "The \"context-kit\" namespace of Pi's settings.json: ~/.pi/agent/settings.json, or .pi/settings.json in a trusted project.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string" },
     "enabled": {
       "description": "false stops context maintenance and handoff notes. recall stays available.",
       "type": "boolean",
@@ -29,81 +28,63 @@
       "enum": ["balanced", "frugal", "pi-summary"],
       "default": "balanced"
     },
-    "advanced": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "methodOrder": {
-          "description": "Replaces the method order of the strategy. Methods after \"soft\" never run.",
-          "type": "array",
-          "items": { "enum": ["handoff", "shake", "soft"] }
-        },
-        "background": {
-          "description": "Write the handoff note in the background before the threshold. The strategy sets the default.",
-          "type": "boolean"
-        },
-        "supersedeReads": {
-          "description": "Replace an older read of a file that was read again.",
-          "type": "boolean",
-          "default": true
-        },
-        "progressRatio": {
-          "description": "Each method must bring the context to this fraction of the threshold, or the next method runs.",
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "maximum": 1,
-          "default": 0.8
-        },
-        "prune": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean", "default": true },
-            "protectTokens": {
-              "description": "The newest tool outputs, up to this many tokens, are never pruned.",
-              "type": "integer",
-              "minimum": 0,
-              "default": 40000
-            },
-            "minSavings": {
-              "description": "Prune only when this many tokens or more are removed.",
-              "type": "integer",
-              "minimum": 0,
-              "default": 20000
-            },
-            "minTokens": {
-              "description": "Tool outputs smaller than this are never pruned.",
-              "type": "integer",
-              "minimum": 0,
-              "default": 50
-            }
-          }
-        },
-        "shake": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "protectTokens": {
-              "description": "The newest context, up to this many tokens, is never shaken.",
-              "type": "integer",
-              "minimum": 0,
-              "default": 16000
-            },
-            "minSavings": {
-              "description": "Shake only when this many tokens or more are removed.",
-              "type": "integer",
-              "minimum": 0,
-              "default": 4000
-            },
-            "blockMinTokens": {
-              "description": "Code and XML blocks smaller than this are never shaken.",
-              "type": "integer",
-              "minimum": 0,
-              "default": 400
-            }
-          }
-        }
-      }
+    "methodOrder": {
+      "description": "Replaces the method order of the strategy. Methods after \"soft\" never run.",
+      "type": "array",
+      "items": { "enum": ["handoff", "shake", "soft"] }
+    },
+    "background": {
+      "description": "Write the handoff note in the background before the threshold. The strategy sets the default.",
+      "type": "boolean"
+    },
+    "supersedeReads": {
+      "description": "Replace an older read of a file that was read again.",
+      "type": "boolean",
+      "default": true
+    },
+    "progressRatio": {
+      "description": "Each method must bring the context to this fraction of the threshold, or the next method runs.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1,
+      "default": 0.8
+    },
+    "pruneEnabled": { "type": "boolean", "default": true },
+    "pruneProtectTokens": {
+      "description": "The newest tool outputs, up to this many tokens, are never pruned.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 40000
+    },
+    "pruneMinSavings": {
+      "description": "Prune only when this many tokens or more are removed.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 20000
+    },
+    "pruneMinTokens": {
+      "description": "Tool outputs smaller than this are never pruned.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 50
+    },
+    "shakeProtectTokens": {
+      "description": "The newest context, up to this many tokens, is never shaken.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 16000
+    },
+    "shakeMinSavings": {
+      "description": "Shake only when this many tokens or more are removed.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 4000
+    },
+    "shakeBlockMinTokens": {
+      "description": "Code and XML blocks smaller than this are never shaken.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 400
     }
   }
 }

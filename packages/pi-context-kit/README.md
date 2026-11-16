@@ -1,10 +1,6 @@
 # pi-context-kit: long Pi sessions that stay sharp
 
-[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/pi-context-kit)](https://www.npmjs.com/package/pi-context-kit)
-[![Pi package](https://img.shields.io/badge/pi.dev-package-blue)](https://pi.dev/packages/pi-context-kit)
-[![Node.js](https://img.shields.io/node/v/pi-context-kit)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/npm/l/pi-context-kit)](LICENSE)
+[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/pi-context-kit)](https://www.npmjs.com/package/pi-context-kit) [![Pi package](https://img.shields.io/badge/pi.dev-package-blue)](https://pi.dev/packages/pi-context-kit) [![Node.js](https://img.shields.io/node/v/pi-context-kit)](https://nodejs.org) [![License: MIT](https://img.shields.io/npm/l/pi-context-kit)](LICENSE)
 
 **Pi compaction and context management for the [Pi coding agent](https://github.com/earendil-works/pi).** pi-context-kit clears stale file reads and old tool outputs out of the context window, writes the handoff summary in the background before Pi needs it, and keeps the original text of the current branch one `recall` search away.
 
@@ -103,13 +99,15 @@ After pi-context-kit shortens old outputs, Pi shows a notice, for example: `pi-c
 
 To change the settings, type `/context-kit` and press Enter. Select a line with the arrow keys and press Enter to change its value. The change is saved at once and applies from the next turn. Press Escape to close the panel.
 
-| Panel line                   | Choices                                               | Setting in the file                                  |
+The panel has a scope row. Choose the session, the global settings, or the project settings when the project is trusted. The first three lines are the main settings:
+
+| Panel line                   | Choices                                               | Setting                                              |
 | ---------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
 | Automatic cleanup            | On, Off                                               | `enabled`                                            |
 | Clean up when the context is | 50% to 90% full, At Pi's limit                        | `threshold`                                          |
 | Cleanup method               | Summary notes (recommended), Trim first, Pi's summary | `strategy`: `"balanced"`, `"frugal"`, `"pi-summary"` |
 
-The panel does not show the Cleanup method line when `advanced.methodOrder` is in the file, because that setting replaces the method.
+Commands write the same values, for example `/context-kit off --global` turns cleanup off in the global settings. `/context-kit set threshold 8000` sets a value for this session only. `/context-kit inherit threshold --project` removes the project value. Without `--global` or `--project`, a command writes to the session.
 
 Outside the interactive mode, `/context-kit` shows the current settings in one line.
 
@@ -138,16 +136,13 @@ Outside the interactive mode, `/context-kit` shows the current settings in one l
 
 ### 1. Old file reads are replaced
 
-Sometimes the model reads the same file two times. The first copy is then old.
-pi-context-kit replaces the old copy with this text: `[Superseded by a newer read of this file]`.
+Sometimes the model reads the same file two times. The first copy is then old. pi-context-kit replaces the old copy with this text: `[Superseded by a newer read of this file]`.
 
-It does this only when the newer read covers all of the old read. If the newer read was cut short, the old copy stays.
-It does this only when the context is above the threshold, in the same change as pruning, shaking or compaction. Each change to old text makes the provider read all later text again without its cache. With Anthropic, it also removes the model's earlier reasoning from the request. One change near the threshold costs less than one change at each turn.
+It does this only when the newer read covers all of the old read. If the newer read was cut short, the old copy stays. It does this only when the context is above the threshold, in the same change as pruning, shaking or compaction. Each change to old text makes the provider read all later text again without its cache. With Anthropic, it also removes the model's earlier reasoning from the request. One change near the threshold costs less than one change at each turn.
 
 ### 2. A handoff note is prepared in advance
 
-Before the context reaches the threshold, the session model writes a handoff note in the background. Your work does not stop.
-The note starts one eighth of the threshold early, with a maximum of 32,000 tokens. With a threshold of 150,000 tokens, it starts at approximately 131,250 tokens.
+Before the context reaches the threshold, the session model writes a handoff note in the background. Your work does not stop. The note starts one eighth of the threshold early, with a maximum of 32,000 tokens. With a threshold of 150,000 tokens, it starts at approximately 131,250 tokens.
 
 The note uses the same sections as Pi's summary. It also lists the files that were read and changed.
 
@@ -179,16 +174,13 @@ The `recall` tool reads original session text, not the shortened context sent to
 - search earlier conversation text on the current branch, including removed and summarized messages;
 - read an entry's text by ID, with pagination for large entries.
 
-Other branches and sessions are excluded. System prompt entries are not searched.
-Shell commands explicitly excluded from model context with `!!` are not available through `recall`.
+Other branches and sessions are excluded. System prompt entries are not searched. Shell commands explicitly excluded from model context with `!!` are not available through `recall`.
 
-Images remain in the original session entries, but `recall` returns only their MIME types, not image content.
-The model must call `recall` to retrieve a missing detail. Retrieval is not automatic.
+Images remain in the original session entries, but `recall` returns only their MIME types, not image content. The model must call `recall` to retrieve a missing detail. Retrieval is not automatic.
 
 ## What maintenance preserves
 
-File-read replacement, pruning, and shaking do not rewrite the original session entries.
-In the model's context, these steps preserve:
+File-read replacement, pruning, and shaking do not rewrite the original session entries. In the model's context, these steps preserve:
 
 - Your messages, including your instructions and images.
 - The model's tool calls and reasoning. Anthropic can still drop the reasoning after an edited message (see [Old file reads are replaced](#1-old-file-reads-are-replaced)).
@@ -198,26 +190,32 @@ Compaction is different: it replaces older context with a summary, including old
 
 ## Settings
 
-This section is for users who edit the settings file. The panel changes the three main settings; the file also has the advanced settings.
+This section is for users who edit the settings. The `/context-kit` panel lists every setting, one line each. The main settings come first in this section.
 
 ### The settings files
 
-| File                                       | Applies to                                                                                                      |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `~/.pi/agent/context-kit.json`             | All your projects. `~` is your home folder.                                                                     |
-| `.pi/context-kit.json` in a project folder | Only this project, and only when you trust the project in Pi. Its values replace the values of the global file. |
+pi-context-kit keeps its settings in the `context-kit` entry of Pi's `settings.json`. Three layers apply, the later one wins:
 
-You do not need to set all settings. A missing setting uses its default. pi-context-kit reads the files again at each turn, so you do not need to restart Pi. The panel writes to the project file when that file sets the setting, otherwise to the global file.
+| Layer   | File                             | Applies to                                                                                                                          |
+| ------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Global  | `~/.pi/agent/settings.json`      | All your projects. `~` is your home folder.                                                                                         |
+| Project | `.pi/settings.json` in a project | Only this project, and only when you trust the project in Pi. Its values replace the values of the global file.                     |
+| Session | Entries of the current session   | This session only. It replaces the values of both files. Commands write here unless you name a file with `--global` or `--project`. |
 
-Add the `$schema` line to get completion and checks in editors such as VS Code:
+Write the values in the `context-kit` entry, like this:
 
 ```json
 {
-  "$schema": "https://unpkg.com/pi-context-kit/context-kit.schema.json",
-  "threshold": "70%",
-  "strategy": "frugal"
+  "context-kit": {
+    "threshold": "70%",
+    "strategy": "frugal"
+  }
 }
 ```
+
+The package file `context-kit.schema.json` describes the `context-kit` entry for editors. Do not add a `$schema` key to the entry: it is not a setting.
+
+You do not need to set all settings. A missing setting uses its default. Pi applies a change from the next turn, so you do not need to restart Pi.
 
 ### Main settings
 
@@ -239,60 +237,74 @@ Add the `$schema` line to get completion and checks in editors such as VS Code:
 
 ### Advanced settings
 
-Put these settings in an `advanced` block. Most users never need them.
+Put these settings in the `context-kit` entry under the flat names in the table. Most users never need them.
 
 ```json
 {
-  "advanced": {
+  "context-kit": {
     "methodOrder": ["handoff", "shake", "soft"],
     "background": true,
     "supersedeReads": true,
     "progressRatio": 0.8,
-    "prune": { "enabled": true, "protectTokens": 40000, "minSavings": 20000, "minTokens": 50 },
-    "shake": { "protectTokens": 16000, "minSavings": 4000, "blockMinTokens": 400 }
+    "pruneEnabled": true,
+    "pruneProtectTokens": 40000,
+    "pruneMinSavings": 20000,
+    "pruneMinTokens": 50,
+    "shakeProtectTokens": 16000,
+    "shakeMinSavings": 4000,
+    "shakeBlockMinTokens": 400
   }
 }
 ```
 
-| Setting                | Default         | What it does                                                                                                                                                                                                                                                               |
-| ---------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `methodOrder`          | From `strategy` | Replaces the method order of the strategy. Allowed values: `"handoff"`, `"shake"`, `"soft"`. Methods after `"soft"` never run. Without `"handoff"` before `"soft"`, no handoff note is written, also on `/compact`. An empty list `[]` only replaces old reads and prunes. |
-| `background`           | From `strategy` | `true` writes the handoff note in the background, one eighth of the threshold early (maximum 32,000 tokens). `false` writes it at the threshold, and your work waits for it.                                                                                               |
-| `supersedeReads`       | `true`          | Replaces the old copy of a file that the model read again.                                                                                                                                                                                                                 |
-| `progressRatio`        | `0.8`           | Each method must bring the context to this fraction of the threshold, otherwise its result is not used and the next method runs. Above 0, up to 1.                                                                                                                         |
-| `prune.enabled`        | `true`          | `false` never prunes tool outputs.                                                                                                                                                                                                                                         |
-| `prune.protectTokens`  | `40000`         | The newest tool outputs, up to this number of tokens, are never pruned.                                                                                                                                                                                                    |
-| `prune.minSavings`     | `20000`         | Pruning occurs only if it removes at least this number of tokens.                                                                                                                                                                                                          |
-| `prune.minTokens`      | `50`            | Tool outputs smaller than this are never pruned.                                                                                                                                                                                                                           |
-| `shake.protectTokens`  | `16000`         | The newest context, up to this number of tokens, is never shaken. Your own messages are never shaken.                                                                                                                                                                      |
-| `shake.minSavings`     | `4000`          | Shaking occurs only if it removes at least this number of tokens.                                                                                                                                                                                                          |
-| `shake.blockMinTokens` | `400`           | Code and XML blocks smaller than this are never shaken.                                                                                                                                                                                                                    |
+The flat names replace the nested names of 0.4 `context-kit.json`: `prune.enabled` is `pruneEnabled`, `prune.protectTokens` is `pruneProtectTokens`, `prune.minSavings` is `pruneMinSavings`, `prune.minTokens` is `pruneMinTokens`, and `shake.protectTokens`, `shake.minSavings` and `shake.blockMinTokens` become `shakeProtectTokens`, `shakeMinSavings` and `shakeBlockMinTokens`.
+
+| Setting               | Default         | What it does                                                                                                                                                                                                                                                               |
+| --------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `methodOrder`         | From `strategy` | Replaces the method order of the strategy. Allowed values: `"handoff"`, `"shake"`, `"soft"`. Methods after `"soft"` never run. Without `"handoff"` before `"soft"`, no handoff note is written, also on `/compact`. An empty list `[]` only replaces old reads and prunes. |
+| `background`          | From `strategy` | `true` writes the handoff note in the background, one eighth of the threshold early (maximum 32,000 tokens). `false` writes it at the threshold, and your work waits for it.                                                                                               |
+| `supersedeReads`      | `true`          | Replaces the old copy of a file that the model read again.                                                                                                                                                                                                                 |
+| `progressRatio`       | `0.8`           | Each method must bring the context to this fraction of the threshold, otherwise its result is not used and the next method runs. Above 0, up to 1.                                                                                                                         |
+| `pruneEnabled`        | `true`          | `false` never prunes tool outputs.                                                                                                                                                                                                                                         |
+| `pruneProtectTokens`  | `40000`         | The newest tool outputs, up to this number of tokens, are never pruned.                                                                                                                                                                                                    |
+| `pruneMinSavings`     | `20000`         | Pruning occurs only if it removes at least this number of tokens.                                                                                                                                                                                                          |
+| `pruneMinTokens`      | `50`            | Tool outputs smaller than this are never pruned.                                                                                                                                                                                                                           |
+| `shakeProtectTokens`  | `16000`         | The newest context, up to this number of tokens, is never shaken. Your own messages are never shaken.                                                                                                                                                                      |
+| `shakeMinSavings`     | `4000`          | Shaking occurs only if it removes at least this number of tokens.                                                                                                                                                                                                          |
+| `shakeBlockMinTokens` | `400`           | Code and XML blocks smaller than this are never shaken.                                                                                                                                                                                                                    |
 
 ### When a setting is incorrect
 
-pi-context-kit checks each value. If a value is incorrect, Pi shows a warning and the setting uses its default. The other settings still apply. Example: with `"threshold": "150000"` (a text in quotes, not a number), Pi shows:
+pi-context-kit checks every value of a layer. If one value is incorrect, pi-context-kit ignores that whole layer, the global file or the project file. The other layer still applies, and defaults apply to every setting that no remaining layer sets. Pi shows a warning that names the layer and the problem.
 
-```text
-pi-context-kit settings need attention: threshold must be a positive integer (tokens), a percentage such as "75%", or "pi" (default used). Type /context-kit to see them.
-```
-
-Pi also warns about a setting name with a spelling mistake, a file that is not valid JSON, and settings that have no effect, for example `advanced.background` without a handoff note in the method order.
+Pi also warns about an unknown setting name, which makes its layer incorrect, and about a settings file that is not valid JSON.
 
 ### Upgrade from 0.3
 
-You do not need to do anything. Version 0.4 reads its own file. At the first start, it copies the `contextKit` block of Pi's `settings.json` to `~/.pi/agent/context-kit.json` (and the block of a trusted project to `.pi/context-kit.json`), with the same behavior, and shows a notice once. The project file gets only the settings that the project block changed, because 0.3 used the global block for the others. It does not change Pi's `settings.json`; you can delete the `contextKit` block, which is no longer used. If `context-kit.json` already exists, nothing is copied. If you had no `contextKit` block, 0.4 starts maintenance at the new default of `"75%"`; to wait for Pi's limit as before, set `"threshold": "pi"`. The table shows how the values are converted.
+You do not need to do anything. At each start, pi-context-kit moves its settings into the `context-kit` entry once for each layer that has no such entry.
 
-| 0.3 (`contextKit` in `settings.json`)               | 0.4 (`context-kit.json`)                                                                                                                                       |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `thresholdTokens: 150000`                           | `threshold: 150000`                                                                                                                                            |
-| `thresholdPercent: 75`                              | `threshold: "75%"`                                                                                                                                             |
-| Both `thresholdTokens` and `thresholdPercent`       | `threshold` with the number of tokens                                                                                                                          |
-| No threshold (Pi's limit)                           | `threshold: "pi"`. The default for new users is `"75%"`.                                                                                                       |
-| `methodOrder: ["shake", "handoff", "soft"]`         | `strategy: "frugal"`, with `advanced.background: true` unless `asyncEnabled` was `false`                                                                       |
-| `methodOrder: ["soft"]`                             | `strategy: "pi-summary"`                                                                                                                                       |
-| Other `methodOrder` values                          | `advanced.methodOrder`, without `"remote"` and `"snapcompact"`, which 0.3 already skipped. A list with an unknown method becomes the default order, as in 0.3. |
-| `asyncEnabled`                                      | `advanced.background`, when it differs from the strategy                                                                                                       |
-| `supersedeReads`, `progressRatio`, `prune`, `shake` | The same names in `advanced`                                                                                                                                   |
+A layer that has no `context-kit` entry imports its `context-kit.json` if that file exists. Otherwise it converts the `contextKit` block of Pi's `settings.json`, the 0.3 settings, with the same behavior.
+
+The project block converts over the global settings, as 0.3 merged them. The project entry gets only the settings that the project block changed.
+
+After the import is written, `context-kit.json` is renamed to `context-kit.json.migrated`, and pi-context-kit shows a notice once. If the write fails, the file keeps its name and the import runs again at the next start. Defaults apply until then.
+
+An existing `context-kit` entry is never changed by the import. The 0.3 `contextKit` block stays in `settings.json` and is no longer read, so you can delete it.
+
+If you had no `contextKit` block, 0.4 starts maintenance at the new default of `"75%"`; to wait for Pi's limit as before, set `"threshold": "pi"`. The table shows how the values are converted.
+
+| 0.3 (`contextKit` in `settings.json`)            | 0.4 (`context-kit` entry)                                                                                                                             |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `thresholdTokens: 150000`                        | `threshold: 150000`                                                                                                                                   |
+| `thresholdPercent: 75`                           | `threshold: "75%"`                                                                                                                                    |
+| Both `thresholdTokens` and `thresholdPercent`    | `threshold` with the number of tokens                                                                                                                 |
+| No threshold (Pi's limit)                        | `threshold: "pi"`. The default for new users is `"75%"`.                                                                                              |
+| `methodOrder: ["shake", "handoff", "soft"]`      | `strategy: "frugal"`, with `background: true` unless `asyncEnabled` was `false`                                                                       |
+| `methodOrder: ["soft"]`                          | `strategy: "pi-summary"`                                                                                                                              |
+| Other `methodOrder` values                       | `methodOrder`, without `"remote"` and `"snapcompact"`, which 0.3 already skipped. A list with an unknown method becomes the default order, as in 0.3. |
+| `asyncEnabled`                                   | `background`, when it differs from the strategy                                                                                                       |
+| `supersedeReads`, `progressRatio`                | The same names                                                                                                                                        |
+| `prune`, `shake` (0.3 or 0.4 `context-kit.json`) | Flat names, such as `pruneEnabled` and `shakeMinSavings`                                                                                              |
 
 ### Pi settings that also apply
 
@@ -309,15 +321,15 @@ pi-context-kit has no setting per model. To start earlier for one model only, ma
 
 ### Recipes
 
-| I want to...                                     | `context-kit.json`                                        |
-| ------------------------------------------------ | --------------------------------------------------------- |
-| Start later, at Pi's own limit                   | `{ "threshold": "pi" }`                                   |
-| Start at the same number of tokens on all models | `{ "threshold": 150000 }`                                 |
-| Avoid model requests when possible               | `{ "strategy": "frugal" }`                                |
-| Never write a handoff note                       | `{ "advanced": { "methodOrder": ["shake", "soft"] } }`    |
-| Keep more recent tool outputs                    | `{ "advanced": { "prune": { "protectTokens": 80000 } } }` |
-| Keep all old file copies                         | `{ "advanced": { "supersedeReads": false } }`             |
-| Turn pi-context-kit off, but keep `recall`       | `{ "enabled": false }`, or `/context-kit`                 |
+| I want to...                                     | Value in the `context-kit` entry                   |
+| ------------------------------------------------ | -------------------------------------------------- |
+| Start later, at Pi's own limit                   | `"threshold": "pi"`                                |
+| Start at the same number of tokens on all models | `"threshold": 150000`                              |
+| Avoid model requests when possible               | `"strategy": "frugal"`                             |
+| Never write a handoff note                       | `"methodOrder": ["shake", "soft"]`                 |
+| Keep more recent tool outputs                    | `"pruneProtectTokens": 80000`                      |
+| Keep all old file copies                         | `"supersedeReads": false`                          |
+| Turn pi-context-kit off, but keep `recall`       | `"enabled": false`, or `/context-kit off --global` |
 
 ## Limits
 
@@ -334,9 +346,9 @@ pi-context-kit has no setting per model. To start earlier for one model only, ma
 
 **No `Context` in the footer**: type `pi list` and check that it shows `npm:pi-context-kit`. Then restart Pi. Pi shows the footer only in the interactive mode.
 
-**`pi-context-kit settings need attention`**: a value in a settings file is not valid. pi-context-kit uses the default for that value. Type `/context-kit` to see the problem, then correct the file or select a new value in the panel.
+**`pi-context-kit settings need attention`**: a value in a settings layer is not valid, so that layer is ignored. The other layer still applies. Type `/context-kit` to see the problem, then correct the file or select a new value in the panel.
 
-**`pi-context-kit moved its settings to ...`**: an earlier version kept the settings in Pi's `settings.json`. pi-context-kit copied them to its own file once. You can remove the `contextKit` entry from `settings.json`.
+**`pi-context-kit moved its settings into Pi's settings.json`**: an earlier version kept the settings in its own files. pi-context-kit moved them once, and renamed each file to `context-kit.json.migrated`. You can delete the `.migrated` files and the `contextKit` block of Pi's `settings.json`.
 
 **`pi-context-kit: handoff note failed`**: the summary request failed. pi-context-kit uses the next method or Pi's summary, so your session continues. Check the model and your provider limits.
 
@@ -345,8 +357,7 @@ pi-context-kit has no setting per model. To start earlier for one model only, ma
 ## FAQ
 
 **Does it slow down my work?**
-Usually not. The handoff note is written in the background, and pruning and shaking do not use the model.
-If no note is ready at the threshold, pi-context-kit can postpone the handoff until the note in progress is ready. It can also write a new note, which adds one model request.
+Usually not. The handoff note is written in the background, and pruning and shaking do not use the model. If no note is ready at the threshold, pi-context-kit can postpone the handoff until the note in progress is ready. It can also write a new note, which adds one model request.
 
 **Does it cost more?**
 A handoff note is one extra model request. It uses the same model, thinking level, and tool choice as your session. With Anthropic, this lets the provider reuse the cached conversation. Caching is not guaranteed.

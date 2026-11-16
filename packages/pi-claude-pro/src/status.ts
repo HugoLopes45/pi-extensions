@@ -1,7 +1,6 @@
 import type { Access } from "./access.ts";
 import { MODEL_CLAIMS, type Limits, type UsageWindow } from "./limits.ts";
 
-const WARNING_UTILIZATION = 0.8;
 const DAY_MS = 86_400_000;
 
 const CLAIM_LABELS: Record<string, string> = {
@@ -76,6 +75,8 @@ export interface StatusInput {
   limits?: Limits | undefined;
   /** Why the usage lookup failed. */
   usageError?: string;
+  /** Utilization percentage from which the level is a warning. */
+  warnAt?: number;
 }
 
 export interface Report {
@@ -140,7 +141,7 @@ function usageLines(
 function reportLevel(input: StatusInput, now: number): Report["level"] {
   if (input.usageError) return "warning";
   if (!input.limits) return "info";
-  const { level } = footer(input.limits, now);
+  const { level } = footer(input.limits, now, { warnAt: input.warnAt });
   return level === "success" ? "info" : level;
 }
 
@@ -156,18 +157,27 @@ export function statusReport(input: StatusInput, now = Date.now()): Report {
   };
 }
 
-export function footer(limits: Limits, now = Date.now()): Footer {
+export interface FooterOptions {
+  /** Utilization percentage from which the level is a warning; defaults to 80. */
+  warnAt?: number | undefined;
+  /** Windows shown and judged; absent shows all of them. */
+  windows?: readonly UsageWindow["name"][] | undefined;
+}
+
+export function footer(limits: Limits, now = Date.now(), options: FooterOptions = {}): Footer {
+  const { warnAt = 80, windows } = options;
   if (limits.exhausted) return { text: exhaustedMessage(limits, now), level: "error" };
   if (limits.extraUsage)
     return {
       text: `Claude extra usage${resetSuffix(limits.resetsAt, now)}`,
       level: "warning",
     };
-  if (limits.windows.length === 0) return READY;
-  const high = limits.windows.some((window) => window.utilization >= WARNING_UTILIZATION);
-  const parts = limits.windows.map(
-    (window) => `${window.name} ${Math.round(window.utilization * 100)}%`,
+  const shown = limits.windows.filter(
+    (window) => windows === undefined || windows.includes(window.name),
   );
+  if (shown.length === 0) return READY;
+  const high = shown.some((window) => window.utilization * 100 >= warnAt);
+  const parts = shown.map((window) => `${window.name} ${Math.round(window.utilization * 100)}%`);
   return {
     text: `Claude ${parts.join(" · ")}`,
     level: high ? "warning" : "success",

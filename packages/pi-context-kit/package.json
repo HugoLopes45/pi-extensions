@@ -38,6 +38,9 @@
     "check": "tsc --noEmit && vitest --run",
     "prepublishOnly": "npm run check"
   },
+  "dependencies": {
+    "pi-hl-utils": "workspace:*"
+  },
   "devDependencies": {
     "@earendil-works/pi-ai": "^1.5.2",
     "@earendil-works/pi-coding-agent": "^1.5.2",
@@ -53,6 +56,9 @@
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
+  "bundledDependencies": [
+    "pi-hl-utils"
+  ],
   "engines": {
     "node": ">=22.19.0",
     "pi": ">=1.0.3"
