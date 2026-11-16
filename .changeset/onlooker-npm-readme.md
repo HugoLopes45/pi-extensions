@@ -2,4 +2,4 @@
 "pi-onlooker": patch
 ---
 
-The README no longer says that pi-onlooker is missing from npm.
+The README installs from npm and uses neutral display name examples.
