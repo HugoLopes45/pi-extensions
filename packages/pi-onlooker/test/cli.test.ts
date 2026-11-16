@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { expect, it } from "vite-plus/test";
+import { expect, it } from "vitest";
 
 import { arrayContaining, objectContaining } from "./fixtures/matchers.js";
 
@@ -13,7 +13,7 @@ const execute = promisify(execFile);
 const cli = fileURLToPath(
   new URL("./bundle/cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")),
 );
-const onlooker = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+const onlooker = fileURLToPath(new URL("../extensions/index.ts", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/cli-extension.ts", import.meta.url));
 
 // One run per axis value: each of CodeMode and OAuth is on in one case and off in the other.

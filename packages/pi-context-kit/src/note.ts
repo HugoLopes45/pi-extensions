@@ -12,9 +12,9 @@ export interface NoteRequest {
   messages: readonly Message[];
   /** The session's level: Anthropic drops the cached messages when thinking differs. */
   reasoning: ThinkingLevel | undefined;
-  focus?: string;
+  focus?: string | undefined;
   signal: AbortSignal;
-  maxTokens?: number;
+  maxTokens: number;
 }
 
 /** Sends the turn's tool_choice too: Anthropic drops the cached messages when it differs. */
@@ -22,7 +22,7 @@ export async function requestNote(request: NoteRequest): Promise<Note | undefine
   const context = handoffContext(request.messages, request.focus);
   const response = await request.registry
     .streamSimple(request.model, context, {
-      reasoning: request.reasoning,
+      ...(request.reasoning === undefined ? {} : { reasoning: request.reasoning }),
       maxTokens: request.maxTokens,
       signal: request.signal,
       sessionId: request.sessionId,

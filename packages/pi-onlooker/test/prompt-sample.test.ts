@@ -1,5 +1,5 @@
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
-import { expect, it } from "vite-plus/test";
+import { expect, it } from "vitest";
 
 import { promptSample } from "../src/onlooker-calibration.js";
 

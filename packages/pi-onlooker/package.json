@@ -26,25 +26,25 @@
     "directory": "packages/pi-onlooker"
   },
   "files": [
+    "extensions",
     "src",
     "skills",
     "CHANGELOG.md"
   ],
   "type": "module",
   "scripts": {
-    "test": "vp test run",
-    "check": "vp check src test vitest.config.ts",
-    "format": "vp fmt src test",
-    "verify": "pnpm run check && pnpm run test"
+    "check": "tsc --noEmit && vitest --run",
+    "prepublishOnly": "npm run check"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.5.2",
-    "@earendil-works/pi-ai": "1.5.2",
-    "@earendil-works/pi-coding-agent": "1.5.2",
-    "@earendil-works/pi-tui": "1.5.2",
+    "@earendil-works/pi-agent-core": "^1.5.2",
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@earendil-works/pi-tui": "^1.5.2",
     "@types/node": "^26.6.6",
     "typebox": "^1.4.3",
-    "vite-plus": "1.6.0"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
@@ -53,19 +53,12 @@
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^12.18",
-      "onFail": "ignore"
-    }
-  },
   "engines": {
     "node": ">=22.19.0"
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./extensions/index.ts"
     ],
     "skills": [
       "./skills"

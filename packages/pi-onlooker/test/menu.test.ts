@@ -1,5 +1,5 @@
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   OnlookerSettingsMenu,

@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/pi-ai";
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it } from "vite-plus/test";
+import { onTestFinished, expect, it } from "vitest";
 
 import { readOnlookerSettings, sessionTokenLimit } from "../src/onlooker-settings.js";
 import {

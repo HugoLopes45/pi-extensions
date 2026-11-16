@@ -23,7 +23,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it, vi } from "vite-plus/test";
+import { onTestFinished, expect, it, vi } from "vitest";
 
 import "./fixtures/observer-extension.js";
 import { anyInstance, stringContaining } from "./fixtures/matchers.js";
@@ -102,7 +102,7 @@ async function observedRuntime(
       additionalExtensionPaths: [
         fileURLToPath(new URL("./fixtures/observer-extension.ts", import.meta.url)),
         ...(combined ? ["builtin:codemode"] : []),
-        fileURLToPath(new URL("../src/index.ts", import.meta.url)),
+        fileURLToPath(new URL("../extensions/index.ts", import.meta.url)),
       ],
       extensionFactories: combined
         ? [{ name: "codemode", factory: createCodemodeExtension(), builtin: true }]

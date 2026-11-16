@@ -1,4 +1,0 @@
-[tools]
-# `vp` needs Node 22.22.1 or later on the 22.x line.
-node = "22.23.5"
-pnpm = "12.18.0"

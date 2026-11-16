@@ -1,4 +1,4 @@
-import { expect } from "vite-plus/test";
+import { expect } from "vitest";
 
 // Vitest types its asymmetric matchers as `any`; these return `unknown` so expected objects stay typed.
 

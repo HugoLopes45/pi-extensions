@@ -27,8 +27,8 @@ function reply(status: number, headers: Record<string, string> = {}): Response {
 
 describe("createRateLimits", () => {
   it("recognizes exhausted extra usage in a 400 without consuming its body", async () => {
-    const fetchUsage = vi.fn();
-    const onLimits = vi.fn();
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>();
+    const onLimits = vi.fn<RateLimitDeps["onLimits"]>();
     const watch = watcher({ fetchUsage, onLimits })(auth);
     const body = {
       type: "error",
@@ -60,7 +60,7 @@ describe("createRateLimits", () => {
       error: { type: "invalid_request_error", message: "Invalid model" },
     }),
   ])("preserves unrelated or malformed 400 bodies: %s", async (body) => {
-    const fetchUsage = vi.fn();
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>();
     const watch = watcher({ fetchUsage })(auth);
     const response = new Response(body, { status: 400 });
     expect(await watch.inspect(response)).toBe(response);
@@ -70,7 +70,7 @@ describe("createRateLimits", () => {
   });
 
   it("leaves successful responses alone", async () => {
-    const fetchUsage = vi.fn(async () => spentBody);
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async () => spentBody);
     const watch = watcher({ fetchUsage })(auth);
     const response = reply(200);
     expect(await watch.inspect(response)).toBe(response);
@@ -79,8 +79,8 @@ describe("createRateLimits", () => {
   });
 
   it("explains an exhausted subscription from the 429 headers and stops retries", async () => {
-    const fetchUsage = vi.fn(async () => undefined);
-    const onLimits = vi.fn();
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async () => undefined);
+    const onLimits = vi.fn<RateLimitDeps["onLimits"]>();
     const watch = watcher({ fetchUsage, onLimits })(auth);
     const response = await watch.inspect(
       reply(429, {
@@ -95,7 +95,7 @@ describe("createRateLimits", () => {
   });
 
   it("asks the usage endpoint when the 429 headers are not conclusive, and caches it", async () => {
-    const fetchUsage = vi.fn(async () => spentBody);
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async () => spentBody);
     let time = 0;
     const watchRequest = watcher({ fetchUsage, now: () => time });
 
@@ -113,7 +113,7 @@ describe("createRateLimits", () => {
 
   it("does not reuse the cached usage of another account", async () => {
     const other = { ...auth, accessToken: "sk-ant-oat01-other" };
-    const fetchUsage = vi.fn(async ({ accessToken }: RequestAuth) =>
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async ({ accessToken }: RequestAuth) =>
       accessToken === auth.accessToken ? spentBody : freeBody,
     );
     const watchRequest = watcher({ fetchUsage });
@@ -128,7 +128,7 @@ describe("createRateLimits", () => {
   });
 
   it("judges the cached usage against the model of each request", async () => {
-    const fetchUsage = vi.fn(async () => ({
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async () => ({
       five_hour: { utilization: 20 },
       seven_day_opus: { utilization: 100 },
     }));
@@ -157,7 +157,7 @@ describe("createRateLimits", () => {
   });
 
   it("does not send the request headers to Anthropic when the model uses a proxy", async () => {
-    const fetchUsage = vi.fn(async () => spentBody);
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async () => spentBody);
     const watch = watcher({ fetchUsage })({ ...auth, firstParty: false });
     const response = await watch.inspect(reply(429));
     expect(fetchUsage).not.toHaveBeenCalled();

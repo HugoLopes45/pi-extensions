@@ -25,7 +25,7 @@ import {
   type ToolResultEvent,
   type ToolResultEventResult,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect } from "vite-plus/test";
+import { onTestFinished, expect } from "vitest";
 
 import type { ObservedSetup } from "../../src/onlooker-evidence.js";
 import {

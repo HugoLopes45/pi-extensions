@@ -1,4 +1,4 @@
-import { expect, it } from "vite-plus/test";
+import { expect, it } from "vitest";
 
 import { fixture } from "./fixtures/onlooker-runtime.js";
 import { expectNullOptionalArgumentsOmitted } from "./fixtures/tool-testing.js";

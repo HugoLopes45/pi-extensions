@@ -21,7 +21,7 @@ import {
   SettingsManager,
   type ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished } from "vite-plus/test";
+import { onTestFinished } from "vitest";
 
 import "./observer-extension.js";
 import "./review-regression-extension.js";
@@ -105,7 +105,7 @@ export async function fixture({
       additionalExtensionPaths: [
         fileURLToPath(new URL("./observer-extension.ts", import.meta.url)),
         fileURLToPath(new URL("./review-regression-extension.ts", import.meta.url)),
-        fileURLToPath(new URL("../../src/index.ts", import.meta.url)),
+        fileURLToPath(new URL("../../extensions/index.ts", import.meta.url)),
       ],
     },
   });

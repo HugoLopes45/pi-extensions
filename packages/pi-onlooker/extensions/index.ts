@@ -7,13 +7,13 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { completeOnlookerCommandArguments, parseOnlookerCommand } from "./onlooker-command.js";
+import { completeOnlookerCommandArguments, parseOnlookerCommand } from "../src/onlooker-command.js";
 import {
   OnlookerSettingsMenu,
   type OnlookerMenuHost,
   type OnlookerScopedOptions,
-} from "./onlooker-menu.js";
-import { OnlookerObserver } from "./onlooker-observer.js";
+} from "../src/onlooker-menu.js";
+import { OnlookerObserver } from "../src/onlooker-observer.js";
 import {
   onlookerAskToolName as askToolName,
   onlookerFooterText,
@@ -25,8 +25,8 @@ import {
   type OnlookerActivity,
   type OnlookerRenderTheme,
   type OnlookerStatusEntry,
-} from "./onlooker-rendering.js";
-import { isOnlookerSession } from "./onlooker-session.js";
+} from "../src/onlooker-rendering.js";
+import { isOnlookerSession } from "../src/onlooker-session.js";
 import {
   readOnlookerLayers,
   readOnlookerOverrides,
@@ -36,12 +36,12 @@ import {
   type OnlookerChange,
   type OnlookerAppliedChange,
   type OnlookerSettingScope,
-} from "./onlooker-settings.js";
-import { TROUBLESHOOTING_HINT } from "./troubleshooting-skill.js";
-import { expandEntryOnClick, expandMessageOnClick } from "./utils/expand-on-click.js";
-import { acceptNullForOptionalArguments } from "./utils/null-optional-arguments.js";
-import { discoverPiAgentSession } from "./utils/pi-agent-session-discovery.js";
-import { noticeText } from "./utils/ui.js";
+} from "../src/onlooker-settings.js";
+import { TROUBLESHOOTING_HINT } from "../src/troubleshooting-skill.js";
+import { expandEntryOnClick, expandMessageOnClick } from "../src/utils/expand-on-click.js";
+import { acceptNullForOptionalArguments } from "../src/utils/null-optional-arguments.js";
+import { discoverPiAgentSession } from "../src/utils/pi-agent-session-discovery.js";
+import { noticeText } from "../src/utils/ui.js";
 
 const askToolParameters = Type.Object(
   { message: Type.String({ minLength: 1 }) },

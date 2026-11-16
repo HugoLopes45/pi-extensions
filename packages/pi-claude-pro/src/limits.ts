@@ -20,7 +20,7 @@ export interface UsageWindow {
   /** Fraction from 0 to 1. */
   utilization: number;
   /** Unix time in seconds. */
-  resetsAt?: number;
+  resetsAt?: number | undefined;
 }
 
 export interface Limits {
@@ -28,9 +28,9 @@ export interface Limits {
   exhausted: boolean;
   /** The request is billed as extra usage, even when plan limits remain. */
   extraUsage: boolean;
-  claim?: string;
+  claim?: string | undefined;
   /** Unix time in seconds. */
-  resetsAt?: number;
+  resetsAt?: number | undefined;
   windows: UsageWindow[];
 }
 

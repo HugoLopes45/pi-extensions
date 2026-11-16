@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { defineConfig } from "vite-plus";
+import { defineConfig } from "vitest/config";
 
 // The platform's temporary directory can sit behind a symbolic link (macOS's /var is
 // /private/var). Code under test resolves real paths, through process.cwd(), realpath, or a child
@@ -26,7 +26,7 @@ delete process.env.PI_CACHE_RETENTION;
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
-    // `vp run verify` runs several packages' test suites at once, and on a 4-vCPU CI runner that
+    // `pnpm run verify` runs several packages' test suites at once, and on a 4-vCPU CI runner that
     // contention stretches SDK-driven tests that take well under a
     // second alone past Vitest's 5 s default. The timeout only guards against hangs, so give it
     // room rather than raising it test by test.

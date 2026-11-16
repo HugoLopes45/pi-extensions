@@ -2,9 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
-import onlooker from "../src/index.js";
+import onlooker from "../extensions/index.js";
 import { anyInstance, stringContaining, stringMatching } from "./fixtures/matchers.js";
 import { createSdkHarness, reply } from "./fixtures/sdk-harness.js";
 

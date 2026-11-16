@@ -6,7 +6,7 @@ import {
   type Context,
 } from "@earendil-works/pi-ai";
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it, vi } from "vite-plus/test";
+import { onTestFinished, expect, it, vi } from "vitest";
 
 import type { OnlookerFinding } from "../src/onlooker-contract.js";
 import { type OnlookerMode } from "../src/onlooker-observer.js";

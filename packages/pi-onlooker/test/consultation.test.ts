@@ -18,7 +18,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it } from "vite-plus/test";
+import { onTestFinished, expect, it } from "vitest";
 
 import { TROUBLESHOOTING_HINT } from "../src/troubleshooting-skill.js";
 import "./fixtures/observer-extension.js";
@@ -131,7 +131,7 @@ it("returns enabled main-agent consultation as an ordinary tool result", async (
       noPromptTemplates: true,
       additionalExtensionPaths: [
         fileURLToPath(new URL("./fixtures/observer-extension.ts", import.meta.url)),
-        fileURLToPath(new URL("../src/index.ts", import.meta.url)),
+        fileURLToPath(new URL("../extensions/index.ts", import.meta.url)),
       ],
     },
   });

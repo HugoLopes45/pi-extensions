@@ -1,5 +1,5 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it } from "vite-plus/test";
+import { onTestFinished, expect, it } from "vitest";
 
 import {
   onlookerPrompt,

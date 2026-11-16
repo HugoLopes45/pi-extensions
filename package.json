@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "check": "oxfmt --check && oxlint",
-    "verify": "pnpm check && pnpm --recursive run check && pnpm --filter pi-onlooker run test"
+    "verify": "pnpm check && pnpm --recursive run check"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

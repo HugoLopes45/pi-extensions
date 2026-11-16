@@ -1,6 +1,6 @@
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, setKeybindings } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   onlookerFooterText,

@@ -7,7 +7,7 @@ import {
   type Context,
 } from "@earendil-works/pi-ai";
 import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
-import { onTestFinished, expect, it, vi } from "vite-plus/test";
+import { onTestFinished, expect, it, vi } from "vitest";
 
 import { onlookerFallbackTokenFactor } from "../src/onlooker-calibration.js";
 import { projectEvidence, toolCallRef } from "../src/onlooker-evidence.js";

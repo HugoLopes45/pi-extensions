@@ -17,7 +17,7 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { onTestFinished, describe, expect, it } from "vite-plus/test";
+import { onTestFinished, describe, expect, it } from "vitest";
 
 import { onlookerGuidance } from "../src/onlooker-guidance.js";
 import { createOnlookerSession, disposeOnlookerSession } from "../src/onlooker-session.js";

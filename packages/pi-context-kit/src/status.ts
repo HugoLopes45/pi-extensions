@@ -8,7 +8,7 @@ export interface StatusInput {
   /** Where compaction starts, or +Infinity when nothing compacts. */
   limit: number;
   contextWindow: number;
-  note?: keyof typeof NOTE_LABEL;
+  note?: keyof typeof NOTE_LABEL | undefined;
 }
 
 /** The footer text: context use and threshold as shares of the window, then the background note. */

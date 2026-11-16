@@ -6,7 +6,7 @@ import {
   Text,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   appendDurationFooter,

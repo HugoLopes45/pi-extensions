@@ -8,9 +8,9 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import onlooker from "../src/index.js";
+import onlooker from "../extensions/index.js";
 import { createMenuTui, menuDriver } from "./fixtures/menu-ui.js";
 import { fixture, response } from "./fixtures/onlooker-runtime.js";
 import { createSdkHarness, reply, toolCall } from "./fixtures/sdk-harness.js";

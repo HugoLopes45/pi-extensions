@@ -281,12 +281,10 @@ describe("inside Pi", () => {
       const continued = request.body.thread?.type === "continue";
       const system = request.body.system.map((block) => block.text).join("\n");
       expect(system).not.toContain("Pi documentation");
-      if (continued) {
-        expect(system).toMatch(/^x-anthropic-billing-header: [^\n]*$/);
-      } else {
-        expect(system).toContain(custom);
-        expect(system).toContain("inside pi, a coding agent harness");
-      }
+      const expected = continued
+        ? [/^x-anthropic-billing-header: [^\n]*$/]
+        : [custom, "inside pi, a coding agent harness"];
+      for (const part of expected) expect(system).toMatch(part);
       expect(
         JSON.stringify(request.body.messages).split("Pi documentation (read only"),
       ).toHaveLength(continued ? 1 : 2);

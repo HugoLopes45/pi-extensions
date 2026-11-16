@@ -19,6 +19,7 @@ import {
 import {
   createAgentSession,
   DefaultResourceLoader,
+  type ExtensionUIContext,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -139,8 +140,8 @@ describe("pi-context-kit inside Pi", () => {
       true,
       { threshold: 8_000, advanced: { methodOrder: [] } },
     );
-    const notify = vi.fn();
-    const setStatus = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
     await session.bindExtensions({
       uiContext: {
         ...session.extensionRunner.getUIContext(),
@@ -165,7 +166,7 @@ describe("pi-context-kit inside Pi", () => {
 
   it("states the settings with /context-kit outside the TUI", async () => {
     const { session } = await start([], 200_000, true, { strategy: "frugal" });
-    const notify = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
@@ -187,7 +188,7 @@ describe("pi-context-kit inside Pi", () => {
       join(cwd, ".pi", "settings.json"),
       JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
     );
-    const notify = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
@@ -209,8 +210,8 @@ describe("pi-context-kit inside Pi", () => {
       JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
     );
     session.settingsManager.setProjectTrusted(false);
-    const notify = vi.fn();
-    const setStatus = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
     await session.bindExtensions({
       uiContext: {
         ...session.extensionRunner.getUIContext(),
@@ -238,7 +239,7 @@ describe("pi-context-kit inside Pi", () => {
       JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
     );
     const projectFile = join(cwd, ".pi", "context-kit.json");
-    const notify = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
     const file = join(agentDir, "context-kit.json");
     // A read-only file where the new file is written first makes the write fail once.
     const temporary = `${file}.${process.pid}.tmp`;
@@ -278,7 +279,7 @@ describe("pi-context-kit inside Pi", () => {
       JSON.stringify({ contextKit: { methodOrder: ["soft"] } }),
     );
     const projectFile = join(cwd, ".pi", "context-kit.json");
-    const notify = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
@@ -366,7 +367,7 @@ describe("pi-context-kit inside Pi", () => {
     const file = join(cwd, ".pi", "context-kit.json");
     mkdirSync(join(cwd, ".pi"));
     writeFileSync(file, "{ broken");
-    const notify = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
@@ -393,8 +394,8 @@ describe("pi-context-kit inside Pi", () => {
       1_000,
       { thresholdTokens: 8_000, asyncEnabled: false },
     );
-    const notify = vi.fn();
-    const setStatus = vi.fn();
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), notify },
     });
@@ -679,9 +680,8 @@ describe("pi-context-kit inside Pi", () => {
             .getBranch()
             .find((entry) => entry.type === "message" && entry.message.role === "assistant");
           if (!target) throw new Error("missing tree navigation target");
-          expect(await session.navigateTree(target.id)).toMatchObject({
-            cancelled: false,
-          });
+          if ((await session.navigateTree(target.id)).cancelled)
+            throw new Error("tree navigation cancelled");
         }
         expect(noteSignal?.aborted).toBe(true);
       } finally {
@@ -865,7 +865,7 @@ describe("pi-context-kit inside Pi", () => {
       true,
       { enabled: false },
     );
-    const setStatus = vi.fn();
+    const setStatus = vi.fn<ExtensionUIContext["setStatus"]>();
     await session.bindExtensions({
       uiContext: { ...session.extensionRunner.getUIContext(), setStatus },
     });
