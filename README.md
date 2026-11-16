@@ -68,7 +68,7 @@ Start Pi again to use the change.
 
 ## Good to know
 
-- Some features send extra requests to your AI model, which count against your plan or your bill. Each extension page explains this in its **Limits** section.
+- pi-context-kit asks your AI model for summaries, and pi-onlooker asks a second model for reviews. These extra requests count against your plan or your bill. Read the **Limits** section of each extension page.
 - pi-claude-pro is not made or supported by Anthropic. Read its **Limits** section before you use it.
 - pi-onlooker is not released yet. Developers can try it from a copy of this project: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
