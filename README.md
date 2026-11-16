@@ -1,26 +1,28 @@
 # Pi Extensions
 
-Add-ons that make the Pi coding assistant work better, built by Hugo Lopes.
+Personal extensions for the [Pi](https://pi.dev) coding agent, built and maintained by Hugo Lopes for his own work. Each extension installs on its own.
 
-[Pi](https://pi.dev) is an AI assistant that reads, writes and fixes code from a terminal window. An extension adds one feature to Pi. Install only the extensions you want.
+> **Security:** Pi extensions run with your full system permissions and can execute any code. Install only extensions you trust, and read their source if you can.
 
-## What each extension does
+## Extensions
 
-| Extension                                        | What it does for you                                                                                      | Can I install it? |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ----------------- |
-| [pi-context-kit](packages/pi-context-kit#readme) | Keeps long conversations with Pi clear. Pi puts old, unneeded text aside, so it keeps track of your work. | Yes               |
-| [pi-claude-pro](packages/pi-claude-pro#readme)   | Lets Pi use your Claude Pro, Max or Ultra plan. You do not need a separate Anthropic API key.             | Yes               |
-| [pi-onlooker](packages/pi-onlooker#readme)       | A second AI checks Pi's work while it runs, and tells Pi when something is wrong.                         | Not yet           |
+| Extension                                        | What it does                                                       | Install                         |
+| ------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------- |
+| [pi-context-kit](packages/pi-context-kit#readme) | Keeps long sessions clear by putting old, unneeded context aside.  | `pi install npm:pi-context-kit` |
+| [pi-claude-pro](packages/pi-claude-pro#readme)   | Lets Pi use a Claude Pro, Max or Ultra plan instead of an API key. | `pi install npm:pi-claude-pro`  |
+| [pi-onlooker](packages/pi-onlooker#readme)       | A second model checks the agent's work while it runs.              | Not released yet                |
 
-## Before you start
+Read an extension's README before you install it. It lists what the extension needs and its limits.
 
-You need Pi, and an account with an AI provider that Pi supports, such as Anthropic or OpenAI. If Pi already works on your computer, go to [Install an extension](#install-an-extension).
+## Get started
+
+If Pi already works on your computer, go to [Install an extension](#install-an-extension).
 
 1. Open a terminal window:
    - macOS: press <kbd>Cmd</kbd> + <kbd>Space</kbd>, type `Terminal`, then press <kbd>Enter</kbd>.
    - Windows: press the <kbd>Windows</kbd> key, type `PowerShell`, then press <kbd>Enter</kbd>.
-   - Linux: open the Terminal application.
-2. Copy the line for your computer, paste it into the terminal, then press <kbd>Enter</kbd>. This is the official Pi installer.
+   - Linux: open your terminal application.
+2. Copy the official Pi installer line for your computer, paste it into the terminal, then press <kbd>Enter</kbd>.
 
    macOS or Linux:
 
@@ -35,52 +37,35 @@ You need Pi, and an account with an AI provider that Pi supports, such as Anthro
    ```
 
 3. Type `pi`, then press <kbd>Enter</kbd>. Pi starts.
-4. In Pi, type `/login`, press <kbd>Enter</kbd>, then follow the steps to connect your AI account.
+4. In Pi, type `/login`, press <kbd>Enter</kbd>, then follow the steps to connect your AI provider account or API key.
 
 ## Install an extension
 
 1. Quit Pi if it is open: press <kbd>Ctrl</kbd> + <kbd>C</kbd> two times.
-2. In the terminal, type the line for the extension you want, then press <kbd>Enter</kbd>:
-
-   ```bash
-   pi install npm:pi-context-kit
-   ```
-
-   ```bash
-   pi install npm:pi-claude-pro    # needs a Claude Pro, Max or Ultra plan
-   ```
-
+2. Copy the install line of the extension from the [Extensions](#extensions) table, paste it into the terminal, then press <kbd>Enter</kbd>.
 3. Type `pi`, then press <kbd>Enter</kbd>. The extension is now active.
-4. Open the extension's page from the [table above](#what-each-extension-does) to learn what to do next.
 
-To see which extensions you have, type `pi list`.
+## Manage your extensions
 
-## Update or remove an extension
-
-Quit Pi first. Then type one of these lines, with the name of your extension, and press <kbd>Enter</kbd>:
+Quit Pi first. Then type one of these lines and press <kbd>Enter</kbd>. Replace `<extension>` with the name from the table, for example `pi-context-kit`.
 
 ```bash
-pi update npm:pi-context-kit    # get the newest version
-pi remove npm:pi-context-kit    # remove the extension
+pi list                         # show the installed extensions
+pi update npm:<extension>       # get the newest version
+pi remove npm:<extension>       # remove the extension
 ```
 
 Start Pi again to use the change.
 
-## Good to know
-
-- pi-context-kit asks your AI model for summaries, and pi-onlooker asks a second model for reviews. These extra requests count against your plan or your bill. Read the **Limits** section of each extension page.
-- pi-claude-pro is not made or supported by Anthropic. Read its **Limits** section before you use it.
-- pi-onlooker is not released yet. Developers can try it from a copy of this project: see [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## Get help
 
-If something does not work, [open an issue](https://github.com/HugoLopes45/pi-extensions/issues). Tell us which extension you use, what you did and what you saw. Type `pi --version` to find your Pi version, and add it. Do not include passwords, API keys or private conversations.
+If something does not work, [open an issue](https://github.com/HugoLopes45/pi-extensions/issues). Tell us which extension you use, what you did and what you saw, and add your Pi version: type `pi --version` to find it. Do not include passwords, API keys or private conversations.
 
 To report a security problem, read [SECURITY.md](SECURITY.md).
 
-## For developers
+## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) explains how to build, test and release the extensions. Each extension lives in `packages/<name>/` with its own README, changelog, license, source and tests.
+Each extension lives in `packages/<extension>/` with its own README, changelog, license, source and tests. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build, test and release an extension.
 
 ## Author
 
