@@ -189,7 +189,7 @@ async function playSession(before: ExtensionFactory[], turns: readonly Assistant
   const lookup = (name: string): ToolOutputDeclaration | undefined =>
     retired.has(name) ? undefined : running?.getToolDefinition(name);
   const recorder = recordToolOutputs(lookup);
-  const cwd = await mkdtemp(join(tmpdir(), "pi-utils-tool-output-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-hl-utils-tool-output-"));
   const agentDir = join(cwd, "agent");
   await mkdir(agentDir);
   const model = getBuiltinModel("deepseek", "deepseek-flash");
