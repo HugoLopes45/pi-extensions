@@ -6,3 +6,5 @@ onlookers/
 .pi/
 coverage/
 dist/
+*.tgz
+.vitest/

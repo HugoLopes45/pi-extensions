@@ -1,0 +1,219 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+  createAssistantMessageEventStream,
+  fauxAssistantMessage,
+  getCurrentSystemPrompt,
+  getCurrentTools,
+  InMemoryCredentialStore,
+  InMemoryModelsStore,
+  type AssistantMessage,
+  type Context,
+  type ToolCall,
+  withoutInitialSystemMessage,
+} from "@earendil-works/pi-ai";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+  type ExtensionFactory,
+  type ExtensionError,
+  type AgentSessionEvent,
+} from "@earendil-works/pi-coding-agent";
+import { onTestFinished } from "vitest";
+
+import { recordToolOutputs } from "./tool-testing.js";
+
+interface HarnessOptions {
+  contextSettings?: unknown;
+  settings?: SettingsManager;
+  contextWindow?: number;
+  keepRecentTokens?: number;
+  manager?: SessionManager;
+  systemPrompt?: string;
+  /** Render Pi's default structured prompt, which carries tool rules, instead of a custom one. */
+  defaultSystemPrompt?: boolean;
+  modelId?: "claude-sonnet-4-5" | "claude-opus-5-5";
+  additionalExtensionPaths?: string[];
+}
+
+/** Real Pi collaborators; the only scripted collaborator is the external model stream. */
+export async function createSdkHarness(
+  extensions: ExtensionFactory[],
+  options: HarnessOptions = {},
+) {
+  const dir = await mkdtemp(join(tmpdir(), "pi-context-test-"));
+  onTestFinished(() => rm(dir, { recursive: true, force: true }));
+  const manager = options.manager ?? SessionManager.create(dir, dir);
+  const document = {
+    contextManagement: options.contextSettings,
+    compaction: {
+      enabled: true,
+      keepRecentTokens: options.keepRecentTokens ?? 1,
+      reserveTokens: 512,
+    },
+    retry: { enabled: false },
+  };
+  const settings = options.settings ?? SettingsManager.inMemory(document);
+  const baseModel = getBuiltinModel("anthropic", options.modelId ?? "claude-sonnet-4-5");
+  const model = {
+    ...baseModel,
+    contextWindow: options.contextWindow ?? 200_000,
+    maxTokens: 512,
+  };
+  const providerRequests: string[] = [];
+  // The session exists by the time any tool result fires.
+  const toolOutputs = recordToolOutputs((name) => session.getToolDefinition(name));
+  const loader = new DefaultResourceLoader({
+    cwd: dir,
+    agentDir: dir,
+    settingsManager: settings,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    extensionFactories: [
+      ...extensions,
+      (pi) =>
+        pi.registerProvider("anthropic", {
+          api: "anthropic-messages",
+          models: [model],
+          streamSimple(requested) {
+            providerRequests.push(requested.id);
+            throw new Error("Unexpected direct provider request (including a native summarizer)");
+          },
+        }),
+      // Last, so it records results after the other extensions' `tool_result` handlers.
+      toolOutputs.extension,
+    ],
+    additionalExtensionPaths: options.additionalExtensionPaths ?? [],
+    systemPromptOverride: (base) =>
+      options.defaultSystemPrompt
+        ? base
+        : (options.systemPrompt ?? "Standing instructions: finish the user's task."),
+  });
+  await loader.reload();
+  const modelRuntime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsStore: new InMemoryModelsStore(),
+    modelsPath: join(dir, "models.json"),
+    allowModelNetwork: false,
+  });
+  await modelRuntime.setRuntimeApiKey("anthropic", "TEST-NOT-A-REAL-KEY");
+  const { session } = await createAgentSession({
+    cwd: dir,
+    agentDir: dir,
+    sessionManager: manager,
+    settingsManager: settings,
+    resourceLoader: loader,
+    modelRuntime,
+    model,
+    noTools: "builtin",
+  });
+  onTestFinished(async () => {
+    session.dispose();
+  });
+  // Every tool result in every test must conform to its tool's declared outputSchema.
+  onTestFinished(() => {
+    toolOutputs.check();
+  });
+  const events: AgentSessionEvent[] = [];
+  session.subscribe((event) => events.push(event));
+  const requests: Array<{
+    systemPrompt: string;
+    messages: Context["messages"];
+    tools: string[];
+    toolDefinitions: Context["tools"];
+  }> = [];
+  const responses: AssistantMessage[] = [];
+  /** Each request's complete provider transcript, after Pi's prompt and tool projections. */
+  const transcripts: Context["messages"][] = [];
+  session.agent.streamFunction = (currentModel, context, requestOptions) => {
+    requestOptions?.signal?.throwIfAborted();
+    transcripts.push(structuredClone(context.messages));
+    // Pi 0.86+ carries the prompt and tool declarations as transcript system messages.
+    const tools = getCurrentTools(context.messages);
+    requests.push({
+      systemPrompt: getCurrentSystemPrompt(context.messages),
+      messages: structuredClone(withoutInitialSystemMessage(context.messages)),
+      tools: tools.map((tool) => tool.name),
+      toolDefinitions: tools.map(({ name, description, parameters }) => ({
+        name,
+        description,
+        parameters: structuredClone(parameters),
+      })),
+    });
+    const next = responses.shift();
+    if (!next) throw new Error("Unexpected model request (including an accidental summarizer)");
+    const message = {
+      ...next,
+      api: currentModel.api,
+      provider: currentModel.provider,
+      model: currentModel.id,
+    };
+    const reason = message.stopReason;
+    if (reason === "pending") throw new Error("Scripted response must be complete");
+    const stream = createAssistantMessageEventStream();
+    queueMicrotask(() => {
+      if (reason === "error" || reason === "aborted") {
+        stream.push({ type: "error", reason, error: message });
+      } else stream.push({ type: "done", reason, message });
+    });
+    return stream;
+  };
+  const extensionErrors: ExtensionError[] = [];
+  // RPC supplies an error listener too; bindings make /reload emit session_start.
+  await session.bindExtensions({ mode: "rpc", onError: (error) => extensionErrors.push(error) });
+  return {
+    dir,
+    manager,
+    settings,
+    session,
+    requests,
+    transcripts,
+    model,
+    responses,
+    events,
+    providerRequests,
+    extensionErrors,
+  };
+}
+
+export function reply(text: string, inputTokens = 100): AssistantMessage {
+  const message = fauxAssistantMessage(text);
+  message.usage = {
+    ...message.usage,
+    cost: { ...message.usage.cost },
+    input: inputTokens,
+    output: 10,
+    totalTokens: inputTokens + 10,
+  };
+  return message;
+}
+
+export function overflow(partialCall = false): AssistantMessage {
+  const message = partialCall
+    ? toolCall("context_notes", { action: "list" }, "never-executed")
+    : reply("PROVIDER-FAILED-RESPONSE");
+  message.stopReason = "error";
+  message.errorMessage = "prompt is too long: 300000 tokens > 200000 maximum";
+  return message;
+}
+
+export function toolCall(
+  name: string,
+  args: ToolCall["arguments"],
+  id = "call-1",
+): AssistantMessage {
+  return {
+    ...reply(""),
+    content: [{ type: "toolCall", name, arguments: args, id }],
+    stopReason: "toolUse",
+  };
+}

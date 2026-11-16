@@ -1,0 +1,157 @@
+import { describe, expect, it } from "vitest";
+
+import { readEntry, searchEntries } from "../src/recall.ts";
+import { Transcript } from "./fixtures.ts";
+
+describe("searchEntries", () => {
+  it.each([false, true])("excludes private shell output with regex=%s", async (regex) => {
+    const t = new Transcript();
+    t.session.appendMessage({
+      role: "bashExecution",
+      command: "printf PRIVATE-MARKER",
+      output: "PRIVATE-MARKER",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 1,
+      excludeFromContext: true,
+    });
+    expect(await searchEntries(t.branch(), { query: "PRIVATE-MARKER", regex })).toBe(
+      "No entries match.",
+    );
+  });
+
+  it("finds matching entries case-insensitively, newest first", async () => {
+    const t = new Transcript();
+    const user = t.user("Fix the Login bug");
+    t.assistant("Looking at other things");
+    const result = t.tool("bash", { command: "npm test" }, "FAIL login.test.ts\nexpected 200");
+    expect(await searchEntries(t.branch(), { query: "login" })).toBe(
+      [
+        `${result} toolResult bash: [bash result] FAIL login.test.ts expected 200`,
+        `${user} user: Fix the Login bug`,
+      ].join("\n"),
+    );
+  });
+
+  it("supports regex, paging, and reports no match", async () => {
+    const t = new Transcript();
+    const ids = [t.user("error 1"), t.user("error 2"), t.user("error 3")];
+    expect(
+      await searchEntries(t.branch(), {
+        query: "error \\d",
+        regex: true,
+        offset: 1,
+        limit: 1,
+      }),
+    ).toBe(`${ids[1]} user: error 2\n[3 matches. Use offset=2 for more.]`);
+    expect(await searchEntries(t.branch(), { query: "absent" })).toBe("No entries match.");
+    await expect(searchEntries(t.branch(), { query: "(", regex: true })).rejects.toThrow(
+      /Invalid regex/,
+    );
+  });
+
+  it("bounds pathological expressions and stops on cancellation", async () => {
+    const t = new Transcript();
+    t.user(`${"a".repeat(80_000)}!`);
+    await expect(searchEntries(t.branch(), { query: "(a+)+$", regex: true })).rejects.toThrow(
+      /deadline/i,
+    );
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      searchEntries(t.branch(), { query: "a", regex: true }, controller.signal),
+    ).rejects.toThrow(/abort/i);
+
+    const running = new AbortController();
+    const pending = searchEntries(t.branch(), { query: "(a+)+$", regex: true }, running.signal);
+    setTimeout(() => running.abort(), 10);
+    await expect(pending).rejects.toThrow(/abort/i);
+  });
+
+  it("excludes abandoned branches from search and reads", async () => {
+    const t = new Transcript();
+    const root = t.user("shared history");
+    const abandoned = t.assistant("ABANDONED-MARKER");
+    t.session.branch(root);
+    t.assistant("current branch");
+
+    expect(await searchEntries(t.branch(), { query: "ABANDONED-MARKER" })).toBe(
+      "No entries match.",
+    );
+    expect(() => readEntry(t.branch(), abandoned, {})).toThrow(
+      `No entry ${abandoned} on the current branch.`,
+    );
+    expect(t.session.getEntry(abandoned)).toBeDefined();
+  });
+
+  it("finds raw content that a context edit hides", async () => {
+    const t = new Transcript();
+    const id = t.tool("read", { path: "a.ts" }, "secret value");
+    t.session.appendContextEdit(id, {
+      content: [{ type: "text", text: "[pruned]" }],
+    });
+    expect(await searchEntries(t.branch(), { query: "secret" })).toContain(id);
+    expect(await searchEntries(t.branch(), { query: "pruned" })).toBe("No entries match.");
+  });
+});
+
+describe("readEntry", () => {
+  it.each([false, true])("respects shell exclusion=%s for direct reads", (excludeFromContext) => {
+    const t = new Transcript();
+    const id = t.session.appendMessage({
+      role: "bashExecution",
+      command: "printf SHELL-MARKER",
+      output: "SHELL-MARKER",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 1,
+      excludeFromContext,
+    });
+    expect(readEntry(t.branch(), id, {}).includes("SHELL-MARKER")).toBe(!excludeFromContext);
+  });
+
+  it("returns the raw entry text in pages", () => {
+    const t = new Transcript();
+    const id = t.tool("read", { path: "a.ts" }, "0123456789");
+    expect(readEntry(t.branch(), id, { offset: 0, limit: 15 })).toBe(
+      "[read result]\n0\n\n[Showing characters 0-15 of 24. Use offset=15 to continue.]",
+    );
+    expect(readEntry(t.branch(), id, { offset: 15, limit: 100 })).toBe("123456789");
+    expect(() => readEntry(t.branch(), "missing", {})).toThrow(/No entry missing/);
+  });
+
+  it("keeps raw images after edits but recalls only their MIME type", () => {
+    const t = new Transcript();
+    const image = {
+      type: "image",
+      data: "AAAA",
+      mimeType: "image/png",
+    } as const;
+    const id = t.tool("read", { path: "a.png" }, [image]);
+    t.session.appendContextEdit(id, {
+      content: [{ type: "text", text: "[image elided]" }],
+    });
+
+    const entry = t.session.getEntry(id);
+    if (entry?.type !== "message" || entry.message.role !== "toolResult")
+      throw new Error("missing raw image result");
+    expect(entry.message.content).toEqual([image]);
+    expect(readEntry(t.branch(), id, {})).toBe("[read result]\n[image image/png]");
+    expect(JSON.stringify(t.session.buildSessionProjection().messages)).not.toContain(
+      '"data":"AAAA"',
+    );
+  });
+
+  it("describes tool calls and images", () => {
+    const t = new Transcript();
+    const id = t.tool("read", { path: "a.png" }, [
+      { type: "image", data: "AAAA", mimeType: "image/png" },
+    ]);
+    const call = t.branch().at(-2)?.id ?? "";
+    expect(readEntry(t.branch(), call, {})).toBe('[tool call read {"path":"a.png"}]');
+    expect(readEntry(t.branch(), id, {})).toBe("[read result]\n[image image/png]");
+  });
+});

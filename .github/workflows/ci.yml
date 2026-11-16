@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PI_PACKAGES: >-
+    @earendil-works/chord
+    @earendil-works/pi-agent-core
+    @earendil-works/pi-ai
+    @earendil-works/pi-codemode
+    @earendil-works/pi-coding-agent
+    @earendil-works/pi-mcp
+    @earendil-works/pi-telemetry
+    @earendil-works/pi-tui
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pi requires Node 22.19 or later.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      # Corepack installs the pnpm version pinned in packageManager and verifies its signature.
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm run verify
+
+  pi-compat:
+    name: Pi ${{ matrix.pi }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pi: [1.0.3, 1.5.1, latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: corepack enable pnpm
+      # Pi's packages depend on each other with caret ranges, so each one is pinned to match a real install.
+      - name: Pin Pi ${{ matrix.pi }}
+        run: |
+          echo "overrides:" >> pnpm-workspace.yaml
+          for package in $PI_PACKAGES; do
+            version=$(npm view "$package@$PI_VERSION" version)
+            echo "  \"$package\": \"$version\"" >> pnpm-workspace.yaml
+          done
+          pnpm install --no-frozen-lockfile --ignore-scripts
+        env:
+          PI_VERSION: ${{ matrix.pi }}
+      # Oldest supported Pi per package: 1.0.3 for pi-context-kit and pi-claude-pro, 1.5.1 for pi-onlooker.
+      - if: matrix.pi == '1.0.3'
+        run: pnpm --filter pi-context-kit --filter pi-claude-pro run check
+      - if: matrix.pi == '1.5.1'
+        run: pnpm --filter pi-onlooker run check
+      - if: matrix.pi == 'latest'
+        run: pnpm run verify
+
+  workflow-security:
+    name: Workflow security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx run zizmor==1.32.0 --format=github .github
+        env:
+          GH_TOKEN: ${{ github.token }}

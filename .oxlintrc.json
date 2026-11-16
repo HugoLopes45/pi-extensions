@@ -1,0 +1,90 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "vitest", "node", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "typeCheck": true,
+    "denyWarnings": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "rules": {
+    "eslint/no-await-in-loop": "off",
+    "eslint/no-console": "error",
+    "typescript/ban-ts-comment": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      {
+        "considerDefaultExhaustiveForUnions": true
+      }
+    ],
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/consistent-function-scoping": "off",
+    "eslint/no-shadow": "off",
+    "typescript/consistent-return": "off",
+    "oxc/no-map-spread": "off",
+    "eslint/no-underscore-dangle": "off",
+    "import/no-unassigned-import": "off",
+    "promise/always-return": "off",
+    "eslint/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "typescript/unbound-method": "off",
+    "typescript/no-unsafe-type-assertion": "error",
+    "typescript/no-unnecessary-type-parameters": "off",
+    "eslint/no-warning-comments": [
+      "error",
+      {
+        "terms": ["oxlint-disable", "eslint-disable"],
+        "location": "start"
+      }
+    ],
+    "typescript/no-deprecated": "error"
+  },
+  "overrides": [
+    {
+      "files": ["packages/*/scripts/**"],
+      "rules": {
+        "eslint/no-console": "off"
+      }
+    },
+    {
+      "files": ["packages/*/test/**"],
+      "rules": {
+        "eslint/no-console": "off",
+        "typescript/no-base-to-string": "off",
+        "promise/no-callback-in-promise": "off"
+      }
+    },
+    {
+      "files": ["packages/pi-context-kit/**", "packages/pi-claude-pro/**"],
+      "rules": {
+        "eslint/complexity": ["error", 10]
+      }
+    },
+    {
+      "files": ["packages/pi-onlooker/**"],
+      "rules": {
+        "eslint/complexity": ["error", 20]
+      }
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "name": "pi-onlooker",
+  "version": "0.1.0",
+  "description": "A second AI model checks the Pi coding agent's work and tells it when it breaks your instructions, repeats a failure or claims work it did not do.",
+  "keywords": [
+    "ai-agent",
+    "code-review",
+    "coding-agent",
+    "llm",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "reviewer",
+    "second-opinion"
+  ],
+  "homepage": "https://github.com/HugoLopes45/pi-extensions/tree/main/packages/pi-onlooker#readme",
+  "bugs": {
+    "url": "https://github.com/HugoLopes45/pi-extensions/issues"
+  },
+  "license": "MIT",
+  "author": "HugoLopes45 (https://github.com/HugoLopes45)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HugoLopes45/pi-extensions.git",
+    "directory": "packages/pi-onlooker"
+  },
+  "files": [
+    "extensions",
+    "src",
+    "skills",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit && vitest --run",
+    "prepublishOnly": "npm run check"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "^1.5.2",
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@earendil-works/pi-tui": "^1.5.2",
+    "@types/node": "^26.6.6",
+    "typebox": "^1.4.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  }
+}
