@@ -84,7 +84,7 @@ After the checks pass on `main`, the `Plan releases` job of `.github/workflows/c
 
 Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. That environment allows the `main` branch and requires the owner's approval. A published version cannot be replaced: fix a bad release with a new version.
 
-`.github/workflows/release.yml` is the earlier manual path: it publishes when the owner publishes a GitHub release with the tag `<package>@vX.Y.Z`.
+If the `Release` job fails after the npm publication, re-run the failed job: it skips the publication of a version that is already on npm, then creates the tag and the GitHub release.
 
 ## Provenance
 

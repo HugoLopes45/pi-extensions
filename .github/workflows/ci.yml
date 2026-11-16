@@ -96,7 +96,7 @@ jobs:
   # Opens or updates the "Version Packages" pull request from the changesets on main.
   version:
     name: Version packages
-    needs: [check, pi, workflow-security]
+    needs: [check, pi-compat, workflow-security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -126,7 +126,7 @@ jobs:
   # A package is released when its package.json version is not on npm yet.
   plan:
     name: Plan releases
-    needs: [check, pi, workflow-security]
+    needs: [check, pi-compat, workflow-security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
@@ -195,7 +195,21 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: npm publish
+      # Skipped when the version is already on npm, so a failed release step can be re-run.
+      - name: Publish to npm
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.npmjs.org/$PACKAGE/$VERSION")
+          case "$status" in
+            200) echo "$PACKAGE@$VERSION is already on npm." ;;
+            404) npm publish ;;
+            *)
+              echo "npm registry returned HTTP $status for $PACKAGE@$VERSION." >&2
+              exit 1
+              ;;
+          esac
+        env:
+          PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ steps.version.outputs.version }}
       - name: Create the GitHub release
         run: gh release create "$PACKAGE@v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$PACKAGE@v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
         env:
