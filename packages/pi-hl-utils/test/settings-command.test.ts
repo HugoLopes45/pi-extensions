@@ -105,6 +105,15 @@ describe("parseSettingsCommand", () => {
     expect(() => parse("set limit")).toThrow(usage);
     expect(() => parse("bogus")).toThrow(usage);
   });
+
+  it("parses input with long runs of spaces in linear time", () => {
+    const start = performance.now();
+    expect(() => parse(`set limit${" ".repeat(50_000)}x`)).toThrow("limit value is not JSON");
+    expect(parse(`set limit${" ".repeat(50_000)}4 --global`)).toMatchObject({
+      patch: { limit: 4 },
+    });
+    expect(performance.now() - start).toBeLessThan(500);
+  });
 });
 
 describe("completeSettingsCommandArguments", () => {
@@ -141,6 +150,12 @@ describe("completeSettingsCommandArguments", () => {
     expect(values("set limit ")).toEqual([]);
     expect(values("on --global ")).toEqual([]);
     expect(values("status ")).toEqual([]);
+  });
+
+  it("completes input with long runs of spaces in linear time", () => {
+    const start = performance.now();
+    expect(values(`${" ".repeat(50_000)}x`)).toEqual([]);
+    expect(performance.now() - start).toBeLessThan(500);
   });
 });
 
