@@ -18,7 +18,7 @@ To try a package in Pi, run `pi -e ./packages/<package>` from the repository roo
 
 `pnpm run verify` runs `pnpm check` (oxfmt in check mode, then oxlint with type-aware rules through `oxlint-tsgolint`), then each package's `check` script (TypeScript with the shared root `tsconfig.json`, then Vitest offline tests). The tests use fake providers and never call a real model.
 
-Lint rules apply to source and tests alike, including the `typescript/no-unsafe-*` rules. In `packages/*/test/**`, only `no-console`, `no-base-to-string` and `promise/no-callback-in-promise` are off. In `packages/*/scripts/**`, `no-console` is off. One root `.oxlintrc.json` lints every package. Cyclomatic complexity is limited to 10 in pi-context-kit and pi-claude-pro, and to 20 in pi-onlooker. Split a function that is too complex. Inline `oxlint-disable` and `eslint-disable` comments are rejected.
+Lint rules apply to source and tests alike, including the `typescript/no-unsafe-*` rules. In `packages/*/test/**`, only `no-console`, `no-base-to-string` and `promise/no-callback-in-promise` are off. In `packages/*/scripts/**`, `no-console` is off. One root `.oxlintrc.json` lints every package. Cyclomatic complexity is limited to 10, and to 20 in pi-onlooker. Split a function that is too complex. Inline `oxlint-disable` and `eslint-disable` comments are rejected.
 
 Each package must declare `"type": "module"` in its `package.json`; otherwise, TypeScript `NodeNext` treats its `.ts` files as CommonJS and rejects `import` and `export`.
 
@@ -58,14 +58,13 @@ Write one paragraph per line. Use `bash` for shell code blocks. Link to files ou
 ## Add an extension
 
 1. Create `packages/<extension>/` with the same layout as the other packages: `extensions/index.ts` as the entry, modules in `src/`, tests in `test/`, and `README.md`, `CHANGELOG.md` and `LICENSE`.
-2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, `engines`, the `pi` manifest and the Pi peer dependencies at `"*"`.
+2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, the `pi` manifest and the Pi peer dependencies at `"*"`. Set `engines.pi` to the oldest supported Pi, for example `">=1.5.1"`: CI checks the package on that version and on the latest.
 3. Add `tsconfig.json` with `{"extends": "../../tsconfig.json", "include": ["extensions", "src", "test"]}`, and adjust `include` to the folders of the package.
-4. In `.oxlintrc.json`, add `packages/<extension>/**` to the `files` of the override that limits `eslint/complexity` to 10.
-5. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new. Add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
-6. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
-7. Run `pnpm install` and `pnpm run verify`.
+4. In `.github/workflows/ci.yml`, add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
+5. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
+6. Run `pnpm install` and `pnpm run verify`.
 
-The first npm version of a new package is published by hand, because the trusted publisher is configured in the package settings on npmjs.com, which exist only after a first publication. After it, configure the trusted publisher as described in [Releases](#releases); later versions are published by CI.
+The first npm version of a new package is published by hand, because the trusted publisher is configured in the package settings on npmjs.com, which exist only after a first publication. After it, configure the trusted publisher as described in [Releases](#releases); later versions are published by CI. CI also creates the missing tag and GitHub release of the version published by hand.
 
 ## Pull requests
 
@@ -80,7 +79,7 @@ Versions and changelogs are managed with [Changesets](https://github.com/changes
 3. GitHub holds the CI run of `Version Packages` until the owner approves it, because `github-actions[bot]` opened the pull request. Approve the run on the pull request, then merge it when you want to release.
 4. Approve the `npm` environment deployment in the CI run on `main`.
 
-After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm. For each one, the `Release` job publishes it with trusted publishing, then creates the tag `<package>@vX.Y.Z` and a GitHub release with its changelog entry. Do not edit versions or `CHANGELOG.md` entries by hand.
+After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm or has no tag. For each one, the `Release` job publishes it with trusted publishing if npm does not have it yet, then creates the tag `<package>@vX.Y.Z` and a GitHub release with its changelog entry. Do not edit versions or `CHANGELOG.md` entries by hand.
 
 Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. That environment allows the `main` branch and requires the owner's approval. A published version cannot be replaced: fix a bad release with a new version.
 
