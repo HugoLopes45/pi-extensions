@@ -1,0 +1,74 @@
+import { expect, it } from "vitest";
+
+import { diagnosticResult } from "../src/diagnostics.js";
+
+const finding = {
+  message: "Wrong type",
+  code: 2322,
+  severity: 1,
+  range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+};
+
+it("returns useful unversioned findings without certification", () => {
+  expect(diagnosticResult({ diagnostics: [finding] }, 1)).toMatchObject({
+    outcome: "partial",
+    evidence: "unversioned_observation",
+    projectComplete: false,
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("keeps an unversioned empty report partial and uncertified", () => {
+  expect(diagnosticResult({ diagnostics: [] }, 1)).toMatchObject({
+    outcome: "partial",
+    projectComplete: false,
+    diagnostics: [],
+  });
+});
+
+it("distinguishes correlated empty observations from stale publications", () => {
+  expect(diagnosticResult({ version: 2, diagnostics: [] }, 2)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+    projectComplete: false,
+  });
+  expect(diagnosticResult({ version: 1, diagnostics: [] }, 2)).toMatchObject({
+    outcome: "superseded",
+  });
+});
+
+it("bounds output and discloses omissions", () => {
+  const result = diagnosticResult(
+    {
+      diagnostics: Array.from({ length: 30 }, () => ({
+        ...finding,
+        message: "x".repeat(2000),
+      })),
+    },
+    1,
+  );
+  expect(result).toMatchObject({ reportedCount: 30, omitted: 10 });
+  expect(JSON.stringify(result).length).toBeLessThan(16000);
+});
+
+it("rejects invalid ranges and invalid publication versions", () => {
+  expect(() => diagnosticResult({ version: -1, diagnostics: [] }, 1)).toThrow(
+    "Invalid diagnostic publication",
+  );
+  expect(() =>
+    diagnosticResult(
+      {
+        diagnostics: [
+          {
+            ...finding,
+            range: {
+              start: { line: -1, character: 0 },
+              end: { line: 0, character: 1 },
+            },
+          },
+        ],
+      },
+      1,
+    ),
+  ).toThrow("Invalid diagnostic publication");
+});
