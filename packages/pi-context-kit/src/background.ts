@@ -3,7 +3,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 export interface Note {
   note: string;
-  usage?: Usage;
+  usage: Usage;
 }
 
 export interface BackgroundNote extends Note {

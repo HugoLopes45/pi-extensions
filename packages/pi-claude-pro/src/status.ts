@@ -73,7 +73,7 @@ export interface StatusInput {
   kind: Access["kind"];
   /** Why the login failed. */
   error?: string;
-  limits?: Limits;
+  limits?: Limits | undefined;
   /** Why the usage lookup failed. */
   usageError?: string;
 }

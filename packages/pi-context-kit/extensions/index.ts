@@ -221,7 +221,7 @@ export default function contextKit(pi: ExtensionAPI): void {
     limit: number;
     /** Undefined when only the background note may be used. */
     messages: Message[] | undefined;
-    focus?: string;
+    focus?: string | undefined;
     signal: AbortSignal;
     cancelBackground: () => void;
   }) => {

@@ -1,9 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BackgroundHandoff, firstEntryAfter } from "../src/background.ts";
+import { BackgroundHandoff, firstEntryAfter, type Note } from "../src/background.ts";
 import { Transcript } from "./fixtures.ts";
 
-const NOTE = { note: "note" };
+const NOTE: Note = {
+  note: "note",
+  usage: {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  },
+};
 
 describe("BackgroundHandoff", () => {
   it("runs once per compaction epoch and hands over a ready note", async () => {

@@ -82,7 +82,7 @@ export function createProviderStream(deps: ProviderDeps): StreamFn {
         // Error responses never reach onResponse, so quota errors are read here.
         fetch: async (input, init) => {
           const send = (body: RequestInit["body"]) =>
-            (options.fetch ?? fetch)(input, { ...init, body });
+            (options.fetch ?? fetch)(input, body === undefined ? init : { ...init, body });
           const body =
             billing !== undefined && typeof init?.body === "string"
               ? JSON.stringify(addThreadBilling(JSON.parse(init.body), billing))
@@ -107,8 +107,10 @@ export function createProviderStream(deps: ProviderDeps): StreamFn {
     const outer = createAssistantMessageEventStream();
     void (async () => {
       for await (const event of inner) {
-        if (event.type === "error" && event.reason === "error")
-          event.error.errorMessage = watch.explain(event.error.errorMessage);
+        if (event.type === "error" && event.reason === "error") {
+          const explained = watch.explain(event.error.errorMessage);
+          if (explained !== undefined) event.error.errorMessage = explained;
+        }
         outer.push(event);
       }
       outer.end();

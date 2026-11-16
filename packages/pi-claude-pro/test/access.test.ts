@@ -20,7 +20,9 @@ function source(apiKey: string | undefined, { configured = true, error = "" } = 
   return {
     hasConfiguredAuth: () => configured,
     getApiKeyAndHeaders: async () =>
-      error ? { ok: false, error } : { ok: true, apiKey, headers: { a: "b" } },
+      error
+        ? { ok: false, error }
+        : { ok: true, ...(apiKey === undefined ? {} : { apiKey }), headers: { a: "b" } },
   };
 }
 
