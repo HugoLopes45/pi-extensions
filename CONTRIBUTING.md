@@ -79,7 +79,7 @@ Versions and changelogs are managed with [Changesets](https://github.com/changes
 3. GitHub holds the CI run of `Version Packages` until the owner approves it, because `github-actions[bot]` opened the pull request. Approve the run on the pull request, then merge it when you want to release.
 4. Approve the `npm` environment deployment in the CI run on `main`.
 
-After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm or has no tag. For each one, the `Release` job publishes it with trusted publishing if npm does not have it yet, then creates the tag `<package>@vX.Y.Z` and a GitHub release with its changelog entry. Do not edit versions or `CHANGELOG.md` entries by hand.
+After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm or has no tag. A package with `"private": true`, such as shared code bundled into the extensions, is never released. For each one, the `Release` job publishes it with trusted publishing if npm does not have it yet, then creates the tag `<package>@vX.Y.Z` and a GitHub release with its changelog entry. Do not edit versions or `CHANGELOG.md` entries by hand.
 
 Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. That environment allows the `main` branch and requires the owner's approval. A published version cannot be replaced: fix a bad release with a new version.
 
