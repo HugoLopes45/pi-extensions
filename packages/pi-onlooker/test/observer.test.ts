@@ -134,7 +134,7 @@ it("queues a streaming nit without steering the active agent", async () => {
                       {
                         severity: "nit",
                         message: "Use the shorter expression.",
-                        evidence: { quote: "Done" },
+                        evidence: { quote: "Use one tool" },
                       },
                     ]
                   : [],

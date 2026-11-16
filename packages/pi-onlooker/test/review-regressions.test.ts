@@ -47,7 +47,11 @@ it("invalidates unconsumed Onlooker steering on disable without removing unrelat
           model,
           toolCall("onlooker_report", {
             findings: [
-              { severity: "blocker", message: "Stale queued finding", evidence: { quote: "Done" } },
+              {
+                severity: "blocker",
+                message: "Stale queued finding",
+                evidence: { quote: "Observed task" },
+              },
             ],
           }),
           options,
@@ -396,7 +400,7 @@ it("retracts queued findings after a model-only change while preserving unrelate
                     {
                       severity: "blocker",
                       message: "Finding from the child's previous model",
-                      evidence: { quote: "Done" },
+                      evidence: { quote: "Owned child task" },
                     },
                   ],
                 }

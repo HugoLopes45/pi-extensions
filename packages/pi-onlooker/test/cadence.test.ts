@@ -146,7 +146,7 @@ it("lets a slow whole-request Review finish within the headless final drain", as
   expect(session.messages.at(-1)).toMatchObject({
     role: "custom",
     customType: "pi-onlooker",
-    content: "Onlooker concern: Verify the slow path.",
+    content: 'Onlooker concern: Verify the slow path.\n[observed through turn 5; quote: "Done"]',
   });
 });
 
@@ -394,7 +394,9 @@ it.each([
     expect(third.header).toContain("Incremental update.");
     const thirdMessages = received(privateRequests[2]);
     expect(thirdMessages).toHaveLength(5);
-    expect(thirdMessages[0]).toBe("user:Onlooker concern: The lexer change lacks a test.");
+    expect(thirdMessages[0]).toBe(
+      'user:Onlooker concern: The lexer change lacks a test.\n[observed through turn 4; quote: "Done"]',
+    );
     expect(thirdMessages[1]).toBe("user:Request 3.");
     expect(thirdMessages.at(-1)).toBe("assistant:Done");
     // Prior findings survive: the repeated Concern is not delivered twice.
@@ -402,8 +404,8 @@ it.each([
       message.role === "custom" && message.customType === "pi-onlooker" ? [message.content] : [],
     );
     expect(delivered).toEqual([
-      "Onlooker concern: The parser change lacks a test.",
-      "Onlooker concern: The lexer change lacks a test.",
+      'Onlooker concern: The parser change lacks a test.\n[observed through turn 2; quote: "Done"]',
+      'Onlooker concern: The lexer change lacks a test.\n[observed through turn 4; quote: "Done"]',
     ]);
     expectStableAcrossCompaction(privateRequests);
   },

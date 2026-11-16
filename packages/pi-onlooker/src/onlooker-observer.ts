@@ -31,7 +31,6 @@ import {
 import {
   seedNote,
   evidenceTokens,
-  evidenceRefs,
   messageOrigins,
   projectEvidence,
   selectContextSeed,
@@ -44,7 +43,12 @@ import {
   type OnlookerSessionOptions,
 } from "./onlooker-session.js";
 import { seedBudget, sessionTokenLimit, type OnlookerConfig } from "./onlooker-settings.js";
-import { cappedResults } from "./utils/evidence.js";
+import {
+  cappedResults,
+  evidenceText,
+  evidenceTools,
+  type EvidenceMessage,
+} from "./utils/evidence.js";
 import { acceptNullForOptionalArguments } from "./utils/null-optional-arguments.js";
 import { calibratedFactor } from "./utils/token-calibration.js";
 
@@ -263,7 +267,10 @@ export class OnlookerObserver {
   /** Each Onlooker model's calibrated multiple of Pi's chars/4 estimate, by `provider/id`. */
   private readonly tokenFactors = new Map<string, number>();
   private suppliedBoundary: ObservationBoundary | undefined;
-  private readonly pendingFindings = new Map<OnlookerFinding, Review>();
+  private readonly pendingFindings = new Map<
+    OnlookerFinding,
+    { review: Review; content: string }
+  >();
   private completed = 0;
   private reviewed = 0;
   /** Completed turns a Review is due to cover, according to `reviewEvery`. */
@@ -285,8 +292,10 @@ export class OnlookerObserver {
   private error: string | undefined;
   private closed = false;
   private disposing: Promise<void> | undefined;
-  /** Tool-Call References supplied to the current Onlooker Session. */
-  private readonly suppliedRefs = new Set<string>();
+  /** Tool-Call References supplied to the current Onlooker Session, with their tool names. */
+  private readonly suppliedRefs = new Map<string, string>();
+  /** Text of the evidence supplied to the current Onlooker Session; reported quotes must occur in it. */
+  private suppliedText = "";
   /** Findings dropped for this observer's lifetime, by reason. */
   private readonly dropped: OnlookerDroppedFindings = {
     unsupported: 0,
@@ -458,7 +467,7 @@ export class OnlookerObserver {
   }
   private retractInvalidFindings(): void {
     const stale = new Set<OnlookerFinding>();
-    for (const [finding, review] of this.pendingFindings) {
+    for (const [finding, { review }] of this.pendingFindings) {
       if (!this.current(review)) {
         stale.add(finding);
         this.pendingFindings.delete(finding);
@@ -579,6 +588,7 @@ export class OnlookerObserver {
     this.supplied = undefined;
     this.suppliedBoundary = undefined;
     this.suppliedRefs.clear();
+    this.suppliedText = "";
     return runtime;
   }
 
@@ -737,11 +747,15 @@ export class OnlookerObserver {
               terminate: true,
             };
           }
-          const { supported, unsupported } = checkEvidence(report.findings, this.suppliedRefs);
+          const { supported, unsupported } = checkEvidence(
+            report.findings,
+            this.suppliedRefs,
+            this.suppliedText,
+          );
           active.findings = selectFindings(supported, this.limits.maxFindingsPerReview);
           this.dropped.unsupported += unsupported.length;
           const text = unsupported.length
-            ? `Review recorded. Dropped ${unsupported.length} ${unsupported.length === 1 ? "finding" : "findings"} citing no evidence or a Tool-Call Reference absent from the supplied evidence: ${unsupported.map((finding) => JSON.stringify(finding.message.slice(0, 120))).join("; ")}. Cite a \`ref\` from the evidence or a verbatim quote.`
+            ? `Review recorded. Dropped ${unsupported.length} ${unsupported.length === 1 ? "finding" : "findings"} citing no evidence or a Tool-Call Reference or quote absent from the supplied evidence: ${unsupported.map((finding) => JSON.stringify(finding.message.slice(0, 120))).join("; ")}. Cite a \`ref\` from the evidence or a verbatim quote.`
             : "Review recorded";
           return {
             content: [{ type: "text", text }],
@@ -802,6 +816,10 @@ export class OnlookerObserver {
     return { runtime: this.runtime, stable };
   }
 
+  private supply(messages: EvidenceMessage[]): void {
+    for (const [ref, tool] of evidenceTools(messages)) this.suppliedRefs.set(ref, tool);
+    this.suppliedText += `\n${evidenceText(messages)}`;
+  }
   /**
    * Review Evidence the Onlooker Session has not yet received, as prompt JSON ending with
    * `extras`. A new Onlooker Session gets a Context Seed fitted to the seed budget, which also
@@ -817,7 +835,7 @@ export class OnlookerObserver {
     if (stable && this.supplied) {
       const fresh = snapshot.messages.slice(this.supplied.messages.length);
       const { messages, images } = projectEvidence(fresh, this.projection());
-      for (const ref of evidenceRefs(messages)) this.suppliedRefs.add(ref);
+      this.supply(messages);
       this.spend.evidence.cappedResults += cappedResults(fresh, this.projection().toolResultCap);
       return { note: "", images, json: JSON.stringify({ messages, ...extras }) };
     }
@@ -830,7 +848,7 @@ export class OnlookerObserver {
       ...this.projection(),
     });
     const { observedSetup, messages, images } = seed;
-    for (const ref of evidenceRefs(messages)) this.suppliedRefs.add(ref);
+    this.supply(messages);
     const json = JSON.stringify({ observedSetup, messages, ...extras });
     const { evidence } = this.spend;
     evidence.seeds++;
@@ -887,7 +905,7 @@ export class OnlookerObserver {
       if (!review.findings) throw new Error("Onlooker Review did not call onlooker_report");
       this.reviewed = through;
       // A Review ended by invalid reports judged nothing, so withheld findings wait for the next.
-      if (!review.invalid) await this.deliver(review.findings, review);
+      if (!review.invalid) await this.deliver(review.findings, review, through);
     } finally {
       review.cancellation.signal.removeEventListener("abort", abort);
       // After the prompt settles: a cancelled Review is billed for its aborted response too.
@@ -1101,23 +1119,48 @@ export class OnlookerObserver {
   }
 
   /** Delivered even when newer turns completed during the Review: the agent judges staleness. */
-  private async deliver(findings: readonly OnlookerFinding[], review: Review): Promise<void> {
+  private async deliver(
+    findings: readonly OnlookerFinding[],
+    review: Review,
+    through: number,
+  ): Promise<void> {
     const fresh = findings.filter((finding) => {
       const deliveredRank = this.delivered.get(normalized(finding.message)) ?? 0;
       return severityRank[finding.severity] > deliveredRank;
     });
-    for (const finding of fresh) if (!(await this.send(finding, review))) return;
+    for (const finding of fresh) if (!(await this.send(finding, review, through))) return;
+  }
+  /**
+   * The model-visible text of a finding. The agent reads only this text, so it states which
+   * observed turns the Review covered and the evidence it cites; the finding may be outdated.
+   */
+  private findingText(finding: OnlookerFinding, through: number): string {
+    const later = this.completed - through;
+    const provenance = [`observed through turn ${through}`];
+    if (later) provenance.push(`${later} later ${later === 1 ? "turn" : "turns"} not reviewed`);
+    const refs = finding.evidence?.refs ?? [];
+    if (refs.length)
+      provenance.push(
+        `evidence: ${refs.map((ref) => `${this.suppliedRefs.get(ref)}#${ref}`).join(", ")}`,
+      );
+    const quote = finding.evidence?.quote;
+    if (quote)
+      provenance.push(
+        `quote: ${JSON.stringify(quote.length > 120 ? `${quote.slice(0, 120)}…` : quote)}`,
+      );
+    return `${finding.name} ${finding.severity}: ${finding.message}\n[${provenance.join("; ")}]`;
   }
   /** Sends one finding; false once its Review is no longer current. */
-  private async send(finding: OnlookerFinding, review: Review): Promise<boolean> {
+  private async send(finding: OnlookerFinding, review: Review, through: number): Promise<boolean> {
     this.delivered.set(normalized(finding.message), severityRank[finding.severity]);
     const running = this.observed.isStreaming;
     finding.name = this.config.name;
-    this.pendingFindings.set(finding, review);
+    const content = this.findingText(finding, through);
+    this.pendingFindings.set(finding, { review, content });
     await this.observed.sendCustomMessage(
       {
         customType: "pi-onlooker",
-        content: `${finding.name} ${finding.severity}: ${finding.message}`,
+        content,
         display: true,
         details: finding,
       },
@@ -1145,12 +1188,12 @@ export class OnlookerObserver {
     const pending = [...this.pendingFindings];
     retractFindings(this.observed, new Set(this.pendingFindings.keys()));
     this.pendingFindings.clear();
-    for (const [finding, review] of pending) {
+    for (const [finding, { review, content }] of pending) {
       if (!this.current(review)) continue;
       await this.observed.sendCustomMessage(
         {
           customType: "pi-onlooker",
-          content: `${finding.name} ${finding.severity}: ${finding.message}`,
+          content,
           display: true,
           details: finding,
         },

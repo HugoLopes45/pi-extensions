@@ -37,17 +37,24 @@ export function selectFindings(
 }
 
 /**
- * Split reported findings by their evidence: each must cite a Tool-Call Reference or a quote,
- * and every cited reference must have been supplied to this Onlooker Session (or cited by a
- * deferred finding it is re-validating). Quotes are not checked against the evidence.
+ * Split reported findings by their evidence: each must cite a Tool-Call Reference or a quote.
+ * Every cited reference and quote must occur in the evidence supplied to this Onlooker Session.
  */
-export function checkEvidence(findings: readonly OnlookerFinding[], known: ReadonlySet<string>) {
+export function checkEvidence(
+  findings: readonly OnlookerFinding[],
+  known: ReadonlyMap<string, string>,
+  suppliedText: string,
+) {
   const supported: OnlookerFinding[] = [];
   const unsupported: OnlookerFinding[] = [];
   for (const finding of findings) {
     const refs = (finding.evidence?.refs ?? []).map((ref) => ref.trim().replace(/^`(.*)`$/, "$1"));
     const quote = finding.evidence?.quote?.trim();
-    if ((!refs.length && !quote) || refs.some((ref) => !known.has(ref))) {
+    if (
+      (!refs.length && !quote) ||
+      refs.some((ref) => !known.has(ref)) ||
+      (quote && !suppliedText.includes(quote))
+    ) {
       unsupported.push(finding);
       continue;
     }

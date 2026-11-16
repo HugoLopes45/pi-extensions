@@ -116,11 +116,40 @@ it("delivers a Review's findings when newer turns completed during the Review", 
   await session.prompt("Fix the parser");
   expect(observer.status).toMatchObject({ lastError: null, backlog: 0 });
   expect(privateRequests).toHaveLength(2);
+  const [ref] = refsIn(privateRequests[0]);
   expect(delivered(session)).toEqual([
-    "Onlooker concern: The parser fix was not verified.",
-    "Onlooker nit: Name the parser helper consistently.",
+    `Onlooker concern: The parser fix was not verified.\n[observed through turn 1; 1 later turn not reviewed; evidence: bash#${ref}]`,
+    'Onlooker nit: Name the parser helper consistently.\n[observed through turn 1; 1 later turn not reviewed; quote: "ok 0-0"]',
   ]);
   expectStableOnlookerPrefix(privateRequests);
+});
+
+it("delivers a persistent defect once and stamps a later finding with its own boundary", async () => {
+  const privateRequests: PrivateRequest[] = [];
+  const persistent = {
+    severity: "concern" as const,
+    message: "The parser fix was not verified.",
+    evidence: { quote: "ok 0-0" },
+  };
+  globalThis.onlookerObserverTest = longSessionStream({ "Fix the parser": 1 }, privateRequests, {
+    ...ok,
+    report: (review) => ({
+      findings:
+        review === 1
+          ? [persistent]
+          : [
+              persistent,
+              { severity: "nit", message: "Say which test ran.", evidence: { quote: "ok 0-0" } },
+            ],
+    }),
+  });
+  const { session } = await observe({});
+  await session.prompt("Fix the parser");
+  expect(privateRequests).toHaveLength(2);
+  expect(delivered(session)).toEqual([
+    'Onlooker concern: The parser fix was not verified.\n[observed through turn 1; quote: "ok 0-0"]',
+    'Onlooker nit: Say which test ran.\n[observed through turn 2; quote: "ok 0-0"]',
+  ]);
 });
 
 it("delivers every Nit, with no cap per request", async () => {
@@ -160,11 +189,11 @@ it("delivers every Nit, with no cap per request", async () => {
   await session.prompt("Second task");
   await expect.poll(() => nits().length).toBe(5);
   expect(nits()).toEqual([
-    "Onlooker nit: Nit A.",
-    "Onlooker nit: Nit B.",
-    "Onlooker nit: Nit C.",
-    "Onlooker nit: Nit D.",
-    "Onlooker nit: Nit 2.",
+    'Onlooker nit: Nit A.\n[observed through turn 1; 1 later turn not reviewed; quote: "Done"]',
+    'Onlooker nit: Nit B.\n[observed through turn 1; 1 later turn not reviewed; quote: "Done"]',
+    'Onlooker nit: Nit C.\n[observed through turn 1; 1 later turn not reviewed; quote: "Done"]',
+    'Onlooker nit: Nit D.\n[observed through turn 1; 1 later turn not reviewed; quote: "Done"]',
+    'Onlooker nit: Nit 2.\n[observed through turn 2; quote: "Done"]',
   ]);
 });
 
@@ -225,12 +254,12 @@ it("accepts Tool-Call References supplied by a Consultation or a rebuilt Context
   expect(seedPayload(privateRequests.at(-1)).header).toContain("Current context seed.");
   expect(reviewRefs).toEqual(expectedRefs);
   expect(delivered(session)).toEqual([
-    "Onlooker concern: The parser read was unchecked.",
-    "Onlooker blocker: The parser read was unchecked.",
+    `Onlooker concern: The parser read was unchecked.\n[observed through turn 2; evidence: bash#${consultationRefs[0]}]`,
+    `Onlooker blocker: The parser read was unchecked.\n[observed through turn 1; evidence: bash#${consultationRefs[0]}]`,
   ]);
 });
 
-it("drops findings that cite no evidence or a Tool-Call Reference the Onlooker was not given", async () => {
+it("drops findings that cite no evidence, a Tool-Call Reference the Onlooker was not given, or an unobserved quote", async () => {
   const privateRequests: PrivateRequest[] = [];
   globalThis.onlookerObserverTest = longSessionStream({ "Fix the parser": 1 }, privateRequests, {
     ...ok,
@@ -247,6 +276,11 @@ it("drops findings that cite no evidence or a Tool-Call Reference the Onlooker w
           { severity: "nit", message: "Quoted finding.", evidence: { quote: "ok 0-0" } },
           { severity: "concern", message: "Invented reference.", evidence: { refs: ["ZZZZZZZZ"] } },
           { severity: "blocker", message: "Uncited finding.", evidence: {} },
+          {
+            severity: "concern",
+            message: "Invented quote.",
+            evidence: { quote: "never observed" },
+          },
         ],
       };
     },
@@ -255,11 +289,12 @@ it("drops findings that cite no evidence or a Tool-Call Reference the Onlooker w
   await session.prompt("Fix the parser");
   expect(observer.status).toMatchObject({
     lastError: null,
-    droppedFindings: { unsupported: 2 },
+    droppedFindings: { unsupported: 3 },
   });
+  const [ref] = refsIn(privateRequests[0]);
   expect(delivered(session)).toEqual([
-    "Onlooker concern: Cited finding.",
-    "Onlooker nit: Quoted finding.",
+    `Onlooker concern: Cited finding.\n[observed through turn 1; evidence: bash#${ref}]`,
+    'Onlooker nit: Quoted finding.\n[observed through turn 1; quote: "ok 0-0"]',
   ]);
   // The cited reference is journaled without its formatting.
   const cited = session.messages.find((message) => message.role === "custom");
@@ -269,7 +304,7 @@ it("drops findings that cite no evidence or a Tool-Call Reference the Onlooker w
   // The Onlooker learns which findings were dropped, in its own history.
   const report = privateRequests[1]?.messages.find((message) => message.role === "toolResult");
   expect(JSON.stringify(report)).toContain(
-    'Dropped 2 findings citing no evidence or a Tool-Call Reference absent from the supplied evidence: \\"Invented reference.\\"; \\"Uncited finding.\\"',
+    'Dropped 3 findings citing no evidence or a Tool-Call Reference or quote absent from the supplied evidence: \\"Invented reference.\\"; \\"Uncited finding.\\"; \\"Invented quote.\\"',
   );
   expectStableOnlookerPrefix(privateRequests);
 });
@@ -321,7 +356,9 @@ it("accepts a corrected onlooker_report after one invalid call without pausing",
     toolName: "onlooker_report",
     isError: true,
   });
-  expect(delivered(session)).toEqual(["Onlooker concern: Corrected."]);
+  expect(delivered(session)).toEqual([
+    'Onlooker concern: Corrected.\n[observed through turn 1; quote: "Answer"]',
+  ]);
 });
 
 it("accepts null for an optional field of an onlooker_report finding's evidence like omitting it", async () => {
@@ -348,7 +385,9 @@ it("accepts null for an optional field of an onlooker_report finding's evidence 
   });
   // No report was rejected with a request to retry.
   expect(JSON.stringify(privateRequests)).not.toContain("Call onlooker_report again");
-  expect(delivered(session)).toEqual(["Onlooker concern: Cited."]);
+  expect(delivered(session)).toEqual([
+    'Onlooker concern: Cited.\n[observed through turn 1; quote: "Answer"]',
+  ]);
 });
 
 it("drops a legacy single-finding report, which cites no evidence", async () => {

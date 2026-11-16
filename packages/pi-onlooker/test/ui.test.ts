@@ -183,7 +183,12 @@ describe("Interventions", () => {
       { role: "assistant", content: [{ type: "text", text: "Done" }] },
       {
         role: "user",
-        content: [{ type: "text", text: "Onlooker concern: Re-run the failing test" }],
+        content: [
+          {
+            type: "text",
+            text: 'Onlooker concern: Re-run the failing test\n[observed through turn 1; quote: "Done"]',
+          },
+        ],
       },
       { role: "user", content: [{ type: "text", text: "Second task" }] },
     ]);

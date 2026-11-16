@@ -6,6 +6,7 @@ Pi shows the entries newer than your installed version after `pi update`.
 
 - Requires Pi 1.5.1 or later. On Pi 1.5.0, grep results for lines that contain a carriage return are hidden.
 - Findings no longer wait for revalidation after newer turns, and Concern cooldowns and per-request Nit caps are removed. Evidence validation and deduplication remain.
+- Each finding the agent receives states the last turn the Review observed, the number of later turns it did not review, and its evidence as `tool#ref` or a quote. The Onlooker drops a finding whose quote does not occur verbatim in the evidence it was given. This reduces the risk that the agent acts on an outdated or invented finding; it does not prove the finding still applies.
 - Concerns and Blockers can trigger one corrective continuation per interactive request. Set `correct` to `false` to disable it. Cancelling during post-run compaction suppresses pending and late corrective continuations until a new user request.
 
 - The footer uses fixed activity, waiting and pause icons instead of state labels or a backlog count. It retains the display name and model. Detailed status remains available through `/onlooker status`.

@@ -46,13 +46,37 @@ export function toolCallRef(toolCallId: unknown): string {
   return createHash("sha256").update(String(toolCallId)).digest("base64url").slice(0, 8);
 }
 
+/** Every Tool-Call Reference in projected evidence with its tool name, from calls and results. */
+export function evidenceTools(messages: readonly EvidenceMessage[]): [ref: string, tool: string][] {
+  return messages.flatMap((message): [string, string][] => {
+    if (message.role === "toolResult") return [[message.ref, message.toolName]];
+    if (message.role !== "assistant") return [];
+    return message.content.flatMap((block): [string, string][] =>
+      block.type === "toolCall" ? [[block.ref, block.name]] : [],
+    );
+  });
+}
+
 /** Every Tool-Call Reference in projected evidence, from calls and their results. */
 export function evidenceRefs(messages: readonly EvidenceMessage[]): string[] {
-  return messages.flatMap((message) => {
-    if (message.role === "toolResult") return [message.ref];
-    if (message.role !== "assistant") return [];
-    return message.content.flatMap((block) => (block.type === "toolCall" ? [block.ref] : []));
-  });
+  return evidenceTools(messages).map(([ref]) => ref);
+}
+
+/** The text fields of projected evidence that a finding may quote. */
+export function evidenceText(messages: readonly EvidenceMessage[]): string {
+  return messages
+    .flatMap((message) =>
+      typeof message.content === "string" ? [message.content] : message.content.flatMap(blockText),
+    )
+    .join("\n");
+}
+
+function blockText(block: EvidenceBlock): string[] {
+  if (block.type === "text") return [block.text];
+  if (block.type === "thinking") return "thinking" in block ? [block.thinking] : [];
+  if (block.type === "toolCall")
+    return Object.values(block.arguments).filter((value) => typeof value === "string");
+  return [];
 }
 
 /**
