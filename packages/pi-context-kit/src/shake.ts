@@ -23,7 +23,10 @@ export interface ShakeOptions {
 
 /** A fenced code block, or an XML-like element with a matching closing tag. */
 const BLOCK =
-  /(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n[ \t]*\1|<([A-Za-z][\w.:-]*)(?:\s[^<>]*)?>[\s\S]*?<\/\2>/g;
+  /(?=(`{3,}|~{3,}))\1[^\n]*\n[\s\S]*?\n[ \t]*\1|<([A-Za-z][\w.:-]*)(?:\s[^<>]*)?>[\s\S]*?<\/\2>/y;
+const BLOCK_START = /(?<!`)`{3,}|(?<!~)~{3,}|<[A-Za-z]/g;
+const OPEN_TAG = /<([A-Za-z][\w.:-]*)(?:\s[^<>]*)?>/y;
+const CLOSE_TAG = /<\/([A-Za-z][\w.:-]*)>/g;
 
 /**
  * Elides large blocks and images from older messages. Tool calls and thinking stay intact,
@@ -93,12 +96,43 @@ function shakeContent(
 }
 
 function elideBlocks(text: string, id: string, minTokens: number): string {
-  return text.replace(BLOCK, (block) => {
-    const tokens = Math.ceil(block.length / 4);
-    return tokens < minTokens
-      ? block
-      : `[Elided block: about ${tokens} tokens. Call recall with entryId "${id}" to read it.]`;
-  });
+  const lastCloser = new Map(
+    Array.from(text.matchAll(CLOSE_TAG), (match) => [match[1], match.index]),
+  );
+  const unclosedFences = new Set<string>();
+  let result = "";
+  let copied = 0;
+  BLOCK_START.lastIndex = 0;
+  for (let start = BLOCK_START.exec(text); start; start = BLOCK_START.exec(text)) {
+    BLOCK.lastIndex = start.index;
+    const block = cannotClose(text, start, unclosedFences, lastCloser) ? null : BLOCK.exec(text);
+    if (!block) {
+      if (!start[0].startsWith("<")) unclosedFences.add(start[0]);
+      continue;
+    }
+    const tokens = Math.ceil(block[0].length / 4);
+    const notice = `[Elided block: about ${tokens} tokens. Call recall with entryId "${id}" to read it.]`;
+    result += text.slice(copied, start.index) + (tokens < minTokens ? block[0] : notice);
+    copied = BLOCK_START.lastIndex = BLOCK.lastIndex;
+  }
+  return result + text.slice(copied);
+}
+
+/**
+ * Rules out openers without a closer before scanning, so unclosed input does not rescan the
+ * text to its end once per opener. A fence that fails to close leaves no closer for any later
+ * fence of the same length.
+ */
+function cannotClose(
+  text: string,
+  start: RegExpExecArray,
+  unclosedFences: ReadonlySet<string>,
+  lastCloser: ReadonlyMap<string | undefined, number>,
+): boolean {
+  if (!start[0].startsWith("<")) return unclosedFences.has(start[0]);
+  OPEN_TAG.lastIndex = start.index;
+  const name = OPEN_TAG.exec(text)?.[1];
+  return name !== undefined && (lastCloser.get(name) ?? -1) < OPEN_TAG.lastIndex;
 }
 
 function imageNotice(id: string): TextContent {

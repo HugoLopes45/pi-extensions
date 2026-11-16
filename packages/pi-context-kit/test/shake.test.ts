@@ -31,6 +31,37 @@ describe("shake", () => {
     ]);
   });
 
+  it("elides blocks quickly in output with many unclosed tags", () => {
+    const t = new Transcript();
+    const page = `${"<br>line\n".repeat(25_000)}<log>\n${filler(300)}\n</log>`;
+    const id = t.assistant(page);
+    t.assistant(filler(600));
+    const started = performance.now();
+    const edits = shake(t.entries(), ELIDE);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(edits[0]?.targetId).toBe(id);
+    expect(JSON.stringify(edits[0]?.content)).toContain("[Elided block: about 304 tokens.");
+  });
+
+  it("elides blocks quickly in output with many unclosed fences", () => {
+    const t = new Transcript();
+    const id = t.assistant(`${"a````\n```\n".repeat(20_000)}${fenced(300)}`);
+    t.assistant(filler(600));
+    const started = performance.now();
+    const edits = shake(t.entries(), ELIDE);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(edits[0]?.targetId).toBe(id);
+    expect(JSON.stringify(edits[0]?.content)).toContain("[Elided block: about 303 tokens.");
+  });
+
+  it("keeps a fence that only a shorter fence follows", () => {
+    const t = new Transcript();
+    const text = `\`\`\`\`ts\n${filler(300)}\n\`\`\``;
+    t.assistant(text);
+    t.assistant(filler(600));
+    expect(shake(t.entries(), ELIDE)).toEqual([]);
+  });
+
   it("preserves user instructions and user images", () => {
     const t = new Transcript();
     const instruction = `Preserve this instruction.\\n${fenced(600)}`;
