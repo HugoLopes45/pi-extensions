@@ -208,6 +208,116 @@ describe("layered settings resolution", () => {
   });
 });
 
+describe("global-only settings", () => {
+  const globalOnlyKeys: readonly (keyof Options)[] = ["limit"];
+  const restrictedDefinition = {
+    ...definition,
+    sessionEntryType,
+    globalOnlyKeys,
+  };
+  const restricted = () => defineLayeredSettings(restrictedDefinition);
+  const nonGlobalScopes: ("project" | "session")[] = ["project", "session"];
+
+  it.each(nonGlobalScopes)("rejects a global-only option parsed for %s", (scope) => {
+    expect(() => restricted().parseOptions({ limit: 5 }, scope)).toThrow(
+      `Invalid ${scope} Demo settings: limit is global-only; set it in global settings`,
+    );
+  });
+
+  it("preserves the trusted project's scope error and refuses resolution", () => {
+    const { manager } = storageHarness("{}", JSON.stringify({ demo: { limit: 5 } }));
+    const settings = restricted();
+    const layers = settings.readLayers(manager);
+    expect(errorMessage(layers.project)).toBe(
+      "Invalid project Demo settings: limit is global-only; set it in global settings",
+    );
+    expect(() =>
+      settings.readSettings({ settingsManager: manager, sessionManager: branch() }, layers),
+    ).toThrow("Invalid project Demo settings: limit is global-only; set it in global settings");
+  });
+
+  it("rejects a global-only option replayed from a session entry", () => {
+    expect(() =>
+      restricted().readOverrides(branch({ version: 1, overrides: { limit: 5 } })),
+    ).toThrow("Invalid session Demo settings: limit is global-only; set it in global settings");
+  });
+
+  it("rejects a global-only option in caller-supplied project layers", () => {
+    const { manager } = storageHarness();
+    expect(() =>
+      restricted().readSettings(
+        { settingsManager: manager, sessionManager: branch() },
+        { global: {}, project: { limit: 5 } },
+      ),
+    ).toThrow("Invalid project Demo settings: limit is global-only; set it in global settings");
+  });
+
+  it("rejects a direct project write without changing its document", async () => {
+    const { documents, manager } = storageHarness("{}", '{"theme":"dark"}');
+    await expect(
+      restricted().writeSettings(
+        manager,
+        "project",
+        { action: "set", key: "limit", patch: { limit: 5 } },
+        () => true,
+      ),
+    ).rejects.toThrow(
+      "Invalid project Demo settings: limit is global-only; set it in global settings",
+    );
+    expect(documents.project).toBe('{"theme":"dark"}');
+  });
+
+  it("rejects a direct session write without appending an entry", async () => {
+    const { manager } = storageHarness();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    await expect(
+      restricted().writeChange(
+        { appendEntry },
+        { settingsManager: manager, sessionManager: branch() },
+        "session",
+        { action: "set", key: "limit", patch: { limit: 5 } },
+        () => true,
+      ),
+    ).rejects.toThrow(
+      "Invalid session Demo settings: limit is global-only; set it in global settings",
+    );
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("allows the global value and ordinary session overrides", async () => {
+    const { manager } = storageHarness(JSON.stringify({ demo: { limit: 5 } }));
+    const settings = restricted();
+    expect(
+      settings.readSettings({
+        settingsManager: manager,
+        sessionManager: branch({ version: 1, overrides: { enabled: true } }),
+      }).settings,
+    ).toEqual({ enabled: true, limit: 5, tools: { read: true } });
+    await expect(
+      settings.writeSettings(
+        manager,
+        "global",
+        { action: "set", key: "limit", patch: { limit: 9 } },
+        () => true,
+      ),
+    ).resolves.toEqual({ limit: 9 });
+  });
+
+  it("still ignores the whole untrusted project layer", () => {
+    const { manager } = storageHarness(
+      JSON.stringify({ demo: { limit: 5 } }),
+      JSON.stringify({ demo: { limit: 9 } }),
+      false,
+    );
+    expect(
+      restricted().readSettings({
+        settingsManager: manager,
+        sessionManager: branch(),
+      }).settings.limit,
+    ).toBe(5);
+  });
+});
+
 describe("layered settings definition", () => {
   it("requires every schema property to be optional", () => {
     expect(() =>
