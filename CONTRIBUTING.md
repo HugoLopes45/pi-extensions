@@ -53,23 +53,38 @@ A package README has these sections, in this order. Leave out a section only whe
 11. `## Update, try or remove`.
 12. `## Contributing`, `## Author` and `## License`, with the same text in each package.
 
-Write one paragraph per line. Use `bash` for shell code blocks. Link to files outside the package with absolute GitHub URLs, because npm shows the README without the repository. When behavior changes, update the README and the `Unreleased` section of `CHANGELOG.md` in the same pull request.
+Write one paragraph per line. Use `bash` for shell code blocks. Link to files outside the package with absolute GitHub URLs, because npm shows the README without the repository. When behavior changes, update the README and add a changeset in the same pull request (see [Releases](#releases)).
+
+## Add an extension
+
+1. Create `packages/<extension>/` with the same layout as the other packages: `extensions/index.ts` as the entry, modules in `src/`, tests in `test/`, and `README.md`, `CHANGELOG.md` and `LICENSE`.
+2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, `engines`, the `pi` manifest and the Pi peer dependencies at `"*"`.
+3. Add `tsconfig.json` with `{"extends": "../../tsconfig.json", "include": ["extensions", "src", "test"]}`, and adjust `include` to the folders of the package.
+4. In `.oxlintrc.json`, add `packages/<extension>/**` to the `files` of the override that limits `eslint/complexity` to 10.
+5. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new. Add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
+6. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
+7. Run `pnpm install` and `pnpm run verify`.
+
+The first npm version of a new package is published by hand, because the trusted publisher is configured in the package settings on npmjs.com, which exist only after a first publication. After it, configure the trusted publisher as described in [Releases](#releases); later versions are published by CI.
 
 ## Pull requests
 
-Open a branch or fork, then submit a pull request against `main`. Explain the problem, the minimal fix and the checks you ran. Keep unrelated changes in separate pull requests. Give the pull request a title that describes the user-visible change; release notes are generated from these titles.
+Open a branch or fork, then submit a pull request against `main`. Explain the problem, the minimal fix and the checks you ran. Keep unrelated changes in separate pull requests. Give the pull request a title that describes the change.
 
 ## Releases
 
-Only the repository owner publishes. Each package is released on its own:
+Versions and changelogs are managed with [Changesets](https://github.com/changesets/changesets). Each package is released on its own.
 
-1. Move the `Unreleased` entries of `packages/<package>/CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, in words a user understands, and merge to `main`. Pi shows this entry to users after `pi update`.
-2. Wait for CI to pass on that commit.
-3. Publish a GitHub release with the tag `<package>@vX.Y.Z`, for example `pi-context-kit@v0.4.3`.
+1. In each pull request that changes what users get, run `pnpm changeset`. Select the packages, the bump (`patch` for a fix, `minor` for a new feature, `major` for a breaking change) and write one sentence a user understands. Commit the file it creates in `.changeset/`. Pi shows this sentence to users after `pi update`.
+2. After the merge, CI on `main` opens or updates the `Version Packages` pull request. It bumps each `package.json` version and writes the `CHANGELOG.md` entries from the changesets.
+3. GitHub holds the CI run of `Version Packages` until the owner approves it, because `github-actions[bot]` opened the pull request. Approve the run on the pull request, then merge it when you want to release.
+4. Approve the `npm` environment deployment in the CI run on `main`.
 
-`.github/workflows/release.yml` checks the tag, the commit and the changelog entry, sets the version and publishes to npm with trusted publishing, through the `npm` environment. It does not rerun the checks; it relies on CI on `main`. Do not bump the version in pull requests: the tag sets it.
+After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm. For each one, the `Release` job publishes it with trusted publishing, then creates the tag `<package>@vX.Y.Z` and a GitHub release with its changelog entry. Do not edit versions or `CHANGELOG.md` entries by hand.
 
-Configure each package's npm trusted publisher with this repository, `release.yml` and the `npm` environment. Restrict that environment to tags `*@v*` and make the owner its required reviewer. A published version cannot be replaced: fix a bad release with a new version.
+Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. That environment allows the `main` branch and requires the owner's approval. A published version cannot be replaced: fix a bad release with a new version.
+
+If the `Release` job fails after the npm publication, re-run the failed job: it skips the publication of a version that is already on npm, then creates the tag and the GitHub release.
 
 ## Provenance
 
