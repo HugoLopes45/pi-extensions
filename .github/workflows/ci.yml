@@ -22,7 +22,8 @@ env:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main can publish, so only pull request runs are cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -91,3 +92,83 @@ jobs:
       - run: pipx run zizmor==1.32.0 --format=github .github
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # A package is released when its package.json version is not on npm yet.
+  plan:
+    name: Plan releases
+    needs: [check, pi, workflow-security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.plan.outputs.packages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: plan
+        run: |
+          packages='[]'
+          for manifest in packages/*/package.json; do
+            package=$(jq -r .name "$manifest")
+            version=$(jq -r .version "$manifest")
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.npmjs.org/$package/$version")
+            case "$status" in
+              200) ;;
+              404) packages=$(jq --compact-output --arg package "$package" '. + [$package]' <<< "$packages") ;;
+              *)
+                echo "npm registry returned HTTP $status for $package@$version." >&2
+                exit 1
+                ;;
+            esac
+          done
+          echo "packages=$packages" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Release ${{ matrix.package }}
+    needs: plan
+    if: needs.plan.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    environment: npm
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.packages) }}
+    concurrency:
+      group: release-${{ matrix.package }}
+      cancel-in-progress: false
+    permissions:
+      contents: write # create the tag and the GitHub release
+      id-token: write # npm trusted publishing and provenance
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - id: version
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+      # Pi shows CHANGELOG.md to users after an update; the entry is also the release notes.
+      - name: Read the changelog entry
+        run: |
+          awk -v heading="## [$VERSION]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "CHANGELOG.md needs a non-empty '## [$VERSION]' entry." >&2
+            exit 1
+          fi
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: npm publish
+      - name: Create the GitHub release
+        run: gh release create "$PACKAGE@v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$PACKAGE@v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ matrix.package }}
+          VERSION: ${{ steps.version.outputs.version }}

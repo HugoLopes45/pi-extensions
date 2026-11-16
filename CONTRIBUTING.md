@@ -65,7 +65,7 @@ Write one paragraph per line. Use `bash` for shell code blocks. Link to files ou
 6. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
 7. Run `pnpm install` and `pnpm run verify`.
 
-The first npm version of a new package is published by hand, because npm accepts a trusted publisher only for a package that exists. After it, configure the trusted publisher as described in [Releases](#releases); later versions go through `release.yml`.
+The first npm version of a new package is published by hand, because the trusted publisher is configured in the package settings on npmjs.com, which exist only after a first publication. After it, configure the trusted publisher as described in [Releases](#releases); later versions are published by CI.
 
 ## Pull requests
 
@@ -75,13 +75,15 @@ Open a branch or fork, then submit a pull request against `main`. Explain the pr
 
 Only the repository owner publishes. Each package is released on its own:
 
-1. Move the `Unreleased` entries of `packages/<package>/CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, in words a user understands, and merge to `main`. Pi shows this entry to users after `pi update`.
-2. Wait for CI to pass on that commit.
-3. Publish a GitHub release with the tag `<package>@vX.Y.Z`, for example `pi-context-kit@v0.4.3`.
+1. In one pull request, set `version` in `packages/<package>/package.json` to `X.Y.Z` and move the `Unreleased` entries of its `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, in words a user understands. Pi shows this entry to users after `pi update`.
+2. Merge the pull request.
+3. Approve the `npm` environment deployment in the CI run on `main`.
 
-`.github/workflows/release.yml` checks the tag, the commit and the changelog entry, sets the version and publishes to npm with trusted publishing, through the `npm` environment. It does not rerun the checks; it relies on CI on `main`. Do not bump the version in pull requests: the tag sets it.
+After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm. For each one, the `Release` job publishes it with trusted publishing through the `npm` environment, then creates the tag `<package>@vX.Y.Z` and a GitHub release with the changelog entry. It fails when that entry is missing or empty.
 
-Configure each package's npm trusted publisher with this repository, `release.yml` and the `npm` environment. Restrict that environment to tags `*@v*` and make the owner its required reviewer. A published version cannot be replaced: fix a bad release with a new version.
+Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. Allow the `main` branch in that environment and make the owner its required reviewer. A published version cannot be replaced: fix a bad release with a new version.
+
+`.github/workflows/release.yml` is the earlier manual path: it publishes when the owner publishes a GitHub release with the tag `<package>@vX.Y.Z`.
 
 ## Provenance
 
