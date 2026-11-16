@@ -102,16 +102,33 @@ describe("cycleDisplay", () => {
   const inEffect = effectiveWithSource("on", "project");
 
   it("shows what an unset option inherits", () => {
-    expect(cycleDisplay({ own: undefined, inEffect, source: "project", scope: "session" })).toBe(
-      "inherit (on · project)",
-    );
+    expect(
+      cycleDisplay({
+        own: undefined,
+        inEffect,
+        source: "project",
+        scope: "session",
+      }),
+    ).toBe("inherit (on · project)");
   });
 
   it("shows the scope's own value, noting an override from another scope", () => {
-    expect(cycleDisplay({ own: "off", inEffect, source: "session", scope: "session" })).toBe("off");
-    expect(cycleDisplay({ own: "off", inEffect, source: "project", scope: "session" })).toBe(
-      "off (overridden: on · project)",
-    );
+    expect(
+      cycleDisplay({
+        own: "off",
+        inEffect,
+        source: "session",
+        scope: "session",
+      }),
+    ).toBe("off");
+    expect(
+      cycleDisplay({
+        own: "off",
+        inEffect,
+        source: "project",
+        scope: "session",
+      }),
+    ).toBe("off (overridden: on · project)");
   });
 });
 
@@ -165,6 +182,45 @@ describe("SettingsMenu", () => {
     press(enter);
     await menu.settled();
     expect(apply).toHaveBeenCalledWith("session", "on");
+  });
+
+  it("cycles from the stored value when a second press comes before the first write ends", async () => {
+    const { tui } = createMenuTui();
+    let stored: string | undefined;
+    const written: string[] = [];
+    const menu = new SettingsMenu<SettingsMenuView, string>(
+      {
+        title: "Test settings",
+        read: () => ({ headline: [], scopes: ["session"] }),
+        rows: () => [
+          { kind: "scope" },
+          {
+            kind: "cycle",
+            id: "footer",
+            label: "footer",
+            description: "Shows the footer",
+            values: ["inherit", "on", "off"],
+            own: stored,
+            inEffect: "on · default",
+            source: "default",
+            change: (value) => value,
+          },
+        ],
+        apply: async (_scope, value) => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          stored = value;
+          written.push(value);
+        },
+      },
+      { tui, theme: escapeTaggedTheme },
+      () => {},
+    );
+    const { goTo, press } = menuDriver(() => menu);
+    goTo("footer");
+    press(enter);
+    press(enter);
+    await menu.settled();
+    expect(written).toEqual(["on", "off"]);
   });
 
   it("keeps the selected row after an edit", async () => {

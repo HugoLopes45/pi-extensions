@@ -402,15 +402,23 @@ export class SettingsMenu<View extends SettingsMenuView, Change> implements Comp
     if (row?.kind === "action") this.run(row.run);
     if (row?.kind !== "cycle") return;
     this.lastRow = id;
-    // The list proposes the first value because its display text is not one of the values, so
-    // cycle from the scope's own value instead.
     const scope = this.scope;
-    const next = nextCycleValue(row.values, row.own ?? "inherit") ?? "inherit";
-    this.run(() => this.spec.apply(scope, row.change(next, scope)));
+    this.run(() => this.cycle(id, scope));
     // The list already overwrote the row with its proposal; show the current value until the
     // write settles and refresh() shows the new one.
     const item = this.items.get(id);
     if (item) item.currentValue = this.cycleText(row);
+  }
+
+  /**
+   * Write the value after the scope's own value, read when the queued edit runs so an earlier
+   * edit is counted. The list's proposal is not used: the row's display text is not a value.
+   */
+  private async cycle(id: string, scope: LayeredSettingScope): Promise<void> {
+    const row = this.spec.rows(this.spec.read(), scope).find((item) => rowId(item) === id);
+    if (row?.kind !== "cycle") return;
+    const next = nextCycleValue(row.values, row.own ?? "inherit") ?? "inherit";
+    await this.spec.apply(scope, row.change(next, scope));
   }
 
   /** Apply a change already built for the current scope. */
