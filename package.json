@@ -1,4 +1,15 @@
 {
   "name": "@hugolopes45/pi-extensions",
-  "private": true
+  "private": true,
+  "scripts": {
+    "check": "oxfmt --check && oxlint",
+    "verify": "pnpm check && pnpm --recursive run check && pnpm --filter pi-onlooker run test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "oxfmt": "0.78.0",
+    "oxlint": "1.93.0",
+    "oxlint-tsgolint": "7.0.2007"
+  },
+  "packageManager": "pnpm@12.18.0"
 }

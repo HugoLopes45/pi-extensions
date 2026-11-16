@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+
+import { editedEntryIds } from "../src/context.ts";
+import { SUPERSEDED_NOTICE, supersededReads } from "../src/stale.ts";
+import { filler, Transcript } from "./fixtures.ts";
+
+function staleIds(t: Transcript): string[] {
+  return supersededReads(t.entries(), editedEntryIds(t.branch())).map((edit) => edit.targetId);
+}
+
+describe("supersededReads", () => {
+  it("replaces an older full read of the same path", () => {
+    const t = new Transcript();
+    const old = t.tool("read", { path: "a.ts" }, filler(500));
+    t.tool("read", { path: "a.ts" }, filler(500));
+    const edits = supersededReads(t.entries(), new Set());
+    expect(edits).toEqual([
+      { targetId: old, content: [{ type: "text", text: SUPERSEDED_NOTICE }] },
+    ]);
+  });
+
+  it("does not treat a truncated whole-file read as covering older ranges", () => {
+    const t = new Transcript();
+    t.tool("read", { path: "a.ts", offset: 2_001, limit: 20 }, filler(500));
+    t.tool(
+      "read",
+      { path: "a.ts" },
+      `${filler(500)}\n\n[Showing lines 1-2000 of 3000. Use offset=2001 to continue.]`,
+    );
+    expect(staleIds(t)).toEqual([]);
+  });
+
+  it("does not let a truncated ranged read cover its matching range", () => {
+    const t = new Transcript();
+    t.tool("read", { path: "a.ts", offset: 1, limit: 500 }, filler(500));
+    t.tool(
+      "read",
+      { path: "a.ts", offset: 1, limit: 500 },
+      `${filler(100)}\n[Showing lines 1-100 of 500 (50.0KB limit). Use offset=101 to continue.]`,
+    );
+    expect(staleIds(t)).toEqual([]);
+  });
+
+  it("keeps reads of other paths and different ranges", () => {
+    const t = new Transcript();
+    t.tool("read", { path: "a.ts", offset: 1, limit: 50 }, filler(500));
+    t.tool("read", { path: "b.ts" }, filler(500));
+    t.tool("read", { path: "a.ts", offset: 51, limit: 50 }, filler(500));
+    expect(staleIds(t)).toEqual([]);
+  });
+
+  it("ignores reads whose range arguments are not numbers or strings", () => {
+    const t = new Transcript();
+    t.tool("read", { path: "a.ts", offset: 1 }, filler(500));
+    t.tool("read", { path: "a.ts", offset: { line: 1 } }, filler(500));
+    t.tool("read", { path: "a.ts", offset: { line: 1 } }, filler(500));
+    expect(staleIds(t)).toEqual([]);
+  });
+
+  it("lets a full read supersede an older ranged read, not the reverse", () => {
+    const t = new Transcript();
+    const ranged = t.tool("read", { path: "a.ts", offset: 10, limit: 5 }, filler(200));
+    t.tool("read", { path: "a.ts" }, filler(500));
+    t.tool("read", { path: "a.ts", offset: 10, limit: 5 }, filler(200));
+    expect(staleIds(t)).toEqual([ranged]);
+  });
+
+  it("lets a failed read supersede only older failed reads", () => {
+    const t = new Transcript();
+    const success = t.tool("read", { path: "a.ts" }, filler(200));
+    const failure = t.tool("read", { path: "a.ts" }, `ENOENT ${filler(50)}`, true);
+    t.tool("read", { path: "a.ts" }, `ENOENT ${filler(50)}`, true);
+    expect(staleIds(t)).toEqual([failure]);
+    expect(staleIds(t)).not.toContain(success);
+  });
+
+  it("skips entries that are already edited or too small to shrink", () => {
+    const t = new Transcript();
+    const old = t.tool("read", { path: "a.ts" }, filler(500));
+    t.tool("read", { path: "tiny.ts" }, "x");
+    t.tool("read", { path: "tiny.ts" }, "x");
+    t.tool("read", { path: "a.ts" }, filler(500));
+    t.session.appendContextEdit(old, {
+      content: [{ type: "text", text: "kept" }],
+    });
+    expect(staleIds(t)).toEqual([]);
+  });
+});

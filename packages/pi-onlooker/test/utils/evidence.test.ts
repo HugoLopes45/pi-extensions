@@ -1,0 +1,253 @@
+import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  capText,
+  combineEvidence,
+  evidenceItemsCost,
+  evidenceRefs,
+  evidenceTokens,
+  fitEvidence,
+  messageOrigins,
+  projectEvidence,
+  projectEvidenceItem,
+  shortenEvidence,
+  toolCallRef,
+  type EvidenceItem,
+} from "../../src/utils/evidence.js";
+import { stringContaining } from "../fixtures/matchers.js";
+import { loadStoredMessages } from "../fixtures/stored-session.js";
+
+const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" } as const;
+const assistant = (content: Extract<Message, { role: "assistant" }>["content"]) => ({
+  ...fauxAssistantMessage(""),
+  content,
+  stopReason: "toolUse" as const,
+});
+const marker = (omitted: number) => `[cut ${omitted}]`;
+
+const messages: Message[] = [
+  { role: "user", content: "Do it.", timestamp: 1 },
+  assistant([
+    { type: "thinking", thinking: "plan", thinkingSignature: "S" },
+    { type: "thinking", thinking: "", thinkingSignature: "S" },
+    { type: "thinking", thinking: "x", thinkingSignature: "E", redacted: true },
+    { type: "toolCall", id: "call-1", name: "read", arguments: { path: "a" } },
+  ]),
+  {
+    role: "toolResult",
+    toolCallId: "call-1",
+    toolName: "read",
+    content: [{ type: "text", text: "T".repeat(500) }, image],
+    isError: false,
+    timestamp: 3,
+  },
+  { ...assistant([{ type: "text", text: "done" }]), stopReason: "error", errorMessage: "boom" },
+];
+
+const items = (source: readonly Message[]): EvidenceItem[] =>
+  source.flatMap((message) => {
+    const item = projectEvidenceItem(message);
+    return item ? [item] : [];
+  });
+
+describe("evidence projection", () => {
+  it("projects messages and links calls to results by reference", () => {
+    const evidence = projectEvidence(messages);
+    const ref = toolCallRef("call-1");
+    expect(ref).toMatch(/^[\w-]{8}$/);
+    expect(evidence.messages[1]).toEqual({
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "plan" },
+        { type: "thinking", redacted: true },
+        { type: "toolCall", ref, name: "read", arguments: { path: "a" } },
+      ],
+    });
+    expect(evidence.messages[3]).toMatchObject({ stopReason: "error", errorMessage: "boom" });
+    expect(evidence.images).toEqual([image]);
+    expect(evidenceRefs(evidence.messages)).toEqual([ref, ref]);
+    expect(toolCallRef("call-1")).toBe(toolCallRef("call-1"));
+  });
+
+  it("projects one message with its own images, or nothing for an unknown role", () => {
+    const [toolResult] = messages.slice(2, 3);
+    expect(toolResult && projectEvidenceItem(toolResult)).toEqual({
+      message: projectEvidence(messages.slice(2, 3)).messages[0],
+      images: [image],
+    });
+    const future = loadStoredMessages([{ role: "futureRole", content: "x" }]);
+    expect(future.flatMap((message) => projectEvidenceItem(message) ?? [])).toEqual([]);
+    // Pi drops unknown roles before extensions see them; a system message still takes this path.
+    expect(projectEvidenceItem({ role: "system", content: "x", timestamp: 0 })).toBeUndefined();
+  });
+
+  it("counts images in the token estimate", () => {
+    expect(evidenceTokens(projectEvidence(messages))).toBeGreaterThan(
+      evidenceTokens({ ...projectEvidence(messages), images: [] }),
+    );
+  });
+
+  it("attributes converted user messages to their original role", () => {
+    const sources: Parameters<typeof messageOrigins>[1] = [
+      { role: "user", content: "hello", timestamp: 5 },
+      {
+        role: "bashExecution",
+        command: "ls",
+        output: "x",
+        exitCode: 0,
+        cancelled: false,
+        truncated: false,
+        timestamp: 6,
+      },
+    ];
+    const origins = messageOrigins(
+      [
+        { role: "user", content: "hello", timestamp: 5 },
+        { role: "user", content: "Command output", timestamp: 6 },
+      ],
+      sources,
+    );
+    expect(origins).toEqual(["user", "bashExecution"]);
+    // No source shares the timestamp of a message nothing converted to.
+    expect(messageOrigins([{ role: "user", content: "rewritten", timestamp: 9 }], sources)).toEqual(
+      ["unknown"],
+    );
+  });
+
+  it("keeps messages that share a timestamp apart by content, then by order", () => {
+    const custom = (content: string) =>
+      ({ role: "custom", customType: "note", content, display: true, timestamp: 7 }) as const;
+    const user = (content: string): Message => ({ role: "user", content, timestamp: 7 });
+    const sources = [custom("finding"), { role: "user", content: "hello", timestamp: 7 } as const];
+    // Exact conversions claim their own source regardless of position.
+    expect(
+      messageOrigins(
+        [
+          { role: "user", content: [{ type: "text", text: "finding" }], timestamp: 7 },
+          user("hello"),
+        ],
+        sources,
+      ),
+    ).toEqual(["custom", "user"]);
+    // One exact match leaves the remaining source to the one rewritten message.
+    expect(messageOrigins([user("changed"), user("hello")], sources)).toEqual(["custom", "user"]);
+    // Nothing exact: the k-th unmatched message takes the k-th unused source.
+    expect(messageOrigins([user("a"), user("b")], sources)).toEqual(["custom", "user"]);
+    expect(messageOrigins([user("a"), user("b"), user("c")], sources)).toEqual([
+      "custom",
+      "user",
+      "unknown",
+    ]);
+  });
+});
+
+describe("tool-result cap", () => {
+  const cap = { limit: 100, marker: (omitted: number) => `[cut ${omitted}]` };
+  const text = `${"H".repeat(300)}${"M".repeat(400)}${"T".repeat(300)}`;
+  const long: Message[] = [
+    { role: "user", content: text, timestamp: 1 },
+    assistant([
+      { type: "text", text },
+      { type: "thinking", thinking: text, thinkingSignature: "S" },
+      { type: "toolCall", id: "c1", name: "read", arguments: { path: text } },
+    ]),
+    {
+      role: "toolResult",
+      toolCallId: "c1",
+      toolName: "read",
+      content: [{ type: "text", text }, image, { type: "text", text: "short" }],
+      isError: true,
+      timestamp: 2,
+    },
+  ];
+
+  it("keeps head and tail of tool-result text only, with the reference and error status", () => {
+    const capped = projectEvidence(long, { toolResultCap: cap });
+    const plain = projectEvidence(long);
+    expect(capped.messages.slice(0, 2)).toEqual(plain.messages.slice(0, 2));
+    expect(capped.images).toEqual(plain.images);
+    expect(capped.messages[2]).toEqual({
+      role: "toolResult",
+      ref: toolCallRef("c1"),
+      toolName: "read",
+      isError: true,
+      content: [
+        { type: "text", text: `${"H".repeat(50)}\n[cut 900]\n${"T".repeat(50)}` },
+        { type: "image", attachment: 1 },
+        { type: "text", text: "short" },
+      ],
+    });
+    const item = long[2];
+    if (!item) throw new Error("fixture has no third message");
+    expect(projectEvidenceItem(item, { toolResultCap: cap })?.message).toEqual(capped.messages[2]);
+  });
+
+  it("leaves text within the limit, or that a marker would not shorten, as is", () => {
+    expect(capText("x".repeat(100), cap)).toBe("x".repeat(100));
+    expect(capText("x".repeat(101), cap)).toBe("x".repeat(101));
+    expect(capText("x".repeat(200), cap)).toHaveLength(50 + 50 + "\n[cut 100]\n".length);
+  });
+
+  it("never splits a surrogate pair", () => {
+    const emoji = "😀".repeat(200);
+    const capped = capText(emoji, cap);
+    expect(capped).not.toMatch(
+      /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/,
+    );
+    expect(capped).toContain("[cut ");
+  });
+});
+
+describe("evidence shortening and fitting", () => {
+  it("shortens long text and arguments with the caller's marker", () => {
+    const source = items(messages);
+    const [, call, result] = shortenEvidence(source, 10, marker);
+    expect(result?.message).toMatchObject({
+      content: [{ type: "text", text: `${"T".repeat(10)}\n[cut 490]` }, { type: "image" }],
+    });
+    expect(result?.images).toEqual([image]);
+    expect(call).toBe(source[1]);
+  });
+
+  it("never grows text", () => {
+    const source = items(messages);
+    expect(shortenEvidence(source, 1000, marker)).toEqual(source);
+  });
+
+  it("marks oversized tool-call arguments as non-parsing JSON", () => {
+    const call = items([
+      assistant([
+        { type: "toolCall", id: "c", name: "write", arguments: { text: "A".repeat(400) } },
+      ]),
+    ]);
+    const [shortened] = shortenEvidence(call, 20, marker);
+    expect(shortened?.message).toMatchObject({
+      content: [{ arguments: { shortenedJson: stringContaining("[cut ") } }],
+    });
+  });
+
+  it("fits items to the longest limit that meets the allowance", () => {
+    const source = items(messages);
+    const full = evidenceItemsCost(source);
+    expect(fitEvidence(source, full, marker)).toEqual(source);
+    const allowance = full - 60;
+    const fitted = fitEvidence(source, allowance, marker);
+    expect(fitted).toBeDefined();
+    expect(evidenceItemsCost(fitted ?? [])).toBeLessThanOrEqual(allowance);
+    expect(fitEvidence(source, 1, marker)).toBeUndefined();
+  });
+
+  it("combines items, renumbering image attachments", () => {
+    const [toolResult] = items(messages.slice(2, 3));
+    const two = toolResult ? [toolResult, toolResult] : [];
+    const combined = combineEvidence(two);
+    expect(combined.images).toHaveLength(2);
+    expect(
+      combined.messages.map((m) => (m.role === "toolResult" ? m.content[1] : undefined)),
+    ).toEqual([
+      { type: "image", attachment: 1 },
+      { type: "image", attachment: 2 },
+    ]);
+  });
+});

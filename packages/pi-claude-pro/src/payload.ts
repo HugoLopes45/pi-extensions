@@ -1,0 +1,57 @@
+import { isRecord } from "./util.ts";
+
+const IDENTITY_TEXT = "You are Claude Code, Anthropic's official CLI for Claude.";
+const BILLING_PREFIX = "x-anthropic-billing-header:";
+
+function isTextBlock(value: unknown): value is Record<string, unknown> & { text: string } {
+  return isRecord(value) && value.type === "text" && typeof value.text === "string";
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(isTextBlock)
+    .map((block) => block.text)
+    .join("\n");
+}
+
+export function firstUserText(payload: unknown): string {
+  if (!isRecord(payload) || !Array.isArray(payload.messages)) return "";
+  const messages: unknown[] = payload.messages;
+  const first = messages.find((message) => isRecord(message) && message.role === "user");
+  return isRecord(first) ? textOf(first.content) : "";
+}
+
+/**
+ * Puts the billing block first, and drops any earlier billing block and Pi's
+ * Claude Code identity line.
+ */
+export function rewriteSystem(payload: unknown, billing: string): unknown {
+  if (!isRecord(payload)) return payload;
+  const blocks =
+    typeof payload.system === "string"
+      ? [{ type: "text", text: payload.system }]
+      : Array.isArray(payload.system)
+        ? payload.system
+        : [];
+  const prompt: unknown[] = blocks.filter(
+    (block) => !isTextBlock(block) || !block.text.startsWith(BILLING_PREFIX),
+  );
+  const withoutIdentity = prompt.filter(
+    (block) => !isTextBlock(block) || block.text !== IDENTITY_TEXT,
+  );
+  // Keep the identity line when it is the whole prompt.
+  const kept = withoutIdentity.some(isTextBlock) ? withoutIdentity : prompt;
+  return { ...payload, system: [{ type: "text", text: billing }, ...kept] };
+}
+
+/**
+ * Pi omits `system` from message-thread continuations, but Anthropic refuses
+ * subscription continuations without the billing block (429 "Error").
+ */
+export function addThreadBilling(payload: unknown, billing: string): unknown {
+  if (!isRecord(payload) || !isRecord(payload.thread)) return payload;
+  if (payload.thread.type !== "continue") return payload;
+  return { ...payload, system: [{ type: "text", text: billing }] };
+}

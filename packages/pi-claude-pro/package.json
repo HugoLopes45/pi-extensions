@@ -1,0 +1,76 @@
+{
+  "name": "pi-claude-pro",
+  "version": "1.1.2",
+  "description": "Use your Claude Pro, Max or Ultra plan in the Pi coding agent with Opus, Sonnet, Haiku and Fable. No API key, no Claude Code. Shows your usage limits and warns when requests are billed as extra usage.",
+  "keywords": [
+    "anthropic",
+    "claude",
+    "claude-code",
+    "claude-fable",
+    "claude-max",
+    "claude-oauth",
+    "claude-opus",
+    "claude-pro",
+    "claude-sonnet",
+    "claude-subscription",
+    "claude-ultra",
+    "coding-agent",
+    "extra-usage",
+    "oauth",
+    "pi",
+    "pi-coding-agent",
+    "pi-extension",
+    "pi-package",
+    "subscription",
+    "usage-limits"
+  ],
+  "homepage": "https://github.com/HugoLopes45/pi-extensions/tree/main/packages/pi-claude-pro#readme",
+  "bugs": {
+    "url": "https://github.com/HugoLopes45/pi-extensions/issues"
+  },
+  "license": "MIT",
+  "author": "HugoLopes45 (https://github.com/HugoLopes45)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HugoLopes45/pi-extensions.git",
+    "directory": "packages/pi-claude-pro"
+  },
+  "files": [
+    "extensions",
+    "src",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit && vitest --run",
+    "check:live": "node scripts/live-check.ts",
+    "prepublishOnly": "npm run check"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.0.3",
+    "@earendil-works/pi-coding-agent": "^1.0.3",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "overrides": {
+    "@eslint/config-array": {
+      "minimatch": "^11.0.8"
+    },
+    "eslint": {
+      "minimatch": "^11.0.8"
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  }
+}
