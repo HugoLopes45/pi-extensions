@@ -49,14 +49,8 @@ pi -e ./src/index.ts
 
 ## Pull requests
 
-CI must pass `Check (Node 22)` and `Check (Node 24)`. On Node 24, CI also checks the oldest supported Pi (1.5.1) and the latest Pi. `main` takes no force push.
+CI must pass `Check (Node 22)` and `Check (Node 24)`. On Node 24, CI also checks the oldest supported Pi (1.5.1) and the latest Pi.
 
 ## Releases
 
-Maintainer only.
-
-1. Move the `Unreleased` entries to `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`. For the first release, remove the "Not on npm yet" note from `README.md`. Merge to `main`.
-2. Wait for CI to pass on that commit.
-3. Publish a GitHub release with tag `vX.Y.Z` on that commit.
-
-The release workflow refuses a tag that is not `vX.Y.Z`, a commit that is not on `main` or has no passing CI, and a version with no changelog entry. It then runs `pnpm run verify` and publishes to npm. Release tags cannot be moved or deleted, so a bad release needs a new version.
+Follow [Release](../../README.md#release) in the monorepo README, with the tag `pi-onlooker@vX.Y.Z`. For the first release, also remove the "Not on npm yet" note from `README.md`.

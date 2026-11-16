@@ -36,7 +36,9 @@ Each package is released on its own:
 2. Wait for CI to pass on that commit.
 3. Publish a GitHub release with the tag `<package>@vX.Y.Z`.
 
-`.github/workflows/release.yml` checks the tag, the commit and the changelog entry, sets the version and publishes to npm with trusted publishing, through the `npm` environment.
+`.github/workflows/release.yml` checks the tag, the commit and the changelog entry, sets the version and publishes to npm with trusted publishing, through the `npm` environment. It does not rerun the checks; it relies on CI on `main`.
+
+Configure each package's npm trusted publisher with this repository, `release.yml` and the `npm` environment. Restrict that environment to tags `*@v*` and make the owner its required reviewer. A published version cannot be replaced: fix a bad release with a new version.
 
 ## Migration
 

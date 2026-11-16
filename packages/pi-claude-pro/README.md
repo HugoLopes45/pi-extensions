@@ -74,7 +74,7 @@ Run `/claude-pro` to see the current model, whether its requests use your plan, 
 
 - **Unofficial.** Anthropic does not support this package. Using a subscription outside Claude Code can break the Anthropic Consumer Terms. You accept this risk.
 - **Server contract.** Requests work only while Anthropic accepts the Claude Code identity that this package sends. Anthropic does not publish this contract and can change it at any time. The offline tests cannot detect such a change. `npm run check:live` tests the current contract; see [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Pi versions.** The extension does not enforce a Pi version. CI tests Pi 1.0.3, the lockfile baseline and the latest published Pi packages, on pull requests and weekly. A future Pi API change can still break it.
+- **Pi versions.** The extension does not enforce a Pi version. CI tests Pi 1.0.3, the lockfile baseline and the latest published Pi packages, on pull requests and on pushes to `main`. A future Pi API change can still break it.
 
 ## FAQ
 

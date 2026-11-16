@@ -6,7 +6,7 @@ Coding agents sometimes say "done, all tests pass" when the last test run failed
 
 ## Install in two steps
 
-> **Not on npm yet.** Until the first release, step 1 fails. Use a local copy instead: `pi install ./pi-onlooker` from the folder that contains your clone.
+> **Not on npm yet.** Until the first release, step 1 fails. Use a local copy instead: run `pi install ./packages/pi-onlooker` from the root of your pi-extensions clone.
 
 1. Install the package:
 

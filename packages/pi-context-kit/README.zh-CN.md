@@ -335,6 +335,7 @@ pi-context-kit 没有针对单个模型的设置。如果只想让某个模型�
 - **如果 Pi 的压缩已关闭**（`compaction.enabled: false`），pi-context-kit 只在你运行 `/compact` 时修改上下文。这时它会写交接笔记，与压缩开启时相同。`threshold` 会被忽略，因为 pi-context-kit 只在阈值处自动修改上下文。
 - **手动压缩和错误。** 当你输入 `/compact`、上下文对模型来说过大，或 Pi 在轮次开始前进行压缩时，`shake` 无法运行。pi-context-kit 会使用已准备好的交接笔记，或 Pi 的摘要。
 - **方法顺序在 `soft` 处停止。** `soft` 之后的方法不会运行。
+- **摘要请求不经过会话 hook。** 交接笔记和提前摘要直接发送给模型，与 Pi 自己的压缩摘要相同。其他扩展的 `context` 和 `before_provider_request` hook 不会改变这些请求。如果某个扩展用这些 hook 删除敏感文本，该文本仍可能在摘要请求中发送给模型。
 - **子智能体**读取相同的设置文件。它们不显示警告和状态，因为它们没有界面。
 
 ## 故障排除
@@ -370,8 +371,8 @@ Pi 会显示一条以 `pi-context-kit: handoff note failed` 开头的警告。�
 ## 开发
 
 ```sh
-npm ci
-npm run check
+pnpm install
+pnpm run check
 ```
 
 测试使用 Pi 的模拟（faux）提供商离线运行。它们不会调用真实模型。

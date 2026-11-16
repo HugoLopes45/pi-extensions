@@ -74,7 +74,7 @@ pi install npm:pi-claude-pro
 
 - **非官方。** Anthropic 未认可本包，也不为其提供支持。在 Claude Code 之外使用订阅可能违反 Anthropic 消费者条款（Consumer Terms）。你需要自行承担这一风险。
 - **服务器约定。** 只有在 Anthropic 接受本包发送的 Claude Code 身份时，请求才能正常工作。Anthropic 没有公开这一约定，并且可以随时更改。离线测试无法发现这类变化。`npm run check:live` 会测试当前的约定；参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)。
-- **Pi 版本。** 扩展不强制要求特定的 Pi 版本。CI 会在每个 pull request 上以及每周测试 Pi 1.0.3、锁文件基线以及最新发布的 Pi 包。未来的 Pi API 变化仍可能导致它失效。
+- **Pi 版本。** 扩展不强制要求特定的 Pi 版本。CI 会在每个 pull request 上以及推送到 `main` 时测试 Pi 1.0.3、锁文件基线以及最新发布的 Pi 包。未来的 Pi API 变化仍可能导致它失效。
 
 ## 常见问题
 

@@ -9,13 +9,13 @@ Small, focused contributions are welcome. Discuss large behavior changes in an i
 Use Node.js 22.19 or later. CI checks Node 22 and 24.
 
 ```bash
-npm ci
-npm run check
+pnpm install
+pnpm run check
 ```
 
-`npm run check` validates TypeScript and the offline tests. `pnpm check` at the monorepo root validates formatting and lint, including cyclomatic complexity (at most 10 per function). Split a function that is too complex; inline `oxlint-disable` and `eslint-disable` comments are rejected. The tests use a simulated Anthropic server, not your account.
+`pnpm run check` validates TypeScript and the offline tests. `pnpm check` at the monorepo root validates formatting and lint, including cyclomatic complexity (at most 10 per function). Split a function that is too complex; inline `oxlint-disable` and `eslint-disable` comments are rejected. The tests use a simulated Anthropic server, not your account.
 
-CI also installs Pi `1.0.3`, the oldest supported version, and the latest published Pi packages on Node 24, and reruns these checks. It runs weekly, even without repository changes.
+CI also installs Pi `1.0.3`, the oldest supported version, and the latest published Pi packages on Node 24, and reruns these checks.
 Keep the lockfile baseline reproducible; do not replace it with an unbounded dependency tree. Host-provided peer dependencies stay `*`.
 
 For an optional manual test in Pi:
@@ -48,28 +48,11 @@ Open a branch or fork, then submit a pull request against `main`.
 Explain the problem, the minimal fix, and the checks you ran. Keep unrelated changes in separate pull requests.
 
 `main` requires a pull request and successful `Check (Node 22)` and `Check (Node 24)` checks against the current base.
-No third-party approval is required, so a solo maintainer can merge after CI succeeds. Force pushes and branch deletion are blocked.
+No third-party approval is required, so a solo maintainer can merge after CI succeeds.
 
 ## Releases
 
-Only the repository owner can publish. A GitHub release triggers **Publish release**, and the owner must approve the `npm` environment deployment.
-
-Do not bump the package version in pull requests. The release tag sets the published version.
-
-### Release procedure
-
-1. In a pull request, add a `## [X.Y.Z] - YYYY-MM-DD` entry at the top of `CHANGELOG.md`, in words a user understands. Choose `patch` for fixes, `minor` for compatible features, or `major` for breaking changes. Pi shows this entry to users after `pi update`. Write `CHANGELOG.md` in English only, because Pi reads only this file.
-2. Wait for CI to succeed on the `main` commit you want to publish.
-3. On GitHub, open **Releases > Draft a new release**.
-4. Create the tag `vX.Y.Z` on `main`.
-5. Select **Generate release notes**, then **Publish release**.
-6. Approve the `npm` environment deployment in the Actions run.
-
-The workflow rejects a release that is not from the owner, a prerelease, a tag that is not `vX.Y.Z`, a commit outside `main`, a commit without successful CI, or a version without a `CHANGELOG.md` entry. It runs `npm run check`, sets the package version from the tag and publishes with npm provenance. A new npm publication updates the `latest` dist-tag.
-
-Releases and `v*` tags are immutable. If publication fails for an external cause, use **Re-run failed jobs** on the original run. If the code needs a fix, publish a new version.
-
-The workflow uses npm trusted publishing, so the repository stores no npm token. Configure the npm trusted publisher for this repository, `release.yml`, and the GitHub environment `npm`. Restrict that environment to tags `v*`, with the owner as its required reviewer and self-review allowed.
+Follow [Release](../../README.md#release) in the monorepo README, with the tag `pi-claude-pro@vX.Y.Z`. Do not bump the package version in pull requests. Write `CHANGELOG.md` in English only, because Pi reads only this file.
 
 ## Security
 

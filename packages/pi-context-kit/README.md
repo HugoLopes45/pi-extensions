@@ -373,8 +373,8 @@ Ask the model to use the `recall` tool, for example: "Use recall to find the err
 ## Development
 
 ```sh
-npm ci
-npm run check
+pnpm install
+pnpm run check
 ```
 
 The tests run offline with Pi's faux provider. They do not call a real model.
