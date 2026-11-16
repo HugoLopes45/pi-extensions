@@ -58,10 +58,13 @@ function splitScope(input: string): {
   flagged: boolean;
 } {
   const trimmed = input.trim();
-  const flag = /\s+--(global|project)$/.exec(trimmed);
-  if (!flag) return { text: trimmed, scope: "session", flagged: false };
-  const scope = flag[1] === "global" ? "global" : "project";
-  return { text: trimmed.slice(0, flag.index), scope, flagged: true };
+  for (const scope of ["global", "project"] as const) {
+    const before = trimmed.slice(0, -`--${scope}`.length);
+    const text = before.trimEnd();
+    if (trimmed.endsWith(`--${scope}`) && text.length < before.length)
+      return { text, scope, flagged: true };
+  }
+  return { text: trimmed, scope: "session", flagged: false };
 }
 
 function parseSet<Options, Key extends string>(
@@ -69,7 +72,7 @@ function parseSet<Options, Key extends string>(
   scope: LayeredSettingScope,
   spec: SettingsCommandSpec<Options, Key>,
 ): SettingsCommand<Options, Key> {
-  const set = /^set\s+(\S+)\s+([\s\S]+)$/.exec(text);
+  const set = /^set\s+(\S+)\s+(\S[\s\S]*)$/.exec(text);
   if (!set?.[1] || !set[2]) throw new Error(spec.usage);
   const key = spec.optionKey(set[1]);
   let value: unknown;
@@ -101,8 +104,8 @@ export function completeSettingsCommandArguments(
   const candidates = ["on", "off", "status", "inherit", "set"];
   const keyPrefix = /^((?:set|inherit)\s+)\S*$/.exec(prefix)?.[1];
   if (keyPrefix) candidates.push(...spec.optionKeys.map((key) => `${keyPrefix}${key}`));
-  const scopePrefix = /^(.*\s+)(--\S*)?$/s.exec(prefix)?.[1];
-  if (scopePrefix) {
+  const scopePrefix = beforeLastWord(prefix);
+  if (scopePrefix !== undefined) {
     try {
       if (spec.parse(scopePrefix).scope === "session")
         candidates.push(`${scopePrefix}--global`, `${scopePrefix}--project`);
@@ -113,6 +116,14 @@ export function completeSettingsCommandArguments(
   return candidates
     .filter((value) => value.startsWith(prefix))
     .map((value) => ({ value, label: value }));
+}
+
+/** The prefix up to its last whitespace, when the word after it is empty or a flag. */
+function beforeLastWord(prefix: string): string | undefined {
+  let end = prefix.length;
+  while (end > 0 && !/\s/.test(prefix.charAt(end - 1))) end--;
+  const word = prefix.slice(end);
+  return end > 0 && (word === "" || word.startsWith("--")) ? prefix.slice(0, end) : undefined;
 }
 
 /** The commands that apply one validated change: `set` and `inherit`. */
