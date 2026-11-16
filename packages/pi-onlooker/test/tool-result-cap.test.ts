@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 
+import type { EvidenceMessage } from "pi-hl-utils/evidence";
 import { onTestFinished, expect, it } from "vitest";
 
-import { readOnlookerSettings } from "../src/onlooker-settings.js";
-import type { EvidenceMessage } from "../src/utils/evidence.js";
+import { onlookerSettings } from "../src/onlooker-settings.js";
 import {
   activeFixture,
   expectPrefix,
@@ -22,7 +22,12 @@ async function observe(config: Partial<ObserverSettings>) {
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 1, ...config },
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: 1,
+      ...config,
+    },
     "headless-root",
   );
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);

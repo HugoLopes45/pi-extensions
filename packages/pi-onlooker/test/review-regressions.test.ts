@@ -1,7 +1,7 @@
 import type { Context } from "@earendil-works/pi-ai";
 import { onTestFinished, expect, it } from "vitest";
 
-import { readOnlookerSettings } from "../src/onlooker-settings.js";
+import { onlookerSettings } from "../src/onlooker-settings.js";
 import { createObserver } from "./fixtures/observer-harness.js";
 import { fixture, response } from "./fixtures/onlooker-runtime.js";
 import { reply, toolCall } from "./fixtures/sdk-harness.js";
@@ -432,7 +432,7 @@ it("retracts queued findings after a model-only change while preserving unrelate
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxCorrectiveTurns: 0,

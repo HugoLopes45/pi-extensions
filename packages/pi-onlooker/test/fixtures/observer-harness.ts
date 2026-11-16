@@ -25,6 +25,8 @@ import {
   type ToolResultEvent,
   type ToolResultEventResult,
 } from "@earendil-works/pi-coding-agent";
+import type { EvidenceBlock, EvidenceMessage } from "pi-hl-utils/evidence";
+import { isRecord } from "pi-hl-utils/record";
 import { onTestFinished, expect } from "vitest";
 
 import type { ObservedSetup } from "../../src/onlooker-evidence.js";
@@ -35,7 +37,6 @@ import {
   type OnlookerObserverOptions,
 } from "../../src/onlooker-observer.js";
 import type { OnlookerConfig } from "../../src/onlooker-settings.js";
-import type { EvidenceBlock, EvidenceMessage } from "../../src/utils/evidence.js";
 import "./observer-extension.js";
 
 /** Onlooker settings plus the observer limits a test lowers to reach them quickly. */
@@ -350,10 +351,6 @@ export function seedPayload(request: Pick<PrivateRequest, "text"> | undefined) {
 interface SeedEvidence {
   messages: EvidenceMessage[];
   observedSetup?: ObservedSetup;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isEvidenceBlock(value: unknown): value is EvidenceBlock {

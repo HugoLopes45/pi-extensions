@@ -1,5 +1,12 @@
 import { initTheme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, setKeybindings } from "@earendil-works/pi-tui";
+import {
+  escapeTaggedTheme,
+  expectLinesFitWidth,
+  readableTags,
+  taggedTheme,
+} from "pi-hl-utils/testing/ui-testing";
+import type { DurationContext } from "pi-hl-utils/ui";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -10,13 +17,6 @@ import {
   renderOnlookerIntervention,
   renderOnlookerStatus,
 } from "../src/onlooker-rendering.js";
-import type { DurationContext } from "../src/utils/ui.js";
-import {
-  escapeTaggedTheme,
-  expectLinesFitWidth,
-  readableTags,
-  taggedTheme,
-} from "./fixtures/ui-testing.js";
 
 // Line breaks and truncation match a real theme under the escape-encoded theme (its styles are not
 // re-opened after a wrap); the text-tagged theme is for exact strings from functions that never wrap.

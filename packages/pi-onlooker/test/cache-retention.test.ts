@@ -5,12 +5,12 @@ import { getCurrentTools } from "@earendil-works/pi-ai";
 import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { streamSimple as codexStream } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { streamSimple as openaiStream } from "@earendil-works/pi-ai/api/openai-responses";
+import { stringContaining } from "pi-hl-utils/testing/matchers";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { onTestFinished, expect, it, vi } from "vitest";
 
-import { readOnlookerSettings } from "../src/onlooker-settings.js";
-import { stringContaining } from "./fixtures/matchers.js";
+import { onlookerSettings } from "../src/onlooker-settings.js";
 import {
   activeFixture,
   longSessionStream,
@@ -114,7 +114,12 @@ async function run(
   if (config) {
     const observer = createObserver(
       session,
-      { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 1, ...config },
+      {
+        ...onlookerSettings.readSettings(session).settings,
+        enabled: true,
+        catchUpThreshold: 1,
+        ...config,
+      },
       "headless-root",
     );
     globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);

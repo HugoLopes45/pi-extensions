@@ -2,7 +2,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { onTestFinished, expect, it } from "vitest";
 
-import { readOnlookerSettings, sessionTokenLimit } from "../src/onlooker-settings.js";
+import { onlookerSettings, sessionTokenLimit } from "../src/onlooker-settings.js";
 import {
   activeFixture,
   expectPrefix,
@@ -18,7 +18,7 @@ async function observe(config: Partial<ObserverSettings>) {
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: 1,
       // These tests size evidence by token budgets, so they leave tool results uncapped.

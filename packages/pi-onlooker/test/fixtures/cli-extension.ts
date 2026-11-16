@@ -7,8 +7,7 @@ import {
   type ToolCall,
 } from "@earendil-works/pi-ai";
 import { AgentSession, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-import { discoverPiAgentSession } from "../../src/utils/pi-agent-session-discovery.js";
+import { discoverPiAgentSession } from "pi-hl-utils/pi-agent-session-discovery";
 
 /** Offline CLI boundary: real loading, commands, and reviews without network requests. */
 export default function cliFixture(pi: ExtensionAPI): void {

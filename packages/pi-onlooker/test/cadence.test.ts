@@ -6,12 +6,12 @@ import {
   type Context,
 } from "@earendil-works/pi-ai";
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
+import type { EvidenceBlock } from "pi-hl-utils/evidence";
 import { onTestFinished, expect, it, vi } from "vitest";
 
 import type { OnlookerFinding } from "../src/onlooker-contract.js";
 import { type OnlookerMode } from "../src/onlooker-observer.js";
-import { readOnlookerSettings } from "../src/onlooker-settings.js";
-import type { EvidenceBlock } from "../src/utils/evidence.js";
+import { onlookerSettings } from "../src/onlooker-settings.js";
 import {
   activeFixture,
   conversation,
@@ -37,7 +37,7 @@ async function observe(
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: 1,
       ...config,

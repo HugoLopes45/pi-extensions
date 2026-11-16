@@ -1,4 +1,6 @@
 import { fauxAssistantMessage, type Context, type Message } from "@earendil-works/pi-ai";
+import { stringMatching } from "pi-hl-utils/testing/matchers";
+import { loadStoredMessages } from "pi-hl-utils/testing/stored-session";
 import { expect, it } from "vitest";
 
 import {
@@ -9,8 +11,6 @@ import {
   toolCallRef,
 } from "../src/onlooker-evidence.js";
 import { seedBudget, sessionTokenLimit } from "../src/onlooker-settings.js";
-import { stringMatching } from "./fixtures/matchers.js";
-import { loadStoredMessages } from "./fixtures/stored-session.js";
 
 const longCallId = `call_${"x".repeat(420)}|fc_${"y".repeat(40)}`;
 const image = { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" } as const;

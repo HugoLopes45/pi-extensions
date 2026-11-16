@@ -35,7 +35,6 @@ export const onlookerEvidenceSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export type OnlookerEvidence = Static<typeof onlookerEvidenceSchema>;
 
 const findingFields = {
   severity: onlookerSeveritySchema,

@@ -1,16 +1,11 @@
-import type {
-  AgentSession,
-  SessionManager,
-  SettingsManager,
-} from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
-
-import { onlookerNameSchema } from "./onlooker-contract.js";
 import {
   defineLayeredSettings,
   type LayeredSettingChange,
   type LayeredSettingsLayers,
-} from "./utils/layered-settings.js";
+} from "pi-hl-utils/layered-settings";
+import { Type, type Static } from "typebox";
+
+import { onlookerNameSchema } from "./onlooker-contract.js";
 
 /** Authored Onlooker options; every key is optional so absent values inherit. */
 export const onlookerOptionsSchema = Type.Object(
@@ -126,33 +121,13 @@ export function sessionTokenLimit(contextWindow: number | undefined): number {
   return Math.min(Math.floor((contextWindow || fallbackWindow) / 2), sessionCeiling);
 }
 
-const layered = defineLayeredSettings({
+export const onlookerSettings = defineLayeredSettings({
   namespace: "onlooker",
   label: "Onlooker",
   schema: onlookerOptionsSchema,
   defaults,
   sessionEntryType: "pi-onlooker-settings",
 });
-
-export const onlookerOptionKeys = layered.optionKeys;
-
-// Native settings contain arbitrary authored JSON; the shared layered-settings schema check validates it before use. SDK command tests exercise the boundary.
-export function parseOnlookerOptions(
-  value: unknown,
-  source: OnlookerSettingScope,
-): OnlookerOptions {
-  return layered.parseOptions(value, source);
-}
-
-/** Reject inherited or unknown property names before applying an authored change. */
-export function onlookerOptionKey(input: string): keyof OnlookerOptions {
-  return layered.optionKey(input);
-}
-
-/** Replay only the selected branch's last complete override snapshot. */
-export function readOnlookerOverrides(manager: Pick<SessionManager, "getBranch">): OnlookerOptions {
-  return layered.readOverrides(manager);
-}
 
 /** Authored scopes cached at startup/reload and updated after this extension's own writes. */
 export type OnlookerLayers = LayeredSettingsLayers<OnlookerOptions>;
@@ -165,26 +140,3 @@ export const onlookerAppliedChangeSchema = Type.Object({
   options: onlookerOptionsSchema,
 });
 export type OnlookerAppliedChange = Static<typeof onlookerAppliedChangeSchema>;
-
-/** Read Pi's stored layers, preserving configuration failures until corrected. */
-export function readOnlookerLayers(manager: SettingsManager): OnlookerLayers {
-  return layered.readLayers(manager);
-}
-
-/** Resolve stored scopes without changing Pi's effective runtime overrides. */
-export function readOnlookerSettings(
-  session: Pick<AgentSession, "settingsManager" | "sessionManager">,
-  authored = readOnlookerLayers(session.settingsManager),
-) {
-  return layered.readSettings(session, authored);
-}
-
-/** Use Pi's actual backend: its generic storage API is not exported. */
-export function writeOnlookerSettings(
-  manager: SettingsManager,
-  scope: "global" | "project",
-  change: OnlookerChange,
-  isCurrent: () => boolean,
-): Promise<OnlookerOptions | undefined> {
-  return layered.writeSettings(manager, scope, change, isCurrent);
-}

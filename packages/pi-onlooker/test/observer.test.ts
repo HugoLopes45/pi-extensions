@@ -7,12 +7,12 @@ import {
   type Context,
 } from "@earendil-works/pi-ai";
 import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
+import { objectContaining, stringContaining, stringMatching } from "pi-hl-utils/testing/matchers";
 import { onTestFinished, expect, it, vi } from "vitest";
 
 import { onlookerFallbackTokenFactor } from "../src/onlooker-calibration.js";
 import { projectEvidence, toolCallRef } from "../src/onlooker-evidence.js";
-import { readOnlookerSettings } from "../src/onlooker-settings.js";
-import { objectContaining, stringContaining, stringMatching } from "./fixtures/matchers.js";
+import { onlookerSettings } from "../src/onlooker-settings.js";
 import {
   activeFixture,
   conversation,
@@ -80,7 +80,11 @@ it.each(["none", "blocker"] as const)(
     const session = await activeFixture();
     const observer = createObserver(
       session,
-      { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: Infinity },
+      {
+        ...onlookerSettings.readSettings(session).settings,
+        enabled: true,
+        catchUpThreshold: Infinity,
+      },
       "headless-root",
     );
     globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
@@ -170,7 +174,7 @@ it("queues a streaming nit without steering the active agent", async () => {
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 1 },
+    { ...onlookerSettings.readSettings(session).settings, enabled: true, catchUpThreshold: 1 },
     "interactive",
   );
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
@@ -251,7 +255,7 @@ it("records every finding before starting one Corrective Turn", async () => {
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxCorrectiveTurns: 1,
@@ -337,7 +341,7 @@ it("deduplicates a Review at its highest severity and permits later escalation",
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxFindingsPerReview: 1,
@@ -411,7 +415,11 @@ it("delivers every distinct Concern of consecutive Reviews", async () => {
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: Infinity },
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: Infinity,
+    },
     "headless-root",
   );
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
@@ -442,7 +450,7 @@ it("pauses when a Review omits its terminating report", async () => {
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 1 },
+    { ...onlookerSettings.readSettings(session).settings, enabled: true, catchUpThreshold: 1 },
     "headless-root",
   );
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
@@ -484,7 +492,7 @@ it("pauses on the independent review deadline without cancelling the observed ag
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: 1,
       reviewTimeoutMs: 20,
@@ -533,7 +541,7 @@ it("enforces investigative calls independently of the catch-up setting", async (
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxToolCalls: 1,
@@ -598,7 +606,7 @@ async function batchedQuotaFixture(kind: "review" | "consultation") {
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxToolCalls: 1,
@@ -669,7 +677,7 @@ it("keeps automatic reviews active after a consultation exhausts its tool quota"
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxToolCalls: 1,
@@ -732,7 +740,7 @@ it("lets the Onlooker report once its investigative calls reach the limit", asyn
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxToolCalls: 1,
@@ -787,7 +795,11 @@ it("format dedupe preserves distinct identifiers", async () => {
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: Infinity },
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: Infinity,
+    },
     "headless-root",
   );
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
@@ -835,7 +847,7 @@ it("disabling an in-flight review discards its late finding", async () => {
   };
   const session = await activeFixture();
   const config = {
-    ...readOnlookerSettings(session).settings,
+    ...onlookerSettings.readSettings(session).settings,
     enabled: true,
     catchUpThreshold: Infinity,
   };
@@ -899,7 +911,11 @@ it("preserves blockers after an error ending without a corrective continuation",
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: Infinity },
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: Infinity,
+    },
     "headless-root",
   );
   onTestFinished(() => observer.dispose());
@@ -971,7 +987,7 @@ it("coalesces backlog and releases threshold seven below seven, not only at zero
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 7 },
+    { ...onlookerSettings.readSettings(session).settings, enabled: true, catchUpThreshold: 7 },
     "headless-root",
   );
   onTestFinished(() => observer.dispose());
@@ -1066,7 +1082,11 @@ it("seeds Reviews and Consultations with observed-model evidence, not stored sig
     }),
   };
   const session = await activeFixture();
-  const config = { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 1 };
+  const config = {
+    ...onlookerSettings.readSettings(session).settings,
+    enabled: true,
+    catchUpThreshold: 1,
+  };
   const observer = createObserver(session, config, "headless-root");
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
   onTestFinished(() => observer.dispose());
@@ -1187,7 +1207,7 @@ it("bounds late interactive corrections across native before_agent_start hooks",
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       maxCorrectiveTurns: 2,
@@ -1250,7 +1270,7 @@ it.each([
     const observer = createObserver(
       session,
       {
-        ...readOnlookerSettings(session).settings,
+        ...onlookerSettings.readSettings(session).settings,
         enabled: true,
         correct,
         catchUpThreshold: Infinity,
@@ -1306,7 +1326,7 @@ it("a Concern found before settlement continues the same run", async () => {
   const observer = createObserver(
     session,
     // Each turn waits for its Review, so the Concern arrives before the run ends.
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: 1 },
+    { ...onlookerSettings.readSettings(session).settings, enabled: true, catchUpThreshold: 1 },
     "interactive",
   );
   onTestFinished(() => observer.dispose());
@@ -1331,7 +1351,11 @@ it("disabled observation leaves the ordered native tools, prompt and conversatio
   const tools = structuredClone(session.getAllTools());
   const prompt = session.systemPrompt;
   const messages = structuredClone(session.messages);
-  const observer = createObserver(session, readOnlookerSettings(session).settings, "headless-root");
+  const observer = createObserver(
+    session,
+    onlookerSettings.readSettings(session).settings,
+    "headless-root",
+  );
   onTestFinished(() => observer.dispose());
   await observer.settled(false);
   expect(observer.status).toMatchObject({
@@ -1340,7 +1364,7 @@ it("disabled observation leaves the ordered native tools, prompt and conversatio
     cost: null,
   });
   observer.configure({
-    ...readOnlookerSettings(session).settings,
+    ...onlookerSettings.readSettings(session).settings,
     model: "configured/model",
     thinkingLevel: "low",
   });
@@ -1421,7 +1445,11 @@ it("prioritizes consultation after the active Review and promptly cancels queued
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: Infinity },
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: Infinity,
+    },
     "interactive",
   );
   onTestFinished(() => observer.dispose());
@@ -1529,7 +1557,11 @@ it("cancels an on-demand consultation without pausing later advice", async () =>
   const session = await activeFixture();
   const observer = createObserver(
     session,
-    { ...readOnlookerSettings(session).settings, enabled: true, catchUpThreshold: Infinity },
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: Infinity,
+    },
     "interactive",
   );
   onTestFinished(() => observer.dispose());
@@ -1557,7 +1589,7 @@ it("renames delivered findings without rebuilding the private session", async ()
   });
   const session = await activeFixture();
   const config = {
-    ...readOnlookerSettings(session).settings,
+    ...onlookerSettings.readSettings(session).settings,
     enabled: true,
     name: "Marcel",
     reviewEvery: "request" as const,
@@ -1601,7 +1633,7 @@ it("describes omitted seed messages when the observed session has no file", asyn
   const session = await activeFixture({}, [], SessionManager.inMemory());
   await session.prompt("Original request: refactor the parser.");
   const config = {
-    ...readOnlookerSettings(session).settings,
+    ...onlookerSettings.readSettings(session).settings,
     enabled: true,
     catchUpThreshold: 1,
     maxToolResultChars: 1_000_000,
@@ -1634,7 +1666,7 @@ it("bounds the first Review of a long session by the automatic seed budget", asy
   const session = await activeFixture();
   await session.prompt("Original request: refactor the parser.");
   const config = {
-    ...readOnlookerSettings(session).settings,
+    ...onlookerSettings.readSettings(session).settings,
     enabled: true,
     catchUpThreshold: 1,
     // This test bounds the seed by its budget alone, so tool results stay uncapped.
@@ -1709,7 +1741,7 @@ it("keeps an in-flight Review current when the observed model changes under an O
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: Infinity,
       model: "observer-fixture/priced",
@@ -1760,7 +1792,7 @@ it("seeds the compaction summary and the first user request after it, not findin
   const observer = createObserver(
     session,
     {
-      ...readOnlookerSettings(session).settings,
+      ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: 1,
       seedBudgetTokens: 4_000,

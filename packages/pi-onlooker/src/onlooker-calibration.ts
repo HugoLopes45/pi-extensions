@@ -1,6 +1,5 @@
 import { estimateTokens, type AgentSession } from "@earendil-works/pi-coding-agent";
-
-import type { TokenSample } from "./utils/token-calibration.js";
+import type { TokenSample } from "pi-hl-utils/token-calibration";
 
 /**
  * Factor assumed for an Onlooker model before any of its Reviews reports usage. Review Evidence
