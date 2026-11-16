@@ -26,6 +26,7 @@
     "directory": "packages/pi-onlooker"
   },
   "files": [
+    "extensions",
     "src",
     "skills",
     "CHANGELOG.md"
@@ -57,7 +58,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./extensions/index.ts"
     ],
     "skills": [
       "./skills"

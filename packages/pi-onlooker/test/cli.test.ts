@@ -13,7 +13,7 @@ const execute = promisify(execFile);
 const cli = fileURLToPath(
   new URL("./bundle/cli.js", import.meta.resolve("@earendil-works/pi-coding-agent")),
 );
-const onlooker = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+const onlooker = fileURLToPath(new URL("../extensions/index.ts", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/cli-extension.ts", import.meta.url));
 
 // One run per axis value: each of CodeMode and OAuth is on in one case and off in the other.
