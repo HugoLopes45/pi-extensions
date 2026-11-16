@@ -1,11 +1,14 @@
 {
   "name": "@hugolopes45/pi-extensions",
   "private": true,
+  "type": "module",
   "scripts": {
     "check": "oxfmt --check && oxlint",
-    "verify": "pnpm check && pnpm --recursive run check"
+    "verify": "pnpm check && pnpm --recursive run check",
+    "version-packages": "changeset version && oxfmt"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.3",
     "@types/node": "^26.6.6",
     "oxfmt": "0.78.0",
     "oxlint": "1.93.0",
