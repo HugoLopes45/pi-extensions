@@ -617,9 +617,11 @@ it("counts the evidence each Context Seed omits or shortens and each capped tool
   const sent = privateRequests[0]?.text ?? "";
   const omitted = Number(/omits the other (\d+)/.exec(sent)?.[1]);
   const shortened = Number(/; (\d+) kept messages are shortened/.exec(sent)?.[1] ?? 0);
-  const capped = sent.split("characters omitted from this tool result").length - 1;
+  // Every tool result here exceeds the cap, so each kept one counts as capped, even when the seed
+  // shortens it past its cap marker.
+  const capped = sent.split('"role":"toolResult"').length - 1;
   expect(omitted).toBeGreaterThan(0);
-  expect(capped).toBeGreaterThan(0);
+  expect(sent).toContain("characters omitted from this tool result");
   expect(observer.status.spend.evidence).toEqual({
     seeds: 1,
     omittedMessages: omitted,
