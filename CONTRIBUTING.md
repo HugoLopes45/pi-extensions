@@ -59,10 +59,11 @@ Write one paragraph per line. Use `bash` for shell code blocks. Link to files ou
 
 1. Create `packages/<extension>/` with the same layout as the other packages: `extensions/index.ts` as the entry, modules in `src/`, tests in `test/`, and `README.md`, `CHANGELOG.md` and `LICENSE`.
 2. Copy `package.json` from another package, then change `name`, `description`, `keywords`, `homepage` and `repository.directory`. Keep `"version": "0.1.0"`, `"type": "module"`, the `check` and `prepublishOnly` scripts, `files`, `engines`, the `pi` manifest and the Pi peer dependencies at `"*"`.
-3. Add `tsconfig.json` with `{"extends": "../../tsconfig.json", "include": [...]}`, listing the folders the package type-checks.
-4. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new.
-5. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
-6. Run `pnpm install` and `pnpm run verify`.
+3. Add `tsconfig.json` with `{"extends": "../../tsconfig.json", "include": ["extensions", "src", "test"]}`, and adjust `include` to the folders of the package.
+4. In `.oxlintrc.json`, add `packages/<extension>/**` to the `files` of the override that limits `eslint/complexity` to 10.
+5. In `.github/workflows/ci.yml`, run the package's `check` script on its minimum Pi version, and add that version to the `pi` matrix if it is new. Add each `@earendil-works/*` package that the extension depends on to `PI_PACKAGES`, so the Pi version jobs pin it.
+6. In the root `README.md`, add one row to the Extensions table. Until the first release, write `Not released yet` in the Install column.
+7. Run `pnpm install` and `pnpm run verify`.
 
 The first npm version of a new package is published by hand, because npm accepts a trusted publisher only for a package that exists. After it, configure the trusted publisher as described in [Releases](#releases); later versions go through `release.yml`.
 
