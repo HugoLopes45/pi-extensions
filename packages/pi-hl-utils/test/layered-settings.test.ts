@@ -244,6 +244,21 @@ describe("layered settings writes", () => {
     expect(JSON.parse(documents.global)).toEqual({ x: 1 });
   });
 
+  it("keeps an empty namespace when the definition asks for it", async () => {
+    const { documents, manager } = storageHarness(JSON.stringify({ x: 1, demo: { limit: 4 } }));
+    const settings = defineLayeredSettings({
+      ...definition,
+      keepEmptyNamespace: true,
+    });
+    await settings.writeSettings(
+      manager,
+      "global",
+      { action: "inherit", key: "limit" },
+      () => true,
+    );
+    expect(JSON.parse(documents.global)).toEqual({ x: 1, demo: {} });
+  });
+
   it("refuses invalid documents and invalid results without writing", async () => {
     const settings = define();
     for (const document of ["[]", '{"demo":null}']) {
