@@ -45,7 +45,15 @@ function lines(component: { render(width: number): string[] } | undefined): stri
     .map((line) => line.trimEnd());
 }
 
-const withoutTags = (text: string) => text.replace(/<\/?[A-Za-z:]+>/g, "");
+function withoutTags(text: string): string {
+  let previous: string;
+  let result = text;
+  do {
+    previous = result;
+    result = result.replace(/<\/?[A-Za-z:]+>/g, "");
+  } while (result !== previous);
+  return result;
+}
 const plainText = (rendered: string[]) => withoutTags(rendered.join("\n")).trim();
 
 const label = "<customMessageLabel><b>[onlooker]</b></customMessageLabel>";
