@@ -151,6 +151,7 @@ export interface LayeredSettingsDefinition<
   merge?: Merge;
   /** Keep the namespace in a settings document after its last option is removed. */
   keepEmptyNamespace?: boolean;
+  globalOnlyKeys?: readonly (keyof Static<S> & keyof Config & string)[];
 }
 
 /**
@@ -275,8 +276,16 @@ export function defineLayeredSettings<
   type OptionKey = keyof Options & keyof Config & string;
   type Layers = LayeredSettingsLayers<Options>;
   type Change = LayeredSettingChange<Options>;
-  const { namespace, label, schema, defaults, sessionEntryType, merge, keepEmptyNamespace } =
-    definition;
+  const {
+    namespace,
+    label,
+    schema,
+    defaults,
+    sessionEntryType,
+    merge,
+    keepEmptyNamespace,
+    globalOnlyKeys = [],
+  } = definition;
   if (!Value.Check(schema, {}))
     throw new Error(`${label} settings schema must make every option optional`);
   const keySchema = Type.KeyOf(schema);
@@ -317,6 +326,16 @@ export function defineLayeredSettings<
     return structuredClone(empty);
   }
 
+  function checkScope(options: Options, source: LayeredSettingScope): void {
+    if (source === "global") return;
+    for (const key of globalOnlyKeys) {
+      if (Object.hasOwn(options, key))
+        throw new Error(
+          `Invalid ${source} ${label} settings: ${key} is global-only; set it in global settings`,
+        );
+    }
+  }
+
   // Native settings contain arbitrary authored JSON; the option schema validates it before use. SDK command tests exercise the boundary.
   function parseOptions(value: unknown, source: LayeredSettingScope): Options {
     if (value === undefined) return noOptions();
@@ -330,6 +349,7 @@ export function defineLayeredSettings<
         `Invalid ${source} ${label} settings${issue?.instancePath ?? ""}: ${issue?.message ?? "invalid options"}`,
       );
     }
+    checkScope(value, source);
     return structuredClone(value);
   }
 
@@ -340,6 +360,7 @@ export function defineLayeredSettings<
       .findLast((item) => item.type === "custom" && item.customType === sessionEntryType);
     if (!entry || entry.type !== "custom") return noOptions();
     if (!isSessionData(entry.data)) throw new Error(`Invalid ${label} session settings`);
+    checkScope(entry.data.overrides, "session");
     return structuredClone(entry.data.overrides);
   }
 
@@ -368,11 +389,12 @@ export function defineLayeredSettings<
     authored = readLayers(session.settingsManager),
   ) {
     if (authored.global instanceof Error) throw authored.global;
-    const trusted = session.settingsManager.isProjectTrusted();
-    if (trusted && authored.project instanceof Error) throw authored.project;
+    const project = session.settingsManager.isProjectTrusted() ? authored.project : noOptions();
+    if (project instanceof Error) throw project;
+    checkScope(project, "project");
     const layers: (readonly [LayeredSettingScope, LayeredSettingLayer<Config>])[] = [
       ["global", authored.global],
-      ["project", trusted && !(authored.project instanceof Error) ? authored.project : noOptions()],
+      ["project", project],
     ];
     if (sessionEntryType !== undefined)
       layers.push(["session", readOverrides(session.sessionManager)]);
@@ -486,8 +508,9 @@ export function defineLayeredSettings<
     const overrides = readOverrides(session.sessionManager);
     if (change.action === "inherit") Reflect.deleteProperty(overrides, change.key);
     else Object.assign(overrides, change.patch);
-    pi.appendEntry(sessionEntry, { version: 1, overrides });
-    return overrides;
+    const validated = parseOptions(overrides, "session");
+    pi.appendEntry(sessionEntry, { version: 1, overrides: validated });
+    return validated;
   }
 
   return { ...settings, readOverrides, readSettingsLeniently, writeChange };
