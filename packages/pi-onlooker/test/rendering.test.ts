@@ -16,6 +16,7 @@ import {
   renderOnlookerAskResult,
   renderOnlookerIntervention,
   renderOnlookerStatus,
+  type OnlookerStatusEntry,
 } from "../src/onlooker-rendering.js";
 
 // Line breaks and truncation match a real theme under the escape-encoded theme (its styles are not
@@ -389,6 +390,96 @@ describe("onlooker_ask rendering", () => {
     ).join("\n");
     expect(expanded).toContain("<error>Failure 12</error>");
     expect(expanded).not.toContain("to expand");
+  });
+});
+
+describe("untrusted text", () => {
+  // A title change, a screen clear, a C1 CSI, and a lone bell and escape.
+  const hostile = "ok\x1b]0;pwned\x07\x1b[2J\x9b2J\x07\x1b done\r\nnext";
+  // Style sequences are the renderer's own; anything else reached the text from outside.
+  const controls = (rendered: readonly string[]) => {
+    const text = rendered.join("\n");
+    const found: string[] = [];
+    for (let index = 0; index < text.length; index++) {
+      if (text.startsWith("\x1b[", index)) {
+        let end = index + 2;
+        while (end < text.length && "0123456789;".includes(text.charAt(end))) end++;
+        if (text.charAt(end) === "m") {
+          index = end;
+          continue;
+        }
+      }
+      const code = text.charCodeAt(index);
+      if (code !== 0x0a && code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f)))
+        found.push(text.charAt(index));
+    }
+    return found;
+  };
+  const render = (component: { render(width: number): string[] }) => component.render(120);
+
+  it("keeps terminal controls in model text out of Interventions and onlooker_ask rows", () => {
+    const finding = { severity: "concern", message: hostile } as const;
+    const intervention = renderOnlookerIntervention(finding, collapsed, theme);
+    if (!intervention) throw new Error("Expected a component");
+    expect(controls(render(intervention))).toEqual([]);
+    for (const expanded of [false, true])
+      expect(
+        controls(
+          render(renderOnlookerAskCall({ message: hostile }, expanded, theme, durationContext())),
+        ),
+      ).toEqual([]);
+    for (const isError of [false, true])
+      expect(
+        controls(
+          render(
+            renderOnlookerAskResult(
+              hostile,
+              { expanded: true, isPartial: false, isError },
+              theme,
+              durationContext(),
+            ),
+          ),
+        ),
+      ).toEqual([]);
+  });
+
+  it("keeps terminal controls in errors and models out of status rows", () => {
+    const entry: OnlookerStatusEntry = {
+      state: "paused",
+      settings: { enabled: true, model: hostile },
+      effectiveModel: hostile,
+      error: hostile,
+    };
+    expect(controls(render(renderOnlookerStatus(entry, true, theme)))).toEqual([]);
+    expect(controls(onlookerStatusHeadline(entry, theme))).toEqual([]);
+    expect(
+      controls([onlookerFooterText({ state: "armed", effectiveModel: hostile }, theme) ?? ""]),
+    ).toEqual([]);
+  });
+
+  it("removes C1 controls and OSC 8 links but keeps the link text", () => {
+    const linked = "a\u009b2Jb \x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\ c\x1b]8;;x\x07d";
+    const [, line] = onlookerStatusHeadline({ state: "paused", error: linked }, tagged);
+    expect(line).toBe("<error>✗</error> <error>a2Jb link cd</error>");
+  });
+
+  it("keeps a line break in an Intervention", () => {
+    const intervention = renderOnlookerIntervention(
+      { severity: "concern", message: "first\r\nsecond" },
+      { expanded: true, outputPad: 1 },
+      tagged,
+    );
+    const rows = withoutTags(lines(intervention).join("\n")).split("\n");
+    const first = rows.findIndex((row) => row.includes("first"));
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(rows.findIndex((row) => row.includes("second"))).toBeGreaterThan(first);
+    expect(controls(rows)).toEqual([]);
+  });
+
+  it("keeps the visible text and line breaks", () => {
+    expect(onlookerStatusHeadline({ state: "paused", error: "a\x1b[2Jb\r\nc\td" }, tagged)[1]).toBe(
+      "<error>✗</error> <error>ab\nc\td</error>",
+    );
   });
 });
 

@@ -99,13 +99,15 @@ After pi-context-kit shortens old outputs, Pi shows a notice, for example: `pi-c
 
 To change the settings, type `/context-kit` and press Enter. Select a line with the arrow keys and press Enter to change its value. The change is saved at once and applies from the next turn. Press Escape to close the panel.
 
-The panel has a scope row. Choose the session, the global settings, or the project settings when the project is trusted. The first three lines are the main settings:
+The panel has a scope row. Choose the session, the global settings, or the project settings when the project is trusted. Edits go to the selected scope. Each other line is one setting, named as in [Settings](#settings). A line shows the value in effect, and the scope it comes from when that is not the default. The first three lines are the main settings:
 
-| Panel line                   | Choices                                               | Setting                                              |
-| ---------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
-| Automatic cleanup            | On, Off                                               | `enabled`                                            |
-| Clean up when the context is | 50% to 90% full, At Pi's limit                        | `threshold`                                          |
-| Cleanup method               | Summary notes (recommended), Trim first, Pi's summary | `strategy`: `"balanced"`, `"frugal"`, `"pi-summary"` |
+| Line        | On Enter                                                          |
+| ----------- | ----------------------------------------------------------------- |
+| `enabled`   | Steps through `inherit`, `on`, `off`                              |
+| `threshold` | Opens a field: a token count, a percentage such as `75%`, or `pi` |
+| `strategy`  | Steps through `inherit`, `balanced`, `frugal`, `pi-summary`       |
+
+The other on and off settings step the same way as `enabled`. The other settings open a field. In a field, type `inherit` to remove the value from the selected scope.
 
 Commands write the same values, for example `/context-kit off --global` turns cleanup off in the global settings. `/context-kit set threshold 8000` sets a value for this session only. `/context-kit inherit threshold --project` removes the project value. Without `--global` or `--project`, a command writes to the session.
 
@@ -229,11 +231,11 @@ You do not need to set all settings. A missing setting uses its default. Pi appl
 
 **`strategy`.**
 
-| Strategy (panel name)         | Above the threshold, after pruning                                                                       | Background requests                            |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `"balanced"` (Summary notes)  | A handoff note. If the note fails, shake. Then Pi's summary.                                             | Yes: the note is written before the threshold. |
-| `"frugal"` (Trim first)       | Shake, because it does not call the model. If that is not sufficient, a handoff note. Then Pi's summary. | No                                             |
-| `"pi-summary"` (Pi's summary) | Pi's summary. No handoff note, no shaking.                                                               | No                                             |
+| Strategy       | Above the threshold, after pruning                                                                       | Background requests                            |
+| -------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `"balanced"`   | A handoff note. If the note fails, shake. Then Pi's summary.                                             | Yes: the note is written before the threshold. |
+| `"frugal"`     | Shake, because it does not call the model. If that is not sufficient, a handoff note. Then Pi's summary. | No                                             |
+| `"pi-summary"` | Pi's summary. No handoff note, no shaking.                                                               | No                                             |
 
 ### Advanced settings
 
@@ -352,7 +354,7 @@ pi-context-kit has no setting per model. To start earlier for one model only, ma
 
 **`pi-context-kit: handoff note failed`**: the summary request failed. pi-context-kit uses the next method or Pi's summary, so your session continues. Check the model and your provider limits.
 
-**The panel cannot save a value**: Pi shows `pi-context-kit:` and the file error. Check that you can write the settings file, then select the value again.
+**The panel cannot save a value**: the panel shows the error under the list, and a command shows it after `pi-context-kit:`. Check that you can write the settings file, then select the value again.
 
 ## FAQ
 

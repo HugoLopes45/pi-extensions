@@ -4,7 +4,14 @@ import {
   type Theme,
   type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+import {
+  Container,
+  Markdown,
+  Spacer,
+  stripTerminalSequences,
+  Text,
+  type Component,
+} from "@earendil-works/pi-tui";
 import {
   callDurationFooter,
   COLLAPSED_LINES,
@@ -96,6 +103,23 @@ const messagePaint =
   (text) =>
     theme.fg("customMessageText", text);
 
+/**
+ * Text from a model, a provider error, or a settings file, without terminal controls: pi-tui
+ * writes component text to the terminal as is, so an escape sequence in it would run there.
+ * Keeps tabs and line breaks.
+ */
+function displayText(text: string): string {
+  return Array.from(stripTerminalSequences(text).replace(/\r\n?/g, "\n"))
+    .filter((char) => char === "\n" || char === "\t" || !isControlCharacter(char))
+    .join("");
+}
+
+/** C0, DEL and C1 controls. */
+function isControlCharacter(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+}
+
 /** Severity-labelled, attributed Intervention; invalid details fall back to Pi's renderer. */
 export function renderOnlookerIntervention(
   // Journaled custom-message details are validated by the finding schema below.
@@ -105,7 +129,7 @@ export function renderOnlookerIntervention(
 ): Component | undefined {
   if (!Value.Check(onlookerFindingSchema, details)) return undefined;
   const heading = theme.fg(severityColor[details.severity], details.severity);
-  const body = new Markdown(details.message, 0, 0, getMarkdownTheme(), {
+  const body = new Markdown(displayText(details.message), 0, 0, getMarkdownTheme(), {
     color: messagePaint(theme),
   });
   return customMessageBox(
@@ -132,12 +156,13 @@ export function renderOnlookerAskCall(
   theme: OnlookerRenderTheme,
   context: DurationContext,
 ): Component {
-  const [first = "", ...rest] = args.message.split("\n");
+  const message = displayText(args.message);
+  const [first = "", ...rest] = message.split("\n");
   const hidden = rest.length > 0 && !expanded;
   const heading = toolHeader(theme, onlookerAskToolName, expanded ? undefined : first);
   const container = new Container();
   container.addChild(new Text(hidden ? `${heading}${summaryExpandHint(theme)}` : heading, 0, 0));
-  if (expanded) container.addChild(new Text(theme.fg("muted", `message: ${args.message}`), 0, 0));
+  if (expanded) container.addChild(new Text(theme.fg("muted", `message: ${message}`), 0, 0));
   container.addChild(callDurationFooter(theme, context));
   return container;
 }
@@ -150,17 +175,18 @@ export function renderOnlookerAskResult(
   context: DurationContext,
 ): Component {
   const container = new Container();
-  if (answer) {
+  const shown = displayText(answer);
+  if (shown) {
     container.addChild(new Spacer(1));
     if (options.isError) {
-      const lines = previewBody(theme, answer.split("\n"), {
+      const lines = previewBody(theme, shown.split("\n"), {
         limit: COLLAPSED_LINES.fallback,
         expanded: options.expanded,
         color: "error",
       });
       container.addChild(new Text(lines.join("\n"), 0, 0));
     } else {
-      const body = new Markdown(answer, 0, 0, getMarkdownTheme(), {
+      const body = new Markdown(shown, 0, 0, getMarkdownTheme(), {
         color: (text) => theme.fg("toolOutput", text),
       });
       container.addChild(
@@ -241,7 +267,7 @@ function findingCounts(entry: OnlookerStatusEntry): string[] {
 /** Human-readable option value; an absent value inherits. */
 export function formatOnlookerOption(options: OnlookerOptions, key: keyof OnlookerOptions): string {
   const value = options[key];
-  return value === undefined ? "inherit" : String(value);
+  return value === undefined ? "inherit" : displayText(String(value));
 }
 
 /** The word shown for a state: an armed Onlooker reads `on` to the user. */
@@ -268,15 +294,15 @@ function stateLine(
   return joinInline(theme, [
     label ? `${label} ${state}` : state,
     entry.effectiveModel
-      ? `${paint(entry.effectiveModel)}${inherited ? theme.fg("dim", " (inherited)") : ""}`
+      ? `${paint(displayText(entry.effectiveModel))}${inherited ? theme.fg("dim", " (inherited)") : ""}`
       : undefined,
-    entry.effectiveThinkingLevel ? paint(entry.effectiveThinkingLevel) : undefined,
+    entry.effectiveThinkingLevel ? paint(displayText(entry.effectiveThinkingLevel)) : undefined,
     entry.backlog ? paint(`backlog ${entry.backlog}`) : undefined,
   ]);
 }
 
 function errorLine(theme: OnlookerRenderTheme, error: string): string {
-  return `${statusMark(theme, "failed")} ${theme.fg("error", error)}`;
+  return `${statusMark(theme, "failed")} ${theme.fg("error", displayText(error))}`;
 }
 
 /** Live state line plus any error, as shown at the top of the settings menu. */
@@ -395,8 +421,9 @@ export function onlookerFooterText(
   const paused = root.state === "paused";
   const busy = root.state === "reviewing" || root.state === "consulting";
   const mark = paused ? "warning" : busy ? "active" : "idle";
+  const model = root.effectiveModel?.slice(root.effectiveModel.indexOf("/") + 1);
   return `${statusMark(theme, mark)}  ${joinInline(theme, [
     theme.fg("dim", root.name ?? "onlooker"),
-    root.effectiveModel?.slice(root.effectiveModel.indexOf("/") + 1),
+    model === undefined ? undefined : displayText(model),
   ])}`;
 }
