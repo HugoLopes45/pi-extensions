@@ -1,6 +1,8 @@
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CONFIG } from "../src/config.ts";
+import { contextTokens } from "../src/context.ts";
 import { planMaintenance } from "../src/maintain.ts";
 import { filler, Transcript } from "./fixtures.ts";
 
@@ -21,7 +23,126 @@ function staleSessionBeforeCompaction() {
   return { t, old };
 }
 
+describe("contextTokens", () => {
+  it("counts additive system instructions", () => {
+    const t = new Transcript();
+    t.session.appendMessage({
+      role: "system",
+      content: filler(2_000),
+      timestamp: 1,
+    });
+    t.session.appendMessage({
+      role: "system",
+      content: "Extra instructions",
+      timestamp: 2,
+    });
+    expect(contextTokens(t.entries().flatMap((entry) => entry.messages))).toBe(
+      estimateTokens({
+        role: "system",
+        content: `${filler(2_000)}\n\nExtra instructions`,
+        timestamp: 1,
+      }),
+    );
+  });
+
+  it("replays section replacement and removal", () => {
+    const t = new Transcript();
+    t.session.appendMessage({
+      role: "system",
+      content: "Base",
+      sections: {
+        keep: filler(1_000),
+        replace: filler(2_000),
+        remove: filler(3_000),
+      },
+      timestamp: 1,
+    });
+    t.session.appendMessage({
+      role: "system",
+      content: "",
+      sections: { replace: "New", remove: null },
+      timestamp: 2,
+    });
+    expect(contextTokens(t.entries().flatMap((entry) => entry.messages))).toBe(
+      estimateTokens({
+        role: "system",
+        content: "Base",
+        sections: { keep: filler(1_000), replace: "New" },
+        timestamp: 1,
+      }),
+    );
+  });
+
+  it("retains tools not removed by a later system update", () => {
+    const t = new Transcript();
+    const keep = {
+      name: "keep",
+      description: filler(1_000),
+      parameters: { type: "object" },
+    };
+    const remove = {
+      name: "remove",
+      description: filler(2_000),
+      parameters: { type: "object" },
+    };
+    const add = {
+      name: "add",
+      description: "New tool",
+      parameters: { type: "object" },
+    };
+    t.session.appendMessage({
+      role: "system",
+      content: "Base",
+      toolsAdded: [keep, remove],
+      timestamp: 1,
+    });
+    t.session.appendMessage({
+      role: "system",
+      content: "",
+      toolsAdded: [add],
+      toolsRemoved: [{ name: "remove" }],
+      timestamp: 2,
+    });
+    expect(contextTokens(t.entries().flatMap((entry) => entry.messages))).toBe(
+      estimateTokens({
+        role: "system",
+        content: "Base",
+        toolsAdded: [keep, add],
+        timestamp: 1,
+      }),
+    );
+  });
+});
+
 describe("planMaintenance", () => {
+  it("rejects pruning that still leaves the merged system context over budget", () => {
+    const t = new Transcript();
+    t.session.appendMessage({
+      role: "system",
+      content: filler(20_000),
+      timestamp: 1,
+    });
+    t.tool("bash", { command: "old" }, filler(5_000));
+    t.session.appendMessage({
+      role: "system",
+      content: "Extra instructions",
+      timestamp: 2,
+    });
+    t.user("Continue");
+    const plan = planMaintenance({
+      entries: t.entries(),
+      edited: new Set(),
+      options: {
+        ...DEFAULT_CONFIG,
+        prune: { enabled: true, protectTokens: 0, minSavings: 1, minTokens: 1 },
+        shake: undefined,
+      },
+      tokens: 26_000,
+      threshold: 10_000,
+    });
+    expect(plan).toEqual({ edits: [], tokens: 26_000 });
+  });
+
   // Any edit changes the prompt prefix: the provider cache and the later thinking blocks are lost.
   it("applies no edits below the threshold", () => {
     const { t } = staleSession();

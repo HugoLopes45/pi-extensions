@@ -1,4 +1,5 @@
 import type { ImageContent, TextContent, ThinkingContent, ToolCall } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import {
   type ContextEditableContent,
   type ContextEditEntryDraft,
@@ -37,13 +38,12 @@ export function editableMessage(entry: ProjectedSessionEntry): EditableMessage |
 
 /** Same rule as Pi's projected estimate: the current system message plus every other message. */
 export function contextTokens(messages: readonly AgentMessage[]): number {
-  let system: AgentMessage | undefined;
-  let tokens = 0;
+  const system = getCurrentSystemMessage(messages);
+  let tokens = system ? estimateTokens(system) : 0;
   for (const message of messages) {
-    if (message.role === "system") system = message;
-    else tokens += estimateTokens(message);
+    if (message.role !== "system") tokens += estimateTokens(message);
   }
-  return tokens + (system ? estimateTokens(system) : 0);
+  return tokens;
 }
 
 export function messageTokens(message: AgentMessage): number {

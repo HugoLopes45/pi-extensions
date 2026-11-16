@@ -4,6 +4,23 @@ import { readEntry, searchEntries } from "../src/recall.ts";
 import { Transcript } from "./fixtures.ts";
 
 describe("searchEntries", () => {
+  it.each([false, true])("excludes private shell output with regex=%s", async (regex) => {
+    const t = new Transcript();
+    t.session.appendMessage({
+      role: "bashExecution",
+      command: "printf PRIVATE-MARKER",
+      output: "PRIVATE-MARKER",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 1,
+      excludeFromContext: true,
+    });
+    expect(await searchEntries(t.branch(), { query: "PRIVATE-MARKER", regex })).toBe(
+      "No entries match.",
+    );
+  });
+
   it("finds matching entries case-insensitively, newest first", async () => {
     const t = new Transcript();
     const user = t.user("Fix the Login bug");
@@ -81,6 +98,21 @@ describe("searchEntries", () => {
 });
 
 describe("readEntry", () => {
+  it.each([false, true])("respects shell exclusion=%s for direct reads", (excludeFromContext) => {
+    const t = new Transcript();
+    const id = t.session.appendMessage({
+      role: "bashExecution",
+      command: "printf SHELL-MARKER",
+      output: "SHELL-MARKER",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 1,
+      excludeFromContext,
+    });
+    expect(readEntry(t.branch(), id, {}).includes("SHELL-MARKER")).toBe(!excludeFromContext);
+  });
+
   it("returns the raw entry text in pages", () => {
     const t = new Transcript();
     const id = t.tool("read", { path: "a.ts" }, "0123456789");

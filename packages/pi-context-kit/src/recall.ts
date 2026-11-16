@@ -160,6 +160,8 @@ function messageText(message: Extract<SessionEntry, { type: "message" }>["messag
       return `[${message.toolName} result${message.isError ? " error" : ""}]\n${contentText(message.content)}`;
     case "system":
       return "";
+    case "bashExecution":
+      return message.excludeFromContext ? "" : JSON.stringify(message);
     default:
       return JSON.stringify(message);
   }

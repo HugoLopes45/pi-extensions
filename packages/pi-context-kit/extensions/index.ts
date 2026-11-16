@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-import { type Api, type Message, type Model } from "@earendil-works/pi-ai";
+import { type Api, getCurrentSystemMessage, type Message, type Model } from "@earendil-works/pi-ai";
 import {
   convertToLlm,
   type CompactionEntryDraft,
@@ -16,6 +16,7 @@ import {
   type SessionEntry,
   SettingsManager,
   type Theme,
+  type TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Container, SettingsList, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -121,7 +122,7 @@ export default function contextKit(pi: ExtensionAPI): void {
 
   const statusOf = (ctx: ExtensionContext, config: ContextKitConfig, tokens: number) => {
     if (!config.enabled) return "Context cleanup off";
-    const model = ctx.model;
+    const model: Model<Api> | undefined = ctx.model;
     if (!model || model.contextWindow <= 0) return undefined;
     return statusText({
       tokens,
@@ -295,7 +296,7 @@ export default function contextKit(pi: ExtensionAPI): void {
     speculate(turn, leafId, recent, messages);
     if (result.tokens <= limit || !recent || failedEpoch === current) return undefined;
     const writing = background.writing(current);
-    if (writing && limit < piThreshold(model)) return "waiting" as const;
+    if (writing && result.tokens < piThreshold(model)) return "waiting" as const;
     return tryHandoff(turn, recent, writing ? undefined : messages);
   };
 
@@ -356,12 +357,11 @@ export default function contextKit(pi: ExtensionAPI): void {
     return undefined;
   };
 
-  pi.on("turn_end", async (event, ctx) => {
-    const config = settings(ctx);
-    if (!config.enabled) {
-      showStatus(ctx, config);
-      return undefined;
-    }
+  const maintainTurn = async (
+    event: TurnEndEvent,
+    ctx: ExtensionContext,
+    config: ContextKitConfig,
+  ) => {
     const branch = ctx.sessionManager.getBranch();
     const current = epoch(branch);
     background.invalidate(current, branch);
@@ -400,6 +400,26 @@ export default function contextKit(pi: ExtensionAPI): void {
     if (turn.result.tokens > limit && !shakeFirst && before(methods, "shake", "soft"))
       turn.result = plan(true);
     return (await softAtTurn(turn)) ?? persist(turn);
+  };
+
+  pi.on("turn_end", async (event, ctx) => {
+    const config = settings(ctx);
+    if (!config.enabled || event.outcome === "aborted" || ctx.signal?.aborted) {
+      background.cancel();
+      showStatus(ctx, config);
+      return undefined;
+    }
+    if (
+      event.outcome === "error" ||
+      (event.message.role === "assistant" && event.message.stopReason === "length")
+    )
+      return undefined;
+    const result = await maintainTurn(event, ctx, config);
+    if (ctx.signal?.aborted) {
+      background.cancel();
+      return undefined;
+    }
+    return result;
   });
 
   const handoffBeforeCompact = async (
@@ -647,8 +667,11 @@ function keptTokens(ctx: ExtensionContext, firstKeptEntryId: string): number {
   const entries = ctx.sessionManager.buildSessionProjection().entries;
   const start = entries.findIndex((entry) => entry.sourceEntry.id === firstKeptEntryId);
   if (start < 0) return Number.POSITIVE_INFINITY;
-  const system = projectedMessages(entries).findLast((message) => message.role === "system");
-  return contextTokens([...(system ? [system] : []), ...projectedMessages(entries.slice(start))]);
+  const system = getCurrentSystemMessage(projectedMessages(entries));
+  return contextTokens([
+    ...(system ? [system] : []),
+    ...projectedMessages(entries.slice(start)).filter((message) => message.role !== "system"),
+  ]);
 }
 
 function fits(summary: string, kept: number, limit: number, ratio: number): boolean {

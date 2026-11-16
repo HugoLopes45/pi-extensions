@@ -180,6 +180,8 @@ If pruning is not sufficient, pi-context-kit tries the methods of the [strategy]
 
 Your work continues during these steps. pi-context-kit never stops a running task to compact.
 
+Failed and truncated responses remain under Pi's recovery control. Aborted turns do not start background notes or commit maintenance edits. Disabling cleanup cancels pending notes at the next turn boundary.
+
 ### The `recall` tool
 
 The `recall` tool reads original session text, not the shortened context sent to the model. It can:
@@ -188,6 +190,8 @@ The `recall` tool reads original session text, not the shortened context sent to
 - read an entry's text by ID, with pagination for large entries.
 
 Other branches and sessions are excluded. System prompt entries are not searched.
+Shell commands explicitly excluded from model context with `!!` are not available through `recall`.
+
 Images remain in the original session entries, but `recall` returns only their MIME types, not image content.
 The model must call `recall` to retrieve a missing detail. Retrieval is not automatic.
 
