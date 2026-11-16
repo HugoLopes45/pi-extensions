@@ -1,0 +1,50 @@
+{
+  "name": "pi-hl-lsp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Qualified language-server observations and file-aware navigation for Pi.",
+  "keywords": [
+    "language-server",
+    "pi-extension",
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "HugoLopes45",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit && vitest --run"
+  },
+  "dependencies": {
+    "pi-hl-utils": "workspace:*",
+    "vscode-jsonrpc": "10.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@types/node": "^26.6.6",
+    "typebox": "^1.4.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "bundledDependencies": [
+    "pi-hl-utils"
+  ],
+  "engines": {
+    "node": ">=22.19.0",
+    "pi": ">=1.5.2"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}
