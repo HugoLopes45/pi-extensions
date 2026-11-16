@@ -53,7 +53,7 @@ A package README has these sections, in this order. Leave out a section only whe
 11. `## Update, try or remove`.
 12. `## Contributing`, `## Author` and `## License`, with the same text in each package.
 
-Write one paragraph per line. Use `bash` for shell code blocks. Link to files outside the package with absolute GitHub URLs, because npm shows the README without the repository. When behavior changes, update the README and the `Unreleased` section of `CHANGELOG.md` in the same pull request.
+Write one paragraph per line. Use `bash` for shell code blocks. Link to files outside the package with absolute GitHub URLs, because npm shows the README without the repository. When behavior changes, update the README and add a changeset in the same pull request (see [Releases](#releases)).
 
 ## Add an extension
 
@@ -69,19 +69,20 @@ The first npm version of a new package is published by hand, because the trusted
 
 ## Pull requests
 
-Open a branch or fork, then submit a pull request against `main`. Explain the problem, the minimal fix and the checks you ran. Keep unrelated changes in separate pull requests. Give the pull request a title that describes the user-visible change; release notes are generated from these titles.
+Open a branch or fork, then submit a pull request against `main`. Explain the problem, the minimal fix and the checks you ran. Keep unrelated changes in separate pull requests. Give the pull request a title that describes the change.
 
 ## Releases
 
-Only the repository owner publishes. Each package is released on its own:
+Versions and changelogs are managed with [Changesets](https://github.com/changesets/changesets). Each package is released on its own.
 
-1. In one pull request, set `version` in `packages/<package>/package.json` to `X.Y.Z` and move the `Unreleased` entries of its `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, in words a user understands. Pi shows this entry to users after `pi update`.
-2. Merge the pull request.
-3. Approve the `npm` environment deployment in the CI run on `main`.
+1. In each pull request that changes what users get, run `pnpm changeset`. Select the packages, the bump (`patch` for a fix, `minor` for a new feature, `major` for a breaking change) and write one sentence a user understands. Commit the file it creates in `.changeset/`. Pi shows this sentence to users after `pi update`.
+2. After the merge, CI on `main` opens or updates the `Version Packages` pull request. It bumps each `package.json` version and writes the `CHANGELOG.md` entries from the changesets.
+3. Merge `Version Packages` when you want to release.
+4. Approve the `npm` environment deployment in the CI run on `main`.
 
-After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm. For each one, the `Release` job publishes it with trusted publishing through the `npm` environment, then creates the tag `<package>@vX.Y.Z` and a GitHub release with the changelog entry. It fails when that entry is missing or empty.
+After the checks pass on `main`, the `Plan releases` job of `.github/workflows/ci.yml` lists each package whose `package.json` version is not on npm. For each one, the `Release` job publishes it with trusted publishing, then creates the tag `<package>@vX.Y.Z` and a GitHub release with its changelog entry. Do not edit versions or `CHANGELOG.md` entries by hand.
 
-Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. Allow the `main` branch in that environment and make the owner its required reviewer. A published version cannot be replaced: fix a bad release with a new version.
+Configure each package's npm trusted publisher with this repository, `ci.yml` and the `npm` environment. That environment allows the `main` branch and requires the owner's approval. A published version cannot be replaced: fix a bad release with a new version.
 
 `.github/workflows/release.yml` is the earlier manual path: it publishes when the owner publishes a GitHub release with the tag `<package>@vX.Y.Z`.
 
