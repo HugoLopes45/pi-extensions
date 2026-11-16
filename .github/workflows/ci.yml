@@ -93,6 +93,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Opens or updates the "Version Packages" pull request from the changesets on main.
+  version:
+    name: Version packages
+    needs: [check, pi, workflow-security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the changeset-release/main branch
+      pull-requests: write # open the Version Packages pull request
+      actions: write # start CI on that pull request
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - id: changesets
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          version-script: pnpm run version-packages
+      # Pull requests opened with GITHUB_TOKEN start no workflow, so CI is started by hand.
+      - if: steps.changesets.outputs.pr-number != ''
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref changeset-release/main
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # A package is released when its package.json version is not on npm yet.
   plan:
     name: Plan releases
@@ -156,9 +186,9 @@ jobs:
       # Pi shows CHANGELOG.md to users after an update; the entry is also the release notes.
       - name: Read the changelog entry
         run: |
-          awk -v heading="## [$VERSION]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          awk -v heading="## $VERSION" '$0 == heading { found = 1; next } found && /^## / { exit } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
-            echo "CHANGELOG.md needs a non-empty '## [$VERSION]' entry." >&2
+            echo "CHANGELOG.md needs a non-empty '## $VERSION' entry." >&2
             exit 1
           fi
         env:

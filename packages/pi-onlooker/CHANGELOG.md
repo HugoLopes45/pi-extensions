@@ -2,9 +2,7 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
-## [Unreleased]
-
-## [0.1.0] - 2026-11-16
+## 0.1.0 - 2026-11-16
 
 - First release. A second AI model checks the Pi agent's work and tells it when it breaks your instructions, repeats a failure or claims work it did not do. It works in a private session and reports Blockers, Concerns and Nits, each with evidence.
 - Requires Pi 1.5.1 or later. On Pi 1.5.0, grep results for lines that contain a carriage return are hidden.
