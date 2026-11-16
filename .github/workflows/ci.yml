@@ -144,7 +144,7 @@ jobs:
         with:
           version-script: pnpm run version-packages
 
-  # A package is released when its package.json version is not on npm yet.
+  # A package is released when its package.json version is not on npm or has no tag yet.
   plan:
     name: Plan releases
     needs: [check, pi-compat, workflow-security]
@@ -163,14 +163,20 @@ jobs:
             package=$(jq -r .name "$manifest")
             version=$(jq -r .version "$manifest")
             status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.npmjs.org/$package/$version")
-            case "$status" in
-              200) ;;
-              404) packages=$(jq --compact-output --arg package "$package" '. + [$package]' <<< "$packages") ;;
-              *)
-                echo "npm registry returned HTTP $status for $package@$version." >&2
-                exit 1
-                ;;
-            esac
+            if [ "$status" != 200 ] && [ "$status" != 404 ]; then
+              echo "npm registry returned HTTP $status for $package@$version." >&2
+              exit 1
+            fi
+            # Exit code 2 means the tag does not exist, for example after a first publication by hand.
+            tag_status=0
+            git ls-remote --exit-code --tags origin "refs/tags/$package@v$version" > /dev/null || tag_status=$?
+            if [ "$tag_status" != 0 ] && [ "$tag_status" != 2 ]; then
+              echo "git ls-remote failed with exit code $tag_status." >&2
+              exit 1
+            fi
+            if [ "$status" = 404 ] || [ "$tag_status" = 2 ]; then
+              packages=$(jq --compact-output --arg package "$package" '. + [$package]' <<< "$packages")
+            fi
           done
           echo "packages=$packages" >> "$GITHUB_OUTPUT"
 
@@ -207,7 +213,7 @@ jobs:
       # Pi shows CHANGELOG.md to users after an update; the entry is also the release notes.
       - name: Read the changelog entry
         run: |
-          awk -v heading="## $VERSION" '$0 == heading { found = 1; next } found && /^## / { exit } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          awk -v version="$VERSION" '$1 == "##" && $2 == version { found = 1; next } found && /^## / { exit } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
             echo "CHANGELOG.md needs a non-empty '## $VERSION' entry." >&2
             exit 1
