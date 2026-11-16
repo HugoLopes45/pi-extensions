@@ -57,7 +57,8 @@
         "location": "start"
       }
     ],
-    "typescript/no-deprecated": "error"
+    "typescript/no-deprecated": "error",
+    "eslint/complexity": ["error", 10]
   },
   "overrides": [
     {
@@ -72,12 +73,6 @@
         "eslint/no-console": "off",
         "typescript/no-base-to-string": "off",
         "promise/no-callback-in-promise": "off"
-      }
-    },
-    {
-      "files": ["packages/pi-context-kit/**", "packages/pi-claude-pro/**"],
-      "rules": {
-        "eslint/complexity": ["error", 10]
       }
     },
     {

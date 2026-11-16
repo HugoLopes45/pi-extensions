@@ -58,7 +58,8 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=22.19.0",
+    "pi": ">=1.0.3"
   },
   "pi": {
     "extensions": [
