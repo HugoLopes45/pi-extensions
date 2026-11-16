@@ -69,7 +69,7 @@ async function run(
   calls: readonly ToolCall["arguments"][],
   viaScript: boolean,
 ): Promise<Run> {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-utils-null-optional-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-hl-utils-null-optional-"));
   const agentDir = join(cwd, "agent");
   await mkdir(agentDir);
   const executed: unknown[] = [];
