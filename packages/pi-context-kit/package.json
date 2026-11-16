@@ -1,6 +1,6 @@
 {
   "name": "pi-context-kit",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Keep long Pi coding agent sessions sharp. Clears old file reads and tool outputs from the context, writes the compaction summary in the background, and lets the agent recall the original text.",
   "keywords": [
     "coding-agent",

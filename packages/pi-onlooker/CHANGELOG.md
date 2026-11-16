@@ -2,6 +2,12 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 0.1.2
+
+### Patch Changes
+
+- An unknown key in the `onlooker` settings entry is now reported as `unknown option <key>`. In the `/onlooker` menu, two quick presses on a cycled row now advance it twice instead of writing the same value twice.
+
 ## 0.1.1
 
 ### Patch Changes
