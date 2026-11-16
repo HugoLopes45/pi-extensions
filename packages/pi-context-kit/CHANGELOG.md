@@ -2,6 +2,14 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 0.4.3
+
+### Patch Changes
+
+- An early summary can no longer be longer than the room left under the threshold. Before, Pi could generate a longer summary that pi-context-kit then rejected.
+- The documentation is in English only. The Simplified Chinese translation is removed.
+- The README states that handoff notes and summaries skip the `context` and `before_provider_request` hooks of other extensions, as Pi's own compaction summaries do.
+
 ## 0.4.2 - 2026-11-13
 
 - Documentation in Simplified Chinese: README, contribution guide and security policy. No change to the extension.
