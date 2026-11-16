@@ -152,6 +152,23 @@ it("delivers a persistent defect once and stamps a later finding with its own bo
   ]);
 });
 
+it("shows a long verified quote truncated", async () => {
+  const privateRequests: PrivateRequest[] = [];
+  const quote = `ok 0-0 ${"y".repeat(150)}`;
+  globalThis.onlookerObserverTest = longSessionStream({ "Fix the parser": 1 }, privateRequests, {
+    ...ok,
+    result: (id) => `ok ${id} ${"y".repeat(150)}`,
+    report: () => ({
+      findings: [{ severity: "nit", message: "Long quote.", evidence: { quote } }],
+    }),
+  });
+  const { session } = await observe({});
+  await session.prompt("Fix the parser");
+  expect(delivered(session)).toEqual([
+    `Onlooker nit: Long quote.\n[observed through turn 1; quote: "${quote.slice(0, 120)}…"]`,
+  ]);
+});
+
 it("delivers every Nit, with no cap per request", async () => {
   let reviews = 0;
   const { session } = await fixture({ interactive: true });
