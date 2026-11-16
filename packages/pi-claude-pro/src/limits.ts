@@ -1,4 +1,4 @@
-import { isRecord } from "./util.ts";
+import { isRecord } from "pi-hl-utils/record";
 
 const PREFIX = "anthropic-ratelimit-unified-";
 const USAGE_CLAIMS = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"];

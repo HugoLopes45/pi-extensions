@@ -1,4 +1,4 @@
-import { isRecord } from "./util.ts";
+import { isRecord } from "pi-hl-utils/record";
 
 const IDENTITY_TEXT = "You are Claude Code, Anthropic's official CLI for Claude.";
 const BILLING_PREFIX = "x-anthropic-billing-header:";

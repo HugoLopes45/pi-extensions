@@ -110,6 +110,7 @@ function deps(overrides: Partial<ProviderDeps>): ProviderDeps {
       inspect: async (response) => response,
       explain: (text) => text,
     }),
+    claudeCodeVersion: () => undefined,
     ...overrides,
   };
 }
@@ -211,6 +212,36 @@ describe("createProviderStream", () => {
       },
     }).result();
     expect(sent).toEqual([body]);
+  });
+
+  it("sends a pinned Claude Code version and does not retry at a newer one", async () => {
+    const adapter = fakeAdapter();
+    const requests: unknown[] = [];
+    const result = await createProviderStream(
+      deps({ stream: adapter.stream, claudeCodeVersion: () => "2.1.400" }),
+    )(model, context, {
+      apiKey: TOKEN,
+      fetch: async (_input, init) => {
+        requests.push(init?.body);
+        return Response.json(
+          {
+            type: "error",
+            error: {
+              type: "invalid_request_error",
+              message: "version 2.1.500 or newer is required.",
+            },
+          },
+          { status: 400 },
+        );
+      },
+    }).result();
+
+    expect(result.stopReason).toBe("error");
+    expect(requests).toHaveLength(1);
+    expect(adapter.calls[0]?.options?.headers?.["user-agent"]).toBe(
+      "claude-cli/2.1.400 (external, pi)",
+    );
+    expect(JSON.stringify(adapter.payloads[0])).toMatch(/cc_version=2\.1\.400\.[0-9a-f]{3};/);
   });
 
   it("retries once at the Claude Code version a model requires, then keeps it", async () => {

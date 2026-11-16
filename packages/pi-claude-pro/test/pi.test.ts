@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -9,9 +9,13 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  initTheme,
+  type AgentSession,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { isRecord } from "pi-hl-utils/record";
+import { createMenuTui, keys, menuDriver } from "pi-hl-utils/testing/menu-ui";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { BUNDLED_CLAUDE_CODE_VERSION } from "../src/claude-code.ts";
 
@@ -25,10 +29,6 @@ interface Sent {
     messages?: unknown[];
     thread?: { type: string };
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function isSentBody(value: unknown): value is Sent["body"] {
@@ -87,11 +87,18 @@ const REPLY = sse([
   { type: "message_stop" },
 ]);
 
-async function runPrompt(
+/** A bound UI: its `notify` messages, and the screen of each menu `custom` opens. */
+interface BoundUi {
+  notices: string[];
+  menus: string[];
+}
+
+async function startPi(
   response: (url: string) => Response,
-  prompts = ["Reply with exactly: OK"],
   extensionFactories: ((pi: ExtensionAPI) => void)[] = [],
-): Promise<{ sent: Sent[]; text: string }> {
+  agentSettings: object = {},
+  ui?: BoundUi,
+): Promise<{ session: AgentSession; sent: Sent[] }> {
   const sent: Sent[] = [];
   vi.stubGlobal(
     "fetch",
@@ -108,6 +115,9 @@ async function runPrompt(
 
   const agentDir = mkdtempSync(join(tmpdir(), "pi-claude-pro-agent-"));
   const cwd = mkdtempSync(join(tmpdir(), "pi-claude-pro-cwd-"));
+  // The extension reads its settings from PI_CODING_AGENT_DIR, so the real agent dir stays untouched.
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+  writeFileSync(join(agentDir, "settings.json"), JSON.stringify(agentSettings));
   // Pi retries at two levels: inside the provider request and after a failed
   // turn. Both stay on, with no delay, so the tests see every retry.
   const settingsManager = SettingsManager.inMemory({
@@ -117,6 +127,8 @@ async function runPrompt(
       baseDelayMs: 0,
       provider: { maxRetries: 2 },
     },
+    // A manual compaction then has history to summarize after a single turn.
+    compaction: { keepRecentTokens: 1 },
   });
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
@@ -149,6 +161,41 @@ async function runPrompt(
     sessionManager: SessionManager.inMemory(cwd),
     tools: [],
   });
+  // Binding a UI also turns on Pi's retries, so only a test that reads notices or menus binds one.
+  if (ui) {
+    const uiContext = session.extensionRunner.getUIContext();
+    await session.bindExtensions({
+      mode: "tui",
+      uiContext: {
+        ...uiContext,
+        notify: (message: string) => {
+          ui.notices.push(message);
+        },
+        // The menu is shown, read and closed with Escape, so the command returns.
+        custom: (factory) =>
+          new Promise((resolve) => {
+            const { tui, keybindings } = createMenuTui();
+            void Promise.resolve(factory(tui, uiContext.theme, keybindings, resolve)).then(
+              (component) => {
+                ui.menus.push(menuDriver(() => component).screen());
+                menuDriver(() => component).press(keys.escape);
+              },
+            );
+          }),
+      },
+    });
+  }
+  return { session, sent };
+}
+
+async function runPrompt(
+  response: (url: string) => Response,
+  prompts = ["Reply with exactly: OK"],
+  extensionFactories: ((pi: ExtensionAPI) => void)[] = [],
+  agentSettings: object = {},
+  ui?: BoundUi,
+): Promise<{ sent: Sent[]; text: string }> {
+  const { session, sent } = await startPi(response, extensionFactories, agentSettings, ui);
   try {
     for (const prompt of prompts) await session.prompt(prompt);
     const last = session.messages.at(-1);
@@ -164,8 +211,10 @@ async function runPrompt(
 }
 
 describe("inside Pi", () => {
+  beforeAll(() => initTheme("dark"));
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("sends a subscription request as Claude Code", async () => {
@@ -194,6 +243,52 @@ describe("inside Pi", () => {
     expect(system.slice(1).join("\n")).toContain("inside pi, a coding agent harness");
   });
 
+  it("sends the Claude Code version pinned in settings.json", async () => {
+    const { sent } = await runPrompt(
+      () =>
+        new Response(REPLY, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ["Reply with exactly: OK"],
+      [],
+      { "claude-pro": { claudeCodeVersion: "2.1.400" } },
+    );
+    expect(sent[0]?.headers.get("user-agent")).toBe("claude-cli/2.1.400 (external, pi)");
+  });
+
+  it("serves a request outside an agent turn after a reload", async () => {
+    const { session, sent } = await startPi(
+      () =>
+        new Response(REPLY, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    );
+    try {
+      await session.prompt("Reply with exactly: OK");
+      await session.reload();
+      const { summary } = await session.compact();
+      expect(summary).toContain("OK");
+      expect(sent.at(-1)?.headers.get("user-agent")).toBe(
+        `claude-cli/${BUNDLED_CLAUDE_CODE_VERSION} (external, pi)`,
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("applies a session /claude-pro change to the next request", async () => {
+    const { sent } = await runPrompt(
+      () =>
+        new Response(REPLY, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ['/claude-pro set claudeCodeVersion "2.1.400"', "Reply with exactly: OK"],
+    );
+    const requests = messageRequests(sent);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.headers.get("user-agent")).toBe("claude-cli/2.1.400 (external, pi)");
+  });
+
   const rateLimited = (headers: Record<string, string>) => () =>
     Response.json(
       { type: "error", error: { type: "rate_limit_error", message: "Error" } },
@@ -201,6 +296,39 @@ describe("inside Pi", () => {
     );
   const messageRequests = (sent: Sent[]) =>
     sent.filter((request) => request.url.includes("/v1/messages"));
+
+  it("answers and warns once when a stored settings layer is invalid", async () => {
+    const ok = () => new Response(REPLY, { headers: { "content-type": "text/event-stream" } });
+    const ui: BoundUi = { notices: [], menus: [] };
+    const { sent, text } = await runPrompt(
+      ok,
+      ["Reply with exactly: OK", "Reply again"],
+      [],
+      { "claude-pro": { warnAt: 101 } },
+      ui,
+    );
+    expect(text).toBe("OK");
+    expect(messageRequests(sent)).toHaveLength(2);
+    expect(ui.notices).toEqual([
+      expect.stringMatching(/^pi-claude-pro: Invalid global Claude Pro settings\/warnAt/),
+    ]);
+  });
+
+  it("opens the settings menu while a stored settings layer is invalid", async () => {
+    const ui: BoundUi = { notices: [], menus: [] };
+    await runPrompt(
+      () =>
+        new Response(REPLY, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+      ["/claude-pro"],
+      [],
+      { "claude-pro": { warnAt: 101 } },
+      ui,
+    );
+    expect(ui.menus).toHaveLength(1);
+    expect(ui.menus[0]).toContain("footer");
+  });
 
   it("explains exhausted extra usage from HTTP 400 without retries or usage lookup", async () => {
     const { sent, text } = await runPrompt(() =>
@@ -308,5 +436,47 @@ describe("inside Pi", () => {
         "Pi documentation",
       );
     }
+  });
+});
+
+describe("/claude-pro arguments inside Pi", () => {
+  beforeAll(() => initTheme("dark"));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  /** The completions of the `claude-pro` command that the extension registers. */
+  async function completions(prefix: string): Promise<string[]> {
+    const { session } = await startPi(() => new Response(REPLY));
+    try {
+      const items = await session.extensionRunner
+        .getCommand("claude-pro")
+        ?.getArgumentCompletions?.(prefix);
+      return (items ?? []).map((item) => item.value);
+    } finally {
+      session.dispose();
+    }
+  }
+
+  it("completes the top-level words", async () => {
+    expect(await completions("s")).toEqual(["status", "set"]);
+  });
+
+  it("completes option keys after set and inherit", async () => {
+    expect(await completions("set f")).toEqual(["set footer", "set footerWindows"]);
+    expect(await completions("inherit w")).toEqual(["inherit warnAt"]);
+  });
+
+  it("offers the scope flags once the command is complete", async () => {
+    expect(await completions("set footer false ")).toEqual([
+      "set footer false --global",
+      "set footer false --project",
+    ]);
+    expect(await completions("set footer false --g")).toEqual(["set footer false --global"]);
+  });
+
+  it("offers no scope for a command that is not yet valid", async () => {
+    expect(await completions("set warnAt ")).toEqual([]);
   });
 });

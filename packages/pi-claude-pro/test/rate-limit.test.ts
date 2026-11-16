@@ -17,6 +17,7 @@ function watcher(overrides: Partial<RateLimitDeps>) {
     fetchUsage: async () => undefined,
     onLimits: () => {},
     now: () => 0,
+    usageCacheMs: () => 30_000,
     ...overrides,
   });
 }
@@ -109,6 +110,16 @@ describe("createRateLimits", () => {
     expect(first.explain("429")).toBe("Claude 5-hour limit reached");
     expect(fetchUsage).toHaveBeenCalledTimes(2);
     expect(fetchUsage).toHaveBeenCalledWith(auth);
+  });
+
+  it("looks up the usage on every request when the cache age is zero", async () => {
+    const fetchUsage = vi.fn<RateLimitDeps["fetchUsage"]>(async () => spentBody);
+    const watchRequest = watcher({ fetchUsage, usageCacheMs: () => 0 });
+
+    await watchRequest(auth).inspect(reply(429));
+    await watchRequest(auth).inspect(reply(429));
+
+    expect(fetchUsage).toHaveBeenCalledTimes(2);
   });
 
   it("does not reuse the cached usage of another account", async () => {
