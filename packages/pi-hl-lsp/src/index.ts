@@ -6,12 +6,11 @@ import {
 import { errorText } from "pi-hl-utils/errors";
 import { layeredSettingsSession, type LayeredSettingScope } from "pi-hl-utils/layered-settings";
 import { registerSettingsCommand } from "pi-hl-utils/settings-command";
-import { SettingsMenu } from "pi-hl-utils/settings-menu";
 import { Type } from "typebox";
 
 import { LspController, type Operation } from "./controller.js";
-import { commandSpec, menuSpec, type LspChange } from "./menu.js";
-import { lspSettings, readSettings } from "./settings.js";
+import type { LspChange } from "./menu.js";
+import { commandSpec, lspSettings, readSettings } from "./settings.js";
 
 const file = Type.String({ minLength: 1, maxLength: 4096 });
 const coordinate = Type.Integer({
@@ -119,6 +118,11 @@ export default function hlLsp(pi: ExtensionAPI): void {
       return {
         status: () => ctx.ui.notify(JSON.stringify(status(), null, 2), "info"),
         async menu() {
+          // The menu chain is loaded on first use to keep extension startup light.
+          const [{ SettingsMenu }, { menuSpec }] = await Promise.all([
+            import("pi-hl-utils/settings-menu"),
+            import("./menu.js"),
+          ]);
           await ctx.ui.custom<void>(
             (tui, theme, _keys, done) =>
               new SettingsMenu(

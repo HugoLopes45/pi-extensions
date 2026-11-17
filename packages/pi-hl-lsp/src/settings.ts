@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 
 import { defineLayeredSettings, type LayeredSettingsSession } from "pi-hl-utils/layered-settings";
+import type { SettingsCommandSpec } from "pi-hl-utils/settings-command";
 import { Type, type Static } from "typebox";
 
 const serverSchema = Type.Object(
@@ -70,3 +71,11 @@ export function readSettings(session: LayeredSettingsSession) {
     throw new Error("Pi settings could not be read; correct them before enabling LSP");
   return lspSettings.readSettings(session);
 }
+
+export const commandSpec: SettingsCommandSpec<LspOptions, keyof LspOptions> = {
+  usage:
+    "Usage: /hl-lsp [on|off|status|inherit [key]|set <key> <JSON>] [--global|--project]; /hl-lsp alone opens settings",
+  optionKey: lspSettings.optionKey,
+  parseOptions: lspSettings.parseOptions,
+  toggle: (enabled) => ({ key: "enabled", patch: { enabled } }),
+};

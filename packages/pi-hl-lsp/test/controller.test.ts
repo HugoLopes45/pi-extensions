@@ -236,6 +236,24 @@ it("shuts a healthy initialized server down with shutdown, then exit", async () 
   expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
 
+it.each([
+  ["sync-log", ["didOpen 1", "didChange 2", "didClose", "didOpen 3"]],
+  ["sync-open-close", ["didOpen 1", "didClose", "didOpen 2", "didClose", "didOpen 3"]],
+])("synchronizes a changed file and a different file (%s)", async (mode, expected) => {
+  const { instance, file, spawnLog } = await controller(mode);
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  await instance.query("diagnostics", file);
+  await writeFile(file, "const value = 2;\n");
+  // The observation must come from the new version, not from the first snapshot.
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    documentVersion: 2,
+  });
+  await instance.query("diagnostics", other);
+  expect(await events(spawnLog)).toEqual(expected);
+});
+
 it("falls back to signals within the budget when shutdown gets no answer", async () => {
   const { instance, file, spawnLog } = await controller("mute-shutdown");
   await instance.query("hover", file, { line: 0, character: 6 });

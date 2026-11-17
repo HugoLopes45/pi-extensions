@@ -105,7 +105,7 @@ connection.onRequest("initialize", async () => {
     });
   return {
     capabilities: {
-      textDocumentSync: 1,
+      textDocumentSync: mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
       hoverProvider: true,
       positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
     },
@@ -135,6 +135,8 @@ connection.onRequest(
     return { contents: { kind: "plaintext", value: "const value: number" } };
   },
 );
+// Synchronization modes log each document notification with the version it carries.
+const syncLog = mode === "sync-log" || mode === "sync-open-close";
 const opened = Type.Object({
   textDocument: Type.Object({ uri: Type.String(), version: Type.Integer() }),
 });
@@ -142,7 +144,7 @@ async function publishDiagnostics(value: unknown) {
   if (!Value.Check(opened, value)) throw new Error("Invalid didOpen fixture message");
   await connection.sendNotification("textDocument/publishDiagnostics", {
     uri: value.textDocument.uri,
-    ...(mode === "versioned" ? { version: value.textDocument.version } : {}),
+    ...(mode === "versioned" || syncLog ? { version: value.textDocument.version } : {}),
     diagnostics:
       mode === "versioned"
         ? [
@@ -159,8 +161,17 @@ async function publishDiagnostics(value: unknown) {
         : [],
   });
 }
-connection.onNotification("textDocument/didOpen", publishDiagnostics);
-connection.onNotification("textDocument/didChange", publishDiagnostics);
+connection.onNotification("textDocument/didOpen", async (value: unknown) => {
+  if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
+  await publishDiagnostics(value);
+});
+connection.onNotification("textDocument/didChange", async (value: unknown) => {
+  if (syncLog && Value.Check(opened, value)) log(`didChange ${value.textDocument.version}`);
+  await publishDiagnostics(value);
+});
+connection.onNotification("textDocument/didClose", () => {
+  if (syncLog) log("didClose");
+});
 connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
 });

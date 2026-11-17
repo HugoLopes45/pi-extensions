@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { once } from "node:events";
 import { homedir } from "node:os";
 import { Transform, type TransformCallback } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
@@ -285,12 +286,8 @@ export class LanguageServer {
     if (!(await Promise.race([answered, remaining()]))) return;
     const sent = send(() => this.connection.sendNotification("exit")).catch(() => false);
     if (!(await Promise.race([sent, remaining()]))) return;
-    while (
-      this.child.exitCode === null &&
-      this.child.signalCode === null &&
-      performance.now() < deadline
-    )
-      await delay(50);
+    if (this.child.exitCode === null && this.child.signalCode === null)
+      await Promise.race([once(this.child, "exit"), remaining()]);
   }
 
   private signal(signal: NodeJS.Signals | 0): "sent" | "gone" | "refused" {

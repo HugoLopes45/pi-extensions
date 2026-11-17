@@ -125,10 +125,12 @@ async function synchronize(
   route: SelectedRoute,
   text: string,
   signal: AbortSignal,
+  canChange: boolean,
 ): Promise<Document> {
   const previous = instance.state.document;
   if (previous?.file === route.file && previous.text === text) return previous;
-  if (previous)
+  const changing = canChange && previous?.file === route.file;
+  if (previous && !changing)
     await instance.client.notify(
       "textDocument/didClose",
       { textDocument: { uri: previous.uri } },
@@ -143,19 +145,34 @@ async function synchronize(
     waiting: undefined,
   };
   instance.state.document = document;
-  await instance.client.notify(
-    "textDocument/didOpen",
-    {
-      textDocument: {
-        uri: document.uri,
-        languageId: route.language,
-        version: document.version,
-        text,
-      },
-    },
-    signal,
-  );
+  await sendContent(instance, document, route.language, changing, signal);
   return document;
+}
+
+function sendContent(
+  instance: Instance,
+  document: Document,
+  language: string,
+  changing: boolean,
+  signal: AbortSignal,
+): Promise<void> {
+  const { uri, version, text } = document;
+  return changing
+    ? instance.client.notify(
+        "textDocument/didChange",
+        { textDocument: { uri, version }, contentChanges: [{ text }] },
+        signal,
+      )
+    : instance.client.notify(
+        "textDocument/didOpen",
+        { textDocument: { uri, languageId: language, version, text } },
+        signal,
+      );
+}
+
+function supportsChange(capabilities: Initialization["capabilities"]): boolean {
+  const sync = capabilities.textDocumentSync;
+  return ((typeof sync === "object" ? sync.change : sync) ?? 0) > 0;
 }
 
 function missingCapability(
@@ -280,7 +297,13 @@ export class LspController {
     deadline.throwIfAborted();
     const reason = missingCapability(operation, capabilities);
     if (reason) return { ...route, outcome: "unsupported", reason };
-    const document = await synchronize(instance, route, text, deadline);
+    const document = await synchronize(
+      instance,
+      route,
+      text,
+      deadline,
+      supportsChange(capabilities),
+    );
     this.selected = { instance, document };
     const result = await readResponse(operation, instance, document, position, deadline);
     if (!this.current(instance, document) || (await snapshot(route.file, deadline)) !== text)

@@ -4,7 +4,6 @@ import {
   type LayeredSettingScope,
   type LayeredSettingsSession,
 } from "pi-hl-utils/layered-settings";
-import type { SettingsCommandSpec } from "pi-hl-utils/settings-command";
 import {
   effectiveWithSource,
   type SettingRow,
@@ -17,14 +16,6 @@ import { lspSettings, type LspOptions } from "./settings.js";
 export type LspChange = LayeredSettingChange<LspOptions>;
 type MenuKey = "enabled" | "name" | "timeoutMs" | "allowProjectExecution";
 type View = ReturnType<typeof lspSettings.readSettingsLeniently> & SettingsMenuView;
-
-export const commandSpec: SettingsCommandSpec<LspOptions, keyof LspOptions> = {
-  usage:
-    "Usage: /hl-lsp [on|off|status|inherit [key]|set <key> <JSON>] [--global|--project]; /hl-lsp alone opens settings",
-  optionKey: lspSettings.optionKey,
-  parseOptions: lspSettings.parseOptions,
-  toggle: (enabled) => ({ key: "enabled", patch: { enabled } }),
-};
 
 function change(key: MenuKey, text: string, scope: LayeredSettingScope): LspChange {
   if (text === "inherit") return { action: "inherit", key };
