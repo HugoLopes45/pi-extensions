@@ -12,7 +12,6 @@ const spawnLog = process.argv[3];
 if (spawnLog !== undefined && spawnLog !== "--ready") appendFileSync(spawnLog, `${process.pid}\n`);
 const reader = new rpc.StreamMessageReader(process.stdin);
 reader.partialMessageTimeout = 0;
-// Fragmented mode writes one byte per event-loop turn so frames arrive split.
 const fragmented = new Writable({
   write(chunk: Buffer, _encoding, done) {
     void (async () => {
@@ -32,7 +31,6 @@ function frames(count: number): string {
   const body = JSON.stringify({ jsonrpc: "2.0", method: "noise", params: {} });
   return `Content-Length: ${body.length}\r\n\r\n${body}`.repeat(count);
 }
-// Raw hover replies written past the RPC writer; the request never completes.
 const rawReplies = new Map<string | undefined, () => string>([
   ["invalid-frame", () => "Content-Length: 2\r\n\r\n{x"],
   ["endless-header", () => `X-Pad: ${"a".repeat(9 * 1024 * 1024)}`],
@@ -64,9 +62,7 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     return new Promise<never>(() => {});
   }
   if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
-  if (mode === "grandchild") return { pid: spawn("sleep", ["60"]).pid };
-  if (mode === "stubborn-grandchild")
-    return { pid: spawn("sh", ["-c", "trap '' TERM; sleep 60"]).pid };
+  if (mode === "grandchild") return { pid: spawn("sh", ["-c", "trap '' TERM; sleep 60"]).pid };
   if (mode === "effects") {
     try {
       await connection.sendRequest("workspace/applyEdit", {

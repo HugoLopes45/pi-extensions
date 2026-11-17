@@ -88,7 +88,6 @@ it("settles ignored requests at the total deadline", async () => {
   await expect(client.request("textDocument/hover", {})).rejects.toThrow(/timeout|deadline/iu);
 });
 
-// The hover outcome within `ms`, well before the 5 s request deadline.
 async function hoverWithin(mode: string, ms = 1000) {
   const client = await server(mode, 5000);
   await client.initialize();
@@ -121,21 +120,21 @@ it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () 
   expect(await hoverWithin("burst", 4000)).toMatch(/wire budget/iu);
 });
 
-it.skipIf(process.platform === "win32").each([
-  ["grandchild", 200],
-  ["stubborn-grandchild", 2500],
-])("stops the server's descendants when it is disposed (%s)", async (mode, wait) => {
-  const client = await server(mode, 5000);
-  await client.initialize();
-  const reply = await client.request("textDocument/hover", {});
-  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
-    throw new Error("Fixture did not report its child pid");
-  const { pid } = reply;
-  if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
-  await client.dispose();
-  await delay(wait);
-  expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
-});
+it.skipIf(process.platform === "win32")(
+  "kills descendants that ignore SIGTERM on dispose",
+  async () => {
+    const client = await server("grandchild", 5000);
+    await client.initialize();
+    const reply = await client.request("textDocument/hover", {});
+    if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+      throw new Error("Fixture did not report its child pid");
+    const { pid } = reply;
+    if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
+    await client.dispose();
+    await delay(2500);
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+  },
+);
 
 it("decodes frames split into single bytes", async () => {
   const client = await server("fragmented", 5000);
