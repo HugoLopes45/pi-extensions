@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -697,6 +697,91 @@ it("reports a server that exited as failed, with its reason, in status", async (
       },
     ],
   });
+});
+
+// Two files hold the symbol: index.ts defines it and other.ts imports it.
+async function renameSession(mode: string) {
+  const state = await session(true, mode);
+  await writeFile(join(state.cwd, "other.ts"), 'import { value } from "./index";\n');
+  return state;
+}
+
+function rename(state: Awaited<ReturnType<typeof session>>) {
+  return tool(state, "hl_lsp_rename", {
+    file: "index.ts",
+    line: 1,
+    symbol: "value",
+    new_name: "renamed",
+  });
+}
+
+it.each(["rename-changes", "rename-versioned"])(
+  "renames the symbol in every file of the workspace edit (%s)",
+  async (mode) => {
+    const state = await renameSession(mode);
+    expect(await rename(state)).toMatchObject({
+      isError: false,
+      details: { outcome: "completed" },
+      content: [
+        {
+          type: "text",
+          text: "hl-lsp rename index.ts: completed\nindex.ts: 1 edits\nother.ts: 1 edits\ntotal: 2 edits in 2 files",
+        },
+      ],
+    });
+    expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const renamed = 1;\n");
+    expect(await readFile(join(state.cwd, "other.ts"), "utf8")).toBe(
+      'import { renamed } from "./index";\n',
+    );
+  },
+);
+
+it.each([
+  ["rename-prepare-null", "Rename is not available at this position"],
+  ["rename-stale", "is stale"],
+  ["rename-overlap", "overlap"],
+  ["rename-resource", "resource operation"],
+])("refuses a rename without writing any file (%s)", async (mode, reason) => {
+  const state = await renameSession(mode);
+  const result = await rename(state);
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "refused" },
+  });
+  expect(JSON.stringify(result)).toContain(reason);
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
+  expect(await readFile(join(state.cwd, "other.ts"), "utf8")).toBe(
+    'import { value } from "./index";\n',
+  );
+});
+
+it("refuses a rename that targets a file outside the project and writes no file", async () => {
+  const state = await renameSession("rename-outside");
+  const outside = join(dirname(state.cwd), `outside-${basename(state.cwd)}.ts`);
+  await writeFile(outside, "keep\n");
+  const result = await rename(state);
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "refused" },
+  });
+  expect(JSON.stringify(result)).toContain("outside the project");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
+  expect(await readFile(outside, "utf8")).toBe("keep\n");
+});
+
+it("restores the written files when a later file cannot be written", async () => {
+  const state = await renameSession("rename-changes");
+  await chmod(join(state.cwd, "other.ts"), 0o444);
+  const result = await rename(state);
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "failed" },
+  });
+  expect(JSON.stringify(result)).toContain("other.ts");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
+  expect(await readFile(join(state.cwd, "other.ts"), "utf8")).toBe(
+    'import { value } from "./index";\n',
+  );
 });
 
 it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {

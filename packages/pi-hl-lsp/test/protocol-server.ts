@@ -129,6 +129,30 @@ const loadingModes = new Set<string | undefined>([
   "progress-late",
   "server-status",
 ]);
+const renameModes = new Set<string | undefined>([
+  "rename-changes",
+  "rename-versioned",
+  "rename-overlap",
+  "rename-stale",
+  "rename-resource",
+  "rename-outside",
+  "rename-prepare-null",
+]);
+const renameRequest = Type.Object({
+  textDocument: Type.Object({ uri: Type.String() }),
+  newName: Type.String(),
+});
+function replaceAt(line: number, start: number, end: number, newText: string) {
+  return {
+    range: { start: { line, character: start }, end: { line, character: end } },
+    newText,
+  };
+}
+// The outside target is outside-<project directory name>.ts in the parent directory.
+function outsideUri(uri: string): string {
+  const name = new URL(".", uri).pathname.split("/").at(-2);
+  return new URL(`../outside-${name}.ts`, uri).href;
+}
 const textDocumentUri = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
 });
@@ -162,6 +186,7 @@ function capabilities() {
     ...(mode === "workspace-symbols" || loadingModes.has(mode)
       ? { workspaceSymbolProvider: true }
       : {}),
+    ...(renameModes.has(mode) ? { renameProvider: { prepareProvider: true } } : {}),
     positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
   };
 }
@@ -277,6 +302,41 @@ connection.onRequest("textDocument/implementation", (params: unknown): object =>
   if (!Value.Check(textDocumentUri, params))
     throw new Error("Invalid implementation fixture request");
   return location(new URL("./impl.ts", params.textDocument.uri).href, 2, 0);
+});
+connection.onRequest("textDocument/prepareRename", (params: unknown): object | null => {
+  if (!Value.Check(textDocumentPosition, params))
+    throw new Error("Invalid prepareRename fixture request");
+  return mode === "rename-prepare-null" ? null : span(0, 6);
+});
+// index.ts holds `const value = 1;` and other.ts holds `import { value } from "./index";`.
+connection.onRequest("textDocument/rename", (params: unknown): object => {
+  if (!Value.Check(renameRequest, params)) throw new Error("Invalid rename fixture request");
+  const { uri } = params.textDocument;
+  const sibling = new URL("./other.ts", uri).href;
+  const local = replaceAt(0, 6, 11, params.newName);
+  const imported = replaceAt(0, 9, 14, params.newName);
+  if (mode === "rename-versioned")
+    return {
+      documentChanges: [
+        { textDocument: { uri, version: 1 }, edits: [local] },
+        { textDocument: { uri: sibling, version: null }, edits: [imported] },
+      ],
+    };
+  if (mode === "rename-overlap")
+    return { changes: { [uri]: [local, replaceAt(0, 8, 10, params.newName)] } };
+  if (mode === "rename-stale")
+    return {
+      documentChanges: [{ textDocument: { uri, version: 7 }, edits: [local] }],
+    };
+  if (mode === "rename-resource") return { documentChanges: [{ kind: "create", uri: sibling }] };
+  if (mode === "rename-outside")
+    return {
+      changes: {
+        [uri]: [local],
+        [outsideUri(uri)]: [replaceAt(0, 0, 4, params.newName)],
+      },
+    };
+  return { changes: { [uri]: [local], [sibling]: [imported] } };
 });
 connection.onRequest("textDocument/definition", (params: unknown): object => {
   if (mode === "malformed-definition") return { bogus: 1 };

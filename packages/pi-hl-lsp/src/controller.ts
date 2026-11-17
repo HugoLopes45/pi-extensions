@@ -23,6 +23,7 @@ import {
   formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
+import { applyWorkspaceEdit } from "./rename.js";
 import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import {
@@ -387,6 +388,35 @@ function sendContent(
       );
 }
 
+function unconfigured(route: SelectedRoute) {
+  return {
+    ...route,
+    outcome: "unavailable" as const,
+    reason: `No server configured for "${route.server}"; add servers.${route.server} with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)`,
+  };
+}
+
+// Only a server that advertises prepareProvider is asked; null means no rename target here.
+async function prepareRefusal(
+  instance: Instance,
+  capabilities: Initialization["capabilities"],
+  textDocument: { uri: string },
+  position: Position,
+  deadline: AbortSignal,
+): Promise<string | undefined> {
+  if (
+    typeof capabilities.renameProvider !== "object" ||
+    capabilities.renameProvider.prepareProvider !== true
+  )
+    return undefined;
+  const prepared = await instance.client.request(
+    "textDocument/prepareRename",
+    { textDocument, position },
+    deadline,
+  );
+  return prepared === null ? "Rename is not available at this position" : undefined;
+}
+
 function supportsChange(capabilities: Initialization["capabilities"]): boolean {
   const sync = capabilities.textDocumentSync;
   return ((typeof sync === "object" ? sync.change : sync) ?? 0) > 0;
@@ -709,12 +739,7 @@ export class LspController {
     const route = await resolveRoute(file, this.cwd);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
-    if (!config)
-      return {
-        ...route,
-        outcome: "unavailable",
-        reason: `No server configured for "${route.server}"; add servers.${route.server} with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)`,
-      };
+    if (!config) return unconfigured(route);
     const text = await snapshot(route.file, deadline);
     const position =
       operation === "diagnostics" || operation === "symbols" || operation === "workspace_symbols"
@@ -749,6 +774,64 @@ export class LspController {
       seen.set(key, count);
       return count > (before.get(key) ?? 0);
     });
+  }
+
+  // The server computes the edit; rename.ts checks it, and only then does any file change.
+  async rename(file: string, target: NavigationTarget, newName: string, signal?: AbortSignal) {
+    const refusal = this.gate();
+    if (refusal) return refusal;
+    const deadline = AbortSignal.any([
+      this.lifetime.signal,
+      AbortSignal.timeout(this.settings.timeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
+    deadline.throwIfAborted();
+    const route = await resolveRoute(file, this.cwd);
+    if (route.outcome !== "completed") return route;
+    const config = this.settings.servers[route.server];
+    if (!config) return unconfigured(route);
+    const text = await snapshot(route.file, deadline);
+    const position = resolvePosition(text, target);
+    const instance = await this.instance(route, config, deadline);
+    const { capabilities } = await ready(instance, deadline);
+    deadline.throwIfAborted();
+    if (!capabilities.renameProvider)
+      return {
+        ...route,
+        outcome: "unsupported" as const,
+        reason: "Server did not advertise this capability",
+      };
+    const document = await synchronize(
+      instance,
+      route,
+      text,
+      deadline,
+      supportsChange(capabilities),
+    );
+    await instance.client.settled(deadline, this.settings.timeoutMs / 2);
+    const textDocument = { uri: document.uri };
+    const refused = await prepareRefusal(instance, capabilities, textDocument, position, deadline);
+    if (refused) return { ...route, outcome: "refused" as const, reason: refused };
+    const edit = await instance.client.request(
+      "textDocument/rename",
+      { textDocument, position, newName },
+      deadline,
+    );
+    const applied = await applyWorkspaceEdit(edit, await realpath(this.cwd), document);
+    if (applied.outcome !== "written") return { ...route, ...applied };
+    if (applied.changed.some(({ file }) => file === route.file))
+      await synchronize(
+        instance,
+        route,
+        await snapshot(route.file, deadline),
+        deadline,
+        supportsChange(capabilities),
+      );
+    return {
+      ...route,
+      outcome: "completed" as const,
+      changed: applied.changed,
+    };
   }
 
   private async snapshotMatches(document: Document, instance: Instance): Promise<boolean> {

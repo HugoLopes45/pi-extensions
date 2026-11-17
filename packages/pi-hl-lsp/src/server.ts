@@ -32,6 +32,9 @@ const initializedSchema = Type.Object({
     documentSymbolProvider: provider,
     diagnosticProvider: provider,
     workspaceSymbolProvider: provider,
+    renameProvider: Type.Optional(
+      Type.Union([Type.Boolean(), Type.Object({ prepareProvider: Type.Optional(Type.Boolean()) })]),
+    ),
   }),
 });
 export type Initialization = Static<typeof initializedSchema>;
