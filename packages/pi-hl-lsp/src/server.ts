@@ -50,6 +50,8 @@ class FrameSizes {
       this.header = data;
       return Buffer.alloc(0);
     }
+    // The reader misses a terminator right after a CR, so both would split differently.
+    if (data[end - 1] === 0x0d) throw new Error("LSP frame header ends with a bare CR");
     // Split like the vscode-jsonrpc reader so both agree on every frame's length.
     const [length, ...others] = data
       .subarray(0, end)
@@ -268,7 +270,8 @@ export class LanguageServer {
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
     while (this.signal(0) && performance.now() < deadline) await delay(50);
     this.signal("SIGKILL");
-    await this.exited;
+    // SIGKILL can be refused (EPERM) or stall, and dispose must still settle.
+    await Promise.race([this.exited, delay(500)]);
   }
 
   /** Signals the server's process group on POSIX; returns whether it still exists. */

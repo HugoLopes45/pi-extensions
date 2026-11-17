@@ -108,6 +108,13 @@ it("rejects a frame whose Content-Length the reader would read differently", asy
   expect(await hoverWithin("double-length")).toMatch(/Content-Length/u);
 });
 
+it.each(["mixed-case-length", "cr-cr"])(
+  "rejects a frame header the reader would split differently (%s)",
+  async (mode) => {
+    expect(await hoverWithin(mode)).toMatch(/^LSP frame/u);
+  },
+);
+
 it("accepts a frame header the reader accepts", async () => {
   expect(await hoverWithin("tab-length")).toBe("completed");
 });
@@ -157,6 +164,32 @@ it.skipIf(process.platform === "win32")(
     const outcome = await Promise.race([closing.then(() => "disposed"), delay(2500, "waiting")]);
     vi.restoreAllMocks();
     await closing;
+    expect(outcome).toBe("disposed");
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "resolves dispose when SIGKILL does not stop the server",
+  async () => {
+    const client = await server("stubborn-server", 5000);
+    await client.initialize();
+    const reply = await client.request("textDocument/hover", {});
+    if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+      throw new Error("Fixture did not report its pid");
+    const { pid } = reply;
+    if (typeof pid !== "number") throw new Error("Fixture pid is not a number");
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((target, signal) =>
+      signal === "SIGKILL" ? true : kill(target, signal),
+    );
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+      process.kill(pid, "SIGKILL");
+    });
+    const outcome = await Promise.race([
+      client.dispose().then(() => "disposed"),
+      delay(3000, "waiting"),
+    ]);
     expect(outcome).toBe("disposed");
   },
 );

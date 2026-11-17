@@ -37,12 +37,22 @@ const rawReplies = new Map<string | undefined, () => string>([
   ["endless-header", () => `X-Pad: ${"a".repeat(9 * 1024 * 1024)}`],
   ["burst", () => frames(400_000)],
   [
+    "mixed-case-length",
+    () =>
+      `content-length: 1000\r\nContent-Length: 30\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
+  ],
+  ["cr-cr", () => `Content-Length: 2\r\r\n\r\n{}${frames(10)}`],
+  [
     "double-length",
     () =>
       `Content-Length: 1000\r\nContent-Length: 30x\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
   ],
 ]);
 connection.onRequest("initialize", async () => {
+  if (mode === "tab-length")
+    process.stdout.write(
+      'X-Pad: a\nb\r\nContent-Length:\t30\r\n\r\n{"jsonrpc":"2.0","method":"x"}',
+    );
   if (mode === "backpressure")
     setImmediate(() => {
       process.stdin.pause();
@@ -67,10 +77,11 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     process.stdout.write(raw());
     return new Promise<never>(() => {});
   }
-  if (mode === "tab-length")
-    process.stdout.write(
-      'X-Pad: a\nb\r\nContent-Length:\t30\r\n\r\n{"jsonrpc":"2.0","method":"x"}',
-    );
+  if (mode === "stubborn-server") {
+    process.on("SIGTERM", () => {});
+    setInterval(() => {}, 1000);
+    return { pid: process.pid };
+  }
   if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
   if (mode === "grandchild") return { pid: spawn("sleep", ["60"]).pid };
   if (mode === "stubborn-grandchild") {
@@ -119,7 +130,9 @@ connection.onNotification("textDocument/didChange", publishDiagnostics);
 connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
 });
-connection.onClose(() => process.exit(0));
+connection.onClose(() => {
+  if (mode !== "stubborn-server") process.exit(0);
+});
 connection.listen();
 if (spawnLog === "--ready")
   await connection.sendNotification("textDocument/publishDiagnostics", {
