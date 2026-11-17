@@ -94,7 +94,8 @@ export default function contextKit(pi: ExtensionAPI): void {
   const report = (ctx: ExtensionContext, problems: string[]) => {
     const message = problems.join("; ");
     if (message && message !== reported)
-      ctx.ui.notify(
+      notify(
+        ctx,
         `pi-context-kit settings need attention: ${message}. Type /context-kit to see them.`,
         "warning",
       );
@@ -173,14 +174,14 @@ export default function contextKit(pi: ExtensionAPI): void {
     // Maintenance needs a model with a context window, so `window` is set whenever `output` is.
     const window = turn.ctx.model?.contextWindow;
     if (output && window)
-      turn.ctx.ui.notify(freedNotice(count([]), count(turn.result.edits), window), "info");
+      notify(turn.ctx, freedNotice(count([]), count(turn.result.edits), window), "info");
     showStatus(turn.ctx, turn.config, turn.result.tokens);
     return output;
   };
 
   const warn = (ctx: ExtensionContext, error: unknown, fallback: string, what = "handoff note") => {
-    const message = displayText(errorText(error));
-    ctx.ui.notify(`pi-context-kit: ${what} failed (${message}). ${fallback}`, "warning");
+    const message = errorText(error);
+    notify(ctx, `pi-context-kit: ${what} failed (${message}). ${fallback}`, "warning");
   };
 
   /** Pi's summary at the extension's threshold, because Pi's own hook waits for Pi's threshold. */
@@ -537,7 +538,8 @@ export default function contextKit(pi: ExtensionAPI): void {
           try {
             renameSync(item.file, `${item.file}.migrated`);
           } catch (error) {
-            ctx.ui.notify(
+            notify(
+              ctx,
               `pi-context-kit: settings were imported, but renaming ${item.file} failed (${errorText(error)}). The file stays in place and is not imported again.`,
               "warning",
             );
@@ -547,7 +549,8 @@ export default function contextKit(pi: ExtensionAPI): void {
         }
       }
       if (imports.length > 0)
-        ctx.ui.notify(
+        notify(
+          ctx,
           [
             'pi-context-kit moved its settings into Pi\'s settings.json under "context-kit". The 0.3 "contextKit" entry is no longer read.',
             ...renamed,
@@ -636,7 +639,7 @@ export default function contextKit(pi: ExtensionAPI): void {
       // The settings warning points here, so it shows again.
       reported = "";
       return {
-        status: () => ctx.ui.notify(summaryText(settings(ctx)), "info"),
+        status: () => notify(ctx, summaryText(settings(ctx)), "info"),
         async menu() {
           await ctx.ui.custom<void>(
             (tui, theme, _keybindings, done) =>
@@ -647,7 +650,7 @@ export default function contextKit(pi: ExtensionAPI): void {
           await applyChange(ctx, command.scope, command);
           showStatus(ctx);
         },
-        fail: (cause) => ctx.ui.notify(`pi-context-kit: ${errorText(cause)}`, "error"),
+        fail: (cause) => notify(ctx, `pi-context-kit: ${errorText(cause)}`, "error"),
       };
     },
   });
@@ -782,6 +785,10 @@ function parseImported(item: SettingsImport): ContextKitOptionsPatch {
     const message = errorText(error);
     throw new Error(`${item.file} is invalid (${message})`, { cause: error });
   }
+}
+
+function notify(ctx: ExtensionContext, text: string, type: "info" | "warning" | "error"): void {
+  ctx.ui.notify(displayText(text), type);
 }
 
 /**
