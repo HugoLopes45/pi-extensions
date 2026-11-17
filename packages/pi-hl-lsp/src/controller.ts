@@ -814,15 +814,6 @@ export class LspController {
     };
   }
 
-  // The timeout, the controller lifetime and the caller signal bound one query or one batch of queries.
-  deadline(signal?: AbortSignal): AbortSignal {
-    return AbortSignal.any([
-      this.lifetime.signal,
-      AbortSignal.timeout(this.settings.timeoutMs),
-      ...(signal ? [signal] : []),
-    ]);
-  }
-
   async query(
     operation: Operation,
     file: string,
@@ -832,7 +823,11 @@ export class LspController {
   ) {
     const refusal = this.gate();
     if (refusal) return refusal;
-    const deadline = this.deadline(signal);
+    const deadline = AbortSignal.any([
+      this.lifetime.signal,
+      AbortSignal.timeout(this.settings.timeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
     deadline.throwIfAborted();
     const route = await resolveRoute(file, this.cwd);
     if (route.outcome !== "completed") return route;

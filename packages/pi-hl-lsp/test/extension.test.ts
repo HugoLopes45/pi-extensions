@@ -33,6 +33,7 @@ import { directory } from "./fixtures.js";
 interface SessionOptions {
   allowProjectExecution?: boolean;
   formatOnWrite?: boolean;
+  timeoutMs?: number;
   projectTrusted?: boolean;
   projectSettings?: (spawnLog: string) => unknown;
 }
@@ -62,7 +63,7 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
       "hl-lsp": {
         enabled,
         allowProjectExecution: options.allowProjectExecution ?? true,
-        timeoutMs: 5000,
+        timeoutMs: options.timeoutMs ?? 5000,
         servers: { typescript: typescriptServer(mode, spawnLog) },
         ...(options.formatOnWrite === undefined ? {} : { formatOnWrite: options.formatOnWrite }),
       },
@@ -1147,7 +1148,7 @@ it("checks several files in one call and collapses the clean ones into one line"
     content: [
       {
         type: "text",
-        text: "hl-lsp diagnostics: 3 files, 1 with diagnostics, 2 clean, 0 not checked\nhl-lsp diagnostics index.ts: completed\n1:1 error 2322 Untrusted diagnostic prose\nclean: a.ts, b.ts",
+        text: "hl-lsp diagnostics: 3 files, 1 with diagnostics, 2 clean, 0 not settled, 0 not checked\nhl-lsp diagnostics index.ts: completed\n1:1 error 2322 Untrusted diagnostic prose\nclean: a.ts, b.ts",
       },
     ],
     details: { outcome: "completed" },
@@ -1167,7 +1168,7 @@ it("shows a file whose type has no server as one refusal line and checks the res
       {
         type: "text",
         text: stringMatching(
-          /^hl-lsp diagnostics: 2 files, 1 with diagnostics, 0 clean, 1 not checked\nnotes\.txt: unsupported: .+\nhl-lsp diagnostics index\.ts: completed\n1:1 error 2322 Untrusted diagnostic prose$/u,
+          /^hl-lsp diagnostics: 2 files, 1 with diagnostics, 0 clean, 0 not settled, 1 not checked\nnotes\.txt: unsupported: .+\nhl-lsp diagnostics index\.ts: completed\n1:1 error 2322 Untrusted diagnostic prose$/u,
         ),
       },
     ],
@@ -1196,6 +1197,51 @@ it("refuses more than twenty paths in one call", async () => {
   const paths = Array.from({ length: 21 }, (_item, index) => `file${index}.ts`);
   expect(await tool(state, "hl_lsp_diagnostics", { paths })).toMatchObject({
     isError: true,
+    content: [
+      {
+        type: "text",
+        text: stringMatching(
+          /^Validation failed for tool "hl_lsp_diagnostics":\n\s+- paths: expected at most 20 items/u,
+        ),
+      },
+    ],
+  });
+});
+
+it("gives each file of a batch its own deadline when the batch takes longer than the timeout", async () => {
+  const state = await session(true, "slow-error-lines", { timeoutMs: 3000 });
+  await writeFile(join(state.cwd, "a.ts"), "ERROR\n");
+  await writeFile(join(state.cwd, "b.ts"), "const b = 1;\n");
+  await writeFile(join(state.cwd, "c.ts"), "ERROR\n");
+  await writeFile(join(state.cwd, "d.ts"), "const d = 1;\n");
+  expect(
+    await tool(state, "hl_lsp_diagnostics", {
+      paths: ["a.ts", "b.ts", "c.ts", "d.ts"],
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp diagnostics: 4 files, 2 with diagnostics, 2 clean, 0 not settled, 0 not checked\nhl-lsp diagnostics a.ts: completed\n1:1 error 2322 Untrusted diagnostic prose\nhl-lsp diagnostics c.ts: completed\n1:1 error 2322 Untrusted diagnostic prose\nclean: b.ts, d.ts",
+      },
+    ],
+    details: { outcome: "completed" },
+  });
+});
+
+it("lists files with an unsettled empty result apart from the clean ones", async () => {
+  const state = await session(true);
+  await writeFile(join(state.cwd, "a.ts"), "const a = 1;\n");
+  await writeFile(join(state.cwd, "b.ts"), "const b = 1;\n");
+  expect(await tool(state, "hl_lsp_diagnostics", { paths: ["a.ts", "b.ts"] })).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp diagnostics: 2 files, 0 with diagnostics, 0 clean, 2 not settled, 0 not checked\nno errors seen (not settled): a.ts, b.ts",
+      },
+    ],
   });
 });
 

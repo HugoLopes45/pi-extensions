@@ -134,7 +134,16 @@ function isServed(details: Details): boolean {
 }
 
 function isClean(details: Details): boolean {
-  return isServed(details) && !details.diagnostics?.length;
+  return details.outcome === "completed" && !details.diagnostics?.length;
+}
+
+// A partial result with no diagnostics is not settled, so it is not reported as clean.
+function isUnsettled(details: Details): boolean {
+  return details.outcome === "partial" && !details.diagnostics?.length;
+}
+
+function pathsWhere(checks: Check[], predicate: (details: Details) => boolean): string[] {
+  return checks.filter((check) => predicate(check.details)).map((check) => check.path);
 }
 
 // Only completed and partial results carry text; every other outcome is a refusal or failure.
@@ -153,15 +162,18 @@ function toolResult(header: string, details: Details) {
 // Clean files share one line; other files keep their block or their refusal reason on one line.
 function batchResult(checks: Check[]) {
   const served = checks.filter((check) => isServed(check.details)).length;
-  const clean = checks.filter((check) => isClean(check.details)).map((check) => check.path);
+  const clean = pathsWhere(checks, isClean);
+  const unsettled = pathsWhere(checks, isUnsettled);
   const lines = checks.flatMap(({ path, details }) => {
-    if (isClean(details)) return [];
+    if (isClean(details) || isUnsettled(details)) return [];
     if (!isServed(details))
       return [`${path}: ${details.outcome}: ${(details.reason ?? "").replace(/[\r\n]+/gu, " ")}`];
     return [blockText(`diagnostics ${path}`, details)];
   });
   if (clean.length > 0) lines.push(`clean: ${clean.join(", ")}`);
-  const header = `hl-lsp diagnostics: ${checks.length} files, ${served - clean.length} with diagnostics, ${clean.length} clean, ${checks.length - served} not checked`;
+  if (unsettled.length > 0) lines.push(`no errors seen (not settled): ${unsettled.join(", ")}`);
+  const withDiagnostics = served - clean.length - unsettled.length;
+  const header = `hl-lsp diagnostics: ${checks.length} files, ${withDiagnostics} with diagnostics, ${clean.length} clean, ${unsettled.length} not settled, ${checks.length - served} not checked`;
   const body = bounded([header, ...lines].join("\n"), {
     maxBytes: 65536,
     maxLines: 1000,
@@ -434,16 +446,16 @@ export default function hlLsp(pi: ExtensionAPI): void {
     );
   }
   // Files run one at a time: a server keeps one open document, so two files of one server cannot be in flight.
+  // Each file has its own timeout; the caller signal still stops the rest of the batch.
   async function executeMany(cwd: string, paths: string[], signal: AbortSignal | undefined) {
-    const deadline = controller?.deadline(signal);
     const checks: Check[] = [];
     for (const path of paths) {
-      const details = deadline?.aborted
+      const details = signal?.aborted
         ? {
             outcome: "cancelled",
-            reason: "The call deadline passed before this file was checked",
+            reason: "The call was cancelled before this file was checked",
           }
-        : await check("diagnostics", path, undefined, deadline);
+        : await check("diagnostics", path, undefined, signal);
       checks.push({ path: displayPath(cwd, path), details });
     }
     return batchResult(checks);

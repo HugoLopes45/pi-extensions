@@ -531,7 +531,12 @@ function errorLines(value: unknown): object[] {
   });
 }
 function reportedFindings(value: unknown): object[] {
-  if (mode === "error-lines" || mode === "format-errors" || codeActionModes.has(mode))
+  if (
+    mode === "error-lines" ||
+    mode === "slow-error-lines" ||
+    mode === "format-errors" ||
+    codeActionModes.has(mode)
+  )
     return errorLines(value);
   const code = reportedCodes.get(mode);
   return code === undefined ? [] : [finding(code)];
@@ -542,6 +547,7 @@ const versionedModes = new Set<string | undefined>([
   "error-lines",
   "format-errors",
   ...codeActionModes,
+  "slow-error-lines",
   "string-code",
   "pull-and-push",
   "pull-duplicate",
@@ -574,6 +580,7 @@ async function publishDiagnostics(value: unknown, changed: boolean) {
   const { uri, version } = value.textDocument;
   synchronized = uri;
   if (silentModes.has(mode) || (mode === "dedupe-empty" && changed)) return;
+  if (mode === "slow-error-lines") await delay(1000);
   if (mode === "staged") {
     await connection.sendNotification("textDocument/publishDiagnostics", {
       uri,
