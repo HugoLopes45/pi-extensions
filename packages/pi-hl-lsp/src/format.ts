@@ -86,6 +86,12 @@ const symbolInformation = Type.Object({
   kind: symbolKind,
   location,
 });
+// A WorkspaceSymbol may name only a file, without a range.
+const workspaceSymbol = Type.Object({
+  name: Type.String(),
+  kind: symbolKind,
+  location: Type.Union([location, Type.Object({ uri: Type.String() })]),
+});
 
 type Place = {
   uri: string;
@@ -133,6 +139,28 @@ export function formatSymbols(response: unknown): Formatted {
   if (Value.Check(symbolInformation, response[0])) flatSymbols(response, lines);
   else outline(response, 0, lines);
   return renderBody(lines.slice(0, symbolLimit), Math.max(lines.length - symbolLimit, 0), false);
+}
+
+export async function formatWorkspaceSymbols(
+  response: unknown,
+  cwd: string,
+  lines: LineReader,
+): Promise<Formatted> {
+  if (response === null) return emptyResult();
+  if (!Value.Check(Type.Array(Type.Unknown()), response)) throw unexpected("workspace_symbols");
+  if (response.length === 0) return emptyResult();
+  const items = response.map((item) => checked(workspaceSymbol, item, "workspace_symbols"));
+  const shown = items.slice(0, locationLimit);
+  const places = shown.flatMap(({ location }) =>
+    "range" in location ? [toPlace(location.uri, location.range.start, "workspace_symbols")] : [],
+  );
+  const sources = await readSources(places, cwd, lines);
+  const rendered = shown.map((item) => renderWorkspaceSymbol(item, cwd, sources));
+  return renderBody(
+    rendered.map((line) => line.text),
+    items.length - shown.length,
+    rendered.some((line) => line.truncated),
+  );
 }
 
 export function formatDiagnostics(observation: Observation): Formatted {
@@ -313,6 +341,29 @@ function renderPlace(
     text: source.text === "" ? head : `${head}  ${source.text}`,
     truncated: source.truncated,
   };
+}
+
+function renderWorkspaceSymbol(
+  item: Static<typeof workspaceSymbol>,
+  cwd: string,
+  sources: Map<string, string[] | undefined>,
+): Rendered {
+  const head = `${symbolKindName(item.kind)} ${oneLine(item.name)}`;
+  const { location } = item;
+  if (!("range" in location))
+    return { text: `${head}  ${uriPath(location.uri, cwd)}`, truncated: false };
+  const place = renderPlace(
+    toPlace(location.uri, location.range.start, "workspace_symbols"),
+    cwd,
+    sources,
+  );
+  return { text: `${head}  ${place.text}`, truncated: place.truncated };
+}
+
+function uriPath(uri: string, cwd: string): string {
+  const file = filePath(uri, "workspace_symbols");
+  if (file === undefined) return uri;
+  return insidePath(cwd, file) ?? file;
 }
 
 function diagnosticLine(item: Observation["diagnostics"][number]): Rendered {

@@ -6,6 +6,7 @@ import {
   formatHover,
   formatLocations,
   formatSymbols,
+  formatWorkspaceSymbols,
   type LineReader,
 } from "../src/format.js";
 
@@ -329,6 +330,61 @@ it("caps flat symbols at 200 lines and reports the rest", () => {
     text: [...printed, "... 50 more"].join("\n"),
     truncated: true,
   });
+});
+
+it("formats a workspace symbol with its 1-based location and source line", async () => {
+  const result = await formatWorkspaceSymbols(
+    [
+      {
+        name: "start",
+        kind: 12,
+        location: location("file:///repo/src/a.ts", 11, 4),
+      },
+    ],
+    cwd,
+    readSource,
+  );
+  expect(result).toEqual({
+    text: "function start  src/a.ts:12:5  export function start(port: number) {",
+    truncated: false,
+  });
+});
+
+it("prints a workspace symbol without a range as its path", async () => {
+  const result = await formatWorkspaceSymbols(
+    [{ name: "Server", kind: 5, location: { uri: "file:///repo/src/a.ts" } }],
+    cwd,
+    readSource,
+  );
+  expect(result).toEqual({ text: "class Server  src/a.ts", truncated: false });
+});
+
+it("caps workspace symbols at 50 and reports the other 10", async () => {
+  const response = Array.from({ length: 60 }, (_, line) => ({
+    name: `s${line}`,
+    kind: 12,
+    location: location("file:///repo/src/a.ts", line, 0),
+  }));
+  const printed = Array.from(
+    { length: 50 },
+    (_, line) => `function s${line}  src/a.ts:${line + 1}:1`,
+  );
+  expect(await formatWorkspaceSymbols(response, cwd, async () => undefined)).toEqual({
+    text: [...printed, "... 10 more"].join("\n"),
+    truncated: true,
+  });
+});
+
+it("formats null and empty workspace results as no result", async () => {
+  const empty = { text: "no result", truncated: false };
+  expect(await formatWorkspaceSymbols(null, cwd, readSource)).toEqual(empty);
+  expect(await formatWorkspaceSymbols([], cwd, readSource)).toEqual(empty);
+});
+
+it("rejects a workspace symbol response that matches neither symbol form", async () => {
+  await expect(formatWorkspaceSymbols([{ bogus: 1 }], cwd, readSource)).rejects.toThrow(
+    "Unexpected LSP workspace_symbols response shape",
+  );
 });
 
 it("replaces line breaks in a location URI and in a source line with spaces", async () => {

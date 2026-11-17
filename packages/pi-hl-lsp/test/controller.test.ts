@@ -403,6 +403,49 @@ it("does not issue requests for capabilities that the server did not advertise",
   });
 });
 
+it("finds a symbol by name in a project, opening the queried file first", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({
+    outcome: "completed",
+    text: "variable value  index.ts:1:7  const value = 1;",
+  });
+});
+
+it("prints a workspace symbol without a range as its path", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "pathonly"),
+  ).toMatchObject({
+    outcome: "completed",
+    text: "variable pathonly  index.ts",
+  });
+});
+
+it("caps workspace symbols at fifty lines and reports the rest", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  const result = await instance.query("workspace_symbols", file, undefined, undefined, "many");
+  expect(result).toMatchObject({ outcome: "completed", truncated: true });
+  const text = "text" in result ? result.text : undefined;
+  expect(text?.split("\n")).toHaveLength(51);
+  expect(text).toMatch(/\n\.\.\. 10 more$/u);
+});
+
+it("does not search workspace symbols when the server lacks workspaceSymbolProvider", async () => {
+  const { instance, file } = await controller();
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "unsupported" });
+});
+
+it("rejects a malformed workspace symbol response", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  await expect(
+    instance.query("workspace_symbols", file, undefined, undefined, "bogus"),
+  ).rejects.toThrow("Unexpected LSP workspace_symbols response shape");
+});
+
 async function packages(cwd: string, count: number) {
   return Promise.all(
     Array.from({ length: count }, async (_, index) => {

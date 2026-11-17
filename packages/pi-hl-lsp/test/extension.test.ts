@@ -525,15 +525,71 @@ it("shows the header path absolute when the file is outside the session cwd", as
   });
 });
 
+it("finds a symbol by name through the workspace symbols tool", async () => {
+  const state = await session(true, "workspace-symbols");
+  expect(
+    await tool(state, "hl_lsp_workspace_symbols", {
+      file: "index.ts",
+      query: "value",
+    }),
+  ).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp workspace_symbols index.ts: completed\nvariable value  index.ts:1:7  const value = 1;",
+      },
+    ],
+  });
+});
+
+it("reports a malformed workspace symbol response as an error", async () => {
+  const state = await session(true, "workspace-symbols");
+  expect(
+    await tool(state, "hl_lsp_workspace_symbols", {
+      file: "index.ts",
+      query: "bogus",
+    }),
+  ).toMatchObject({ isError: true, details: { outcome: "failed" } });
+});
+
+it("rejects an empty workspace symbol query before any server launch", async () => {
+  const state = await session(true, "workspace-symbols");
+  const result = await tool(state, "hl_lsp_workspace_symbols", {
+    file: "index.ts",
+    query: "",
+  });
+  expect(result).toMatchObject({ isError: true });
+  expect(JSON.stringify(result)).toContain("query");
+  await expect(readFile(state.spawnLog, "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
 it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {
   const { runtime } = await session(true);
-  for (const name of ["hover", "definition", "references", "symbols", "diagnostics"])
+  for (const name of [
+    "hover",
+    "definition",
+    "references",
+    "symbols",
+    "workspace_symbols",
+    "diagnostics",
+  ])
     expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- hl_lsp_${name}: .+$`, "mu"));
 });
 
 it("names each hl_lsp tool in its own prompt guideline", async () => {
   const { runtime } = await session(true);
-  for (const name of ["hover", "definition", "references", "symbols", "diagnostics"])
+  for (const name of [
+    "hover",
+    "definition",
+    "references",
+    "symbols",
+    "workspace_symbols",
+    "diagnostics",
+  ])
     expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- Use hl_lsp_${name} `, "mu"));
 });
 

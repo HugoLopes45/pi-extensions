@@ -19,13 +19,20 @@ import {
   formatHover,
   formatLocations,
   formatSymbols,
+  formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
 import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import type { LspSettings, ServerConfig, ServerFamily } from "./settings.js";
 
-export type Operation = "hover" | "definition" | "references" | "symbols" | "diagnostics";
+export type Operation =
+  | "hover"
+  | "definition"
+  | "references"
+  | "symbols"
+  | "workspace_symbols"
+  | "diagnostics";
 type Position = { line: number; character: number };
 export type NavigationTarget = {
   line: number;
@@ -59,12 +66,14 @@ const capability = {
   definition: "definitionProvider",
   references: "referencesProvider",
   symbols: "documentSymbolProvider",
+  workspace_symbols: "workspaceSymbolProvider",
 } as const;
 const method = {
   hover: "textDocument/hover",
   definition: "textDocument/definition",
   references: "textDocument/references",
   symbols: "textDocument/documentSymbol",
+  workspace_symbols: "workspace/symbol",
 } as const;
 // Measured on typescript-language-server; see lsp-dev/research/reports/publish-timing.md.
 const SETTLE_MS = 500;
@@ -189,6 +198,7 @@ async function formatResponse(
 ) {
   if (operation === "hover") return formatHover(response);
   if (operation === "symbols") return formatSymbols(response);
+  if (operation === "workspace_symbols") return formatWorkspaceSymbols(response, cwd, lines);
   return formatLocations(response, cwd, lines, operation);
 }
 
@@ -234,6 +244,7 @@ async function readResponse(
   instance: Instance,
   document: Document,
   position: Position | undefined,
+  search: string | undefined,
   signal: AbortSignal,
   cwd: string,
 ) {
@@ -243,11 +254,13 @@ async function readResponse(
   }
   const response = await instance.client.request(
     method[operation],
-    {
-      textDocument: { uri: document.uri },
-      ...(position ? { position } : {}),
-      ...(operation === "references" ? { context: { includeDeclaration: false } } : {}),
-    },
+    operation === "workspace_symbols"
+      ? { query: search }
+      : {
+          textDocument: { uri: document.uri },
+          ...(position ? { position } : {}),
+          ...(operation === "references" ? { context: { includeDeclaration: false } } : {}),
+        },
     signal,
   );
   const formatted = await formatResponse(
@@ -483,6 +496,7 @@ export class LspController {
     instance: Instance,
     operation: Operation,
     position: Position | undefined,
+    search: string | undefined,
     text: string,
     deadline: AbortSignal,
   ) {
@@ -503,6 +517,7 @@ export class LspController {
       instance,
       document,
       position,
+      search,
       deadline,
       await realpath(this.cwd),
     );
@@ -521,7 +536,13 @@ export class LspController {
     };
   }
 
-  async query(operation: Operation, file: string, target?: NavigationTarget, signal?: AbortSignal) {
+  async query(
+    operation: Operation,
+    file: string,
+    target?: NavigationTarget,
+    signal?: AbortSignal,
+    search?: string,
+  ) {
     const refusal = this.gate();
     if (refusal) return refusal;
     const deadline = AbortSignal.any([
@@ -541,11 +562,11 @@ export class LspController {
       };
     const text = await snapshot(route.file, deadline);
     const position =
-      operation === "diagnostics" || operation === "symbols"
+      operation === "diagnostics" || operation === "symbols" || operation === "workspace_symbols"
         ? undefined
         : resolvePosition(text, target);
     const instance = await this.instance(route, config, deadline);
-    return this.exchange(route, instance, operation, position, text, deadline);
+    return this.exchange(route, instance, operation, position, search, text, deadline);
   }
 
   private async snapshotMatches(document: Document, instance: Instance): Promise<boolean> {

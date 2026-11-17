@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { appendFileSync } from "node:fs";
 import { Writable } from "node:stream";
-import { setTimeout as delay, setImmediate as tick } from "node:timers/promises";
+import {
+  setTimeout as delay,
+  setImmediate as tick,
+} from "node:timers/promises";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -10,14 +13,17 @@ import rpc from "vscode-jsonrpc/node";
 const mode = process.argv[2];
 // These servers outlive SIGTERM and a closed stdin, like a hung real server.
 const stubborn =
-  mode === "stubborn-server" || mode === "stubborn-garbage" || mode === "stubborn-mute";
+  mode === "stubborn-server" ||
+  mode === "stubborn-garbage" ||
+  mode === "stubborn-mute";
 if (stubborn) {
   process.on("SIGTERM", () => {});
   setInterval(() => {}, 1000);
 }
 // A launch appends one line here, so a test can count launches without reading internals.
 const spawnLog = process.argv[3];
-if (spawnLog !== undefined && spawnLog !== "--ready") appendFileSync(spawnLog, `${process.pid}\n`);
+if (spawnLog !== undefined && spawnLog !== "--ready")
+  appendFileSync(spawnLog, `${process.pid}\n`);
 const reader = new rpc.StreamMessageReader(process.stdin);
 reader.partialMessageTimeout = 0;
 const fragmented = new Writable({
@@ -33,7 +39,9 @@ const fragmented = new Writable({
 });
 const connection = rpc.createMessageConnection(
   reader,
-  new rpc.StreamMessageWriter(mode === "fragmented" ? fragmented : process.stdout),
+  new rpc.StreamMessageWriter(
+    mode === "fragmented" ? fragmented : process.stdout,
+  ),
 );
 function frames(count: number, padding = 0): string {
   const body = JSON.stringify({
@@ -54,7 +62,11 @@ const rawReplies = new Map<string | undefined, () => string>([
     () =>
       `content-length: 1000\r\nContent-Length: 30\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
   ],
-  ["hex-length", () => `Content-Length: 0x1E\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`],
+  [
+    "hex-length",
+    () =>
+      `Content-Length: 0x1E\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
+  ],
   ["cr-cr", () => `Content-Length: 2\r\r\n\r\n{}${frames(10)}`],
   [
     "double-length",
@@ -100,7 +112,10 @@ const replies = new Map<
   [
     "stubborn-grandchild",
     async () => {
-      const child = spawn("sh", ["-c", "trap '' TERM; echo ready; exec sleep 60"]);
+      const child = spawn("sh", [
+        "-c",
+        "trap '' TERM; echo ready; exec sleep 60",
+      ]);
       await once(child.stdout, "data");
       return { contents: "", group: process.pid };
     },
@@ -130,7 +145,8 @@ const textDocumentPosition = Type.Object({
 });
 // Reports the 0-based position the controller sent, so tests can check the resolved target.
 function echoPosition(params: unknown): object {
-  if (!Value.Check(textDocumentPosition, params)) throw new Error("Invalid hover fixture request");
+  if (!Value.Check(textDocumentPosition, params))
+    throw new Error("Invalid hover fixture request");
   return { contents: `${params.position.line}:${params.position.character}` };
 }
 function span(line: number, character: number) {
@@ -159,10 +175,14 @@ connection.onRequest("initialize", async () => {
     });
   return {
     capabilities: {
-      textDocumentSync: mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
+      textDocumentSync:
+        mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
       hoverProvider: true,
       ...(navigationModes.has(mode) ? { definitionProvider: true } : {}),
       ...(staticPullModes.has(mode) ? { diagnosticProvider: true } : {}),
+      ...(mode === "workspace-symbols"
+        ? { workspaceSymbolProvider: true }
+        : {}),
       positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
     },
   };
@@ -174,8 +194,10 @@ connection.onRequest(
       token.onCancellationRequested(() => log("cancel"));
       return new Promise<never>(() => {});
     }
-    if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
-    if (mode === "long-error") throw new rpc.ResponseError(-32603, "z".repeat(5000));
+    if (mode === "error-hover")
+      throw new rpc.ResponseError(-32801, "content modified");
+    if (mode === "long-error")
+      throw new rpc.ResponseError(-32603, "z".repeat(5000));
     if (mode === "echo-position") return echoPosition(params);
     const raw = rawReplies.get(mode);
     if (raw) {
@@ -197,9 +219,30 @@ connection.onRequest(
     return { contents: { kind: "plaintext", value: "const value: number" } };
   },
 );
+const workspaceQuery = Type.Object({ query: Type.String() });
+// Answers by query: "bogus" is malformed, "pathonly" omits the range, "many" exceeds the fifty-symbol cap.
+function workspaceSymbols(query: string): unknown[] {
+  const uri = synchronized ?? "file:///fixture-unopened";
+  if (query === "bogus") return [{ bogus: 1 }];
+  if (query === "pathonly")
+    return [{ name: query, kind: 13, location: { uri } }];
+  if (query === "many")
+    return Array.from({ length: 60 }, (_, line) => ({
+      name: `${query}${line}`,
+      kind: 13,
+      location: location(uri, line, 0),
+    }));
+  return [{ name: query, kind: 13, location: location(uri, 0, 6) }];
+}
+connection.onRequest("workspace/symbol", (params: unknown): unknown[] => {
+  if (!Value.Check(workspaceQuery, params))
+    throw new Error("Invalid workspace symbol fixture request");
+  return workspaceSymbols(params.query);
+});
 connection.onRequest("textDocument/definition", (params: unknown): object => {
   if (mode === "malformed-definition") return { bogus: 1 };
-  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid definition fixture request");
+  if (!Value.Check(textDocumentUri, params))
+    throw new Error("Invalid definition fixture request");
   const { uri } = params.textDocument;
   if (mode === "special-targets")
     return [
@@ -254,10 +297,14 @@ const silentModes = new Set<string | undefined>([
   "pull-dynamic",
   "pull-cancel-once",
 ]);
+// The most recently synchronized document, which workspace symbols answer with.
+let synchronized: string | undefined;
 // `changed` marks didChange; dedupe-empty stays silent for it, as cli.mjs:21942 does.
 async function publishDiagnostics(value: unknown, changed: boolean) {
-  if (!Value.Check(opened, value)) throw new Error("Invalid didOpen fixture message");
+  if (!Value.Check(opened, value))
+    throw new Error("Invalid didOpen fixture message");
   const { uri, version } = value.textDocument;
+  synchronized = uri;
   if (silentModes.has(mode) || (mode === "dedupe-empty" && changed)) return;
   if (mode === "staged") {
     await connection.sendNotification("textDocument/publishDiagnostics", {
@@ -279,11 +326,13 @@ async function publishDiagnostics(value: unknown, changed: boolean) {
   });
 }
 connection.onNotification("textDocument/didOpen", async (value: unknown) => {
-  if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
+  if (syncLog && Value.Check(opened, value))
+    log(`didOpen ${value.textDocument.version}`);
   await publishDiagnostics(value, false);
 });
 connection.onNotification("textDocument/didChange", async (value: unknown) => {
-  if (syncLog && Value.Check(opened, value)) log(`didChange ${value.textDocument.version}`);
+  if (syncLog && Value.Check(opened, value))
+    log(`didChange ${value.textDocument.version}`);
   await publishDiagnostics(value, true);
 });
 connection.onNotification("textDocument/didClose", () => {
@@ -302,11 +351,15 @@ const pulledCodes = new Map<string | undefined, number | string>([
 ]);
 let pulls = 0;
 connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
-  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid pull fixture request");
+  if (!Value.Check(textDocumentUri, params))
+    throw new Error("Invalid pull fixture request");
   pulls += 1;
   log("pull");
   if (mode === "pull-error") throw new rpc.ResponseError(-32603, "pull failed");
-  if (mode === "pull-cancel-always" || (mode === "pull-cancel-once" && pulls === 1))
+  if (
+    mode === "pull-cancel-always" ||
+    (mode === "pull-cancel-once" && pulls === 1)
+  )
     throw new rpc.ResponseError(-32802, "server cancelled the request");
   const code = pulledCodes.get(mode);
   return { kind: "full", items: code === undefined ? [] : [finding(code)] };
@@ -338,7 +391,8 @@ const handshake = new Set([
 if (mode !== undefined && handshake.has(mode)) {
   connection.onRequest("shutdown", async () => {
     log("shutdown");
-    if (mode === "mute-shutdown" || mode === "stubborn-mute") return new Promise<never>(() => {});
+    if (mode === "mute-shutdown" || mode === "stubborn-mute")
+      return new Promise<never>(() => {});
     if (mode === "slow-shutdown") await delay(500);
     return null;
   });
