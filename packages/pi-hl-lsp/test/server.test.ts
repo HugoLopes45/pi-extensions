@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { expect, it, onTestFinished } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 
 import { LanguageServer } from "../src/server.js";
 import { directory } from "./fixtures.js";
@@ -128,19 +128,39 @@ it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () 
   expect(await hoverWithin("burst", 4000)).toMatch(/wire budget/iu);
 });
 
-it.skipIf(process.platform === "win32").each(["grandchild", "stubborn-grandchild"])(
-  "stops the server's descendants before dispose resolves (%s)",
-  async (mode) => {
-    const client = await server(mode, 5000);
-    await client.initialize();
-    const reply = await client.request("textDocument/hover", {});
-    if (!(typeof reply === "object" && reply !== null && "pid" in reply))
-      throw new Error("Fixture did not report its child pid");
-    const { pid } = reply;
-    if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
-    await client.dispose();
-    await delay(200);
-    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+async function childServer(mode: string) {
+  const client = await server(mode, 5000);
+  await client.initialize();
+  const reply = await client.request("textDocument/hover", {});
+  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+    throw new Error("Fixture did not report its child pid");
+  const { pid } = reply;
+  if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
+  return { client, pid };
+}
+
+it.skipIf(process.platform === "win32").each([
+  ["grandchild", 1000],
+  ["stubborn-grandchild", 2500],
+])("stops the server's descendants before dispose resolves (%s)", async (mode, limit) => {
+  const { client, pid } = await childServer(mode);
+  const started = performance.now();
+  await client.dispose();
+  expect(performance.now() - started).toBeLessThan(limit);
+  await delay(1000);
+  expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+});
+
+it.skipIf(process.platform === "win32")(
+  "escalates on time when the wall clock moves back",
+  async () => {
+    const { client } = await childServer("stubborn-grandchild");
+    const closing = client.dispose();
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() - 60_000);
+    const outcome = await Promise.race([closing.then(() => "disposed"), delay(2500, "waiting")]);
+    vi.restoreAllMocks();
+    await closing;
+    expect(outcome).toBe("disposed");
   },
 );
 

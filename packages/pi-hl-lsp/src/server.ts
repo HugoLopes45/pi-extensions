@@ -264,9 +264,9 @@ export class LanguageServer {
     this.child.stdout.destroy();
     this.child.stderr.destroy();
     this.signal("SIGTERM");
-    const deadline = Date.now() + 2000;
+    const deadline = performance.now() + 2000;
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
-    while (this.signal(0) && Date.now() < deadline) await delay(50);
+    while (this.signal(0) && performance.now() < deadline) await delay(50);
     this.signal("SIGKILL");
     await this.exited;
   }
