@@ -83,6 +83,7 @@ const replies = new Map<
   ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
   ["stubborn-server", () => ({ pid: process.pid })],
   ["lingering-child", () => lingering(5)],
+  ["slow-lingering-child", () => lingering(30)],
   [
     "grandchild",
     () => {
@@ -188,6 +189,7 @@ connection.onNotification("test/fail", async () => {
 const handshake = new Set([
   "handshake",
   "lingering-child",
+  "slow-lingering-child",
   "mute-shutdown",
   "slow-shutdown",
   "stubborn-mute",
