@@ -275,7 +275,6 @@ export class LanguageServer {
     if (killed === "refused" || !exited) this.onClose(new Error("LSP process group did not stop"));
   }
 
-  /** Signals the server's process group on POSIX. */
   private signal(signal: NodeJS.Signals | 0): "sent" | "gone" | "refused" {
     const pid = this.child.pid;
     if (process.platform === "win32" || pid === undefined)

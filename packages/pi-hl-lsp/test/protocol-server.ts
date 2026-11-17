@@ -83,11 +83,14 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     return { pid: process.pid };
   }
   if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
-  if (mode === "grandchild") return { group: process.pid, pid: spawn("sleep", ["60"]).pid };
+  if (mode === "grandchild") {
+    spawn("sleep", ["60"]);
+    return { group: process.pid };
+  }
   if (mode === "stubborn-grandchild") {
     const child = spawn("sh", ["-c", "trap '' TERM; echo ready; exec sleep 60"]);
     await once(child.stdout, "data");
-    return { group: process.pid, pid: child.pid };
+    return { group: process.pid };
   }
   if (mode === "effects") {
     try {
