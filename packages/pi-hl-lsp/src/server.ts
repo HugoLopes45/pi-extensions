@@ -57,23 +57,18 @@ class FrameSizes {
   scan(chunk: Buffer): void {
     let rest = chunk;
     while (rest.length > 0 || this.body === 0)
-      rest =
-        this.body === undefined
-          ? this.readHeader(rest)
-          : this.readBody(rest, this.body);
+      rest = this.body === undefined ? this.readHeader(rest) : this.readBody(rest, this.body);
   }
 
   private readHeader(chunk: Buffer): Buffer {
-    const data =
-      this.header.length === 0 ? chunk : Buffer.concat([this.header, chunk]);
+    const data = this.header.length === 0 ? chunk : Buffer.concat([this.header, chunk]);
     const end = data.indexOf("\r\n\r\n");
     if (end < 0) {
       this.header = data;
       return Buffer.alloc(0);
     }
     // The reader misses a terminator right after a CR, so both would split differently.
-    if (data[end - 1] === 0x0d)
-      throw new Error("LSP frame header ends with a bare CR");
+    if (data[end - 1] === 0x0d) throw new Error("LSP frame header ends with a bare CR");
     // Split like the vscode-jsonrpc reader so both agree on every frame's length.
     const [length, ...others] = data
       .subarray(0, end)
@@ -136,20 +131,13 @@ export class LanguageServer {
     const frames = new FrameSizes();
     let held = 0;
     this.input = new Transform({
-      transform(
-        chunk: Buffer,
-        _encoding: BufferEncoding,
-        done: TransformCallback,
-      ) {
+      transform(chunk: Buffer, _encoding: BufferEncoding, done: TransformCallback) {
         held += chunk.length;
-        if (held > 8 * 1024 * 1024)
-          return done(new Error("LSP wire budget exceeded"));
+        if (held > 8 * 1024 * 1024) return done(new Error("LSP wire budget exceeded"));
         try {
           frames.scan(chunk);
         } catch (error) {
-          return done(
-            error instanceof Error ? error : new Error("Invalid LSP frame"),
-          );
+          return done(error instanceof Error ? error : new Error("Invalid LSP frame"));
         }
         done(null, chunk);
       },
@@ -175,14 +163,11 @@ export class LanguageServer {
       this.stderr = (this.stderr + chunk.toString("utf8")).slice(-4000);
     });
     this.input.on("error", (error: Error) => this.fail(error));
-    this.connection.onClose(() =>
-      this.fail(new Error("LSP connection closed")),
-    );
+    this.connection.onClose(() => this.fail(new Error("LSP connection closed")));
     this.connection.onError(([error]) => this.fail(error));
     this.child.once("error", (error: Error) => this.fail(error));
     this.child.once("exit", (code) => {
-      if (!this.stopped)
-        this.fail(new Error(`LSP process exited (${code}): ${this.stderr}`));
+      if (!this.stopped) this.fail(new Error(`LSP process exited (${code}): ${this.stderr}`));
     });
     this.connection.onRequest("client/registerCapability", (value: unknown) => {
       if (!Value.Check(registrationParams, value))
@@ -190,31 +175,20 @@ export class LanguageServer {
       for (const { method } of value.registrations) this.registered.add(method);
       return null;
     });
-    this.connection.onRequest(
-      "client/unregisterCapability",
-      (value: unknown) => {
-        if (!Value.Check(unregistrationParams, value))
-          return this.reject("Invalid client/unregisterCapability payload");
-        for (const { method } of value.unregisterations)
-          this.registered.delete(method);
-        return null;
-      },
-    );
-    this.connection.onNotification(
-      "textDocument/publishDiagnostics",
-      (value: unknown) => {
-        if (this.stopped) return;
-        try {
-          publish(value);
-        } catch (error) {
-          this.fail(
-            error instanceof Error
-              ? error
-              : new Error("Invalid diagnostic publication"),
-          );
-        }
-      },
-    );
+    this.connection.onRequest("client/unregisterCapability", (value: unknown) => {
+      if (!Value.Check(unregistrationParams, value))
+        return this.reject("Invalid client/unregisterCapability payload");
+      for (const { method } of value.unregisterations) this.registered.delete(method);
+      return null;
+    });
+    this.connection.onNotification("textDocument/publishDiagnostics", (value: unknown) => {
+      if (this.stopped) return;
+      try {
+        publish(value);
+      } catch (error) {
+        this.fail(error instanceof Error ? error : new Error("Invalid diagnostic publication"));
+      }
+    });
     this.connection.listen();
   }
 
@@ -236,9 +210,7 @@ export class LanguageServer {
   }
 
   get pullDiagnostics(): boolean {
-    return (
-      this.diagnosticProvider || this.registered.has("textDocument/diagnostic")
-    );
+    return this.diagnosticProvider || this.registered.has("textDocument/diagnostic");
   }
 
   async initialize(signal?: AbortSignal): Promise<Initialization> {
@@ -304,11 +276,7 @@ export class LanguageServer {
     combined.addEventListener("abort", abort, { once: true });
     try {
       combined.throwIfAborted();
-      const reply = this.connection.sendRequest<unknown>(
-        method,
-        params,
-        cancellation.token,
-      );
+      const reply = this.connection.sendRequest<unknown>(method, params, cancellation.token);
       // A reply that lands after the caller gave up has no listener left.
       reply.catch(() => {});
       return await Promise.race([reply, aborted.promise]);
@@ -343,13 +311,9 @@ export class LanguageServer {
     combined.addEventListener("abort", abort, { once: true });
     try {
       combined.throwIfAborted();
-      await Promise.race([
-        this.connection.sendNotification(method, params),
-        aborted.promise,
-      ]);
+      await Promise.race([this.connection.sendNotification(method, params), aborted.promise]);
     } catch (error) {
-      this.failure =
-        error instanceof Error ? error : new Error("LSP notification failed");
+      this.failure = error instanceof Error ? error : new Error("LSP notification failed");
       throw this.failure;
     } finally {
       combined.removeEventListener("abort", abort);
@@ -404,20 +368,15 @@ export class LanguageServer {
 
   // Lets a healthy server finish its work; the same deadline still bounds the signals after it.
   private async shutdown(deadline: number): Promise<void> {
-    const remaining = () =>
-      delay(Math.max(0, deadline - performance.now()), false, { ref: false });
+    const remaining = () => delay(Math.max(0, deadline - performance.now()), false, { ref: false });
     // A connection closed by an aborted request throws synchronously, which means no answer.
     const send = async (message: () => Promise<unknown>) => {
       await message();
       return true;
     };
-    const answered = send(() => this.connection.sendRequest("shutdown")).catch(
-      () => false,
-    );
+    const answered = send(() => this.connection.sendRequest("shutdown")).catch(() => false);
     if (!(await Promise.race([answered, remaining()]))) return;
-    const sent = send(() => this.connection.sendNotification("exit")).catch(
-      () => false,
-    );
+    const sent = send(() => this.connection.sendNotification("exit")).catch(() => false);
     if (!(await Promise.race([sent, remaining()]))) return;
     if (this.child.exitCode === null && this.child.signalCode === null)
       await Promise.race([once(this.child, "exit"), remaining()]);
