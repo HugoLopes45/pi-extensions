@@ -1,11 +1,17 @@
 import { realpath } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 
-import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
-
-import { presets, type Refusal } from "./presets.js";
+import { presetFor, presets, type Preset, type Refusal, type RootHook } from "./presets.js";
 import { isFile, nearestRoot, outside, realpathIfExists } from "./project-files.js";
-import type { ServerFamily } from "./settings.js";
+import type { ServerConfig } from "./settings.js";
+
+export type ServerDefinition = {
+  name: string;
+  fileTypes: readonly string[];
+  rootMarkers: readonly string[];
+  languageIds: Readonly<Partial<Record<string, string>>>;
+  rootHook?: RootHook | undefined;
+};
 
 export type Route =
   | {
@@ -13,7 +19,7 @@ export type Route =
       file: string;
       root: string;
       language: string;
-      server: ServerFamily;
+      server: string;
       coverage: "local-marker";
     }
   | {
@@ -22,50 +28,60 @@ export type Route =
       reason: string;
     };
 
-async function projectRoot(
-  family: ServerFamily,
-  path: string,
-  base: string,
-): Promise<string | Refusal | undefined> {
-  const preset = presets[family];
-  const directory = dirname(path);
-  const nearest =
-    (await nearestRoot(directory, base, preset.rootMarkers)) ??
-    (preset.fallbackMarkers
-      ? await nearestRoot(directory, base, preset.fallbackMarkers)
-      : undefined);
-  if (!nearest || !preset.workspaceRoot) return nearest;
-  return preset.workspaceRoot(nearest, base);
+// Configured servers come first in settings order, so they win over unconfigured built-ins.
+export function serverDefinitions(
+  servers: Readonly<Record<string, ServerConfig>>,
+): ServerDefinition[] {
+  const configured = Object.entries(servers).map(([name, config]) => definitionOf(name, config));
+  const unconfigured = Object.keys(presets)
+    .filter((name) => !Object.hasOwn(servers, name))
+    .map((name) => definitionOf(name));
+  return [...configured, ...unconfigured];
 }
 
-async function environmentProblem(
-  family: ServerFamily,
-  root: string,
-  base: string,
-): Promise<Refusal | undefined> {
-  return presets[family].environment?.(root, base);
-}
+// A custom server has no preset; settings already require its own file types and markers.
+const noPreset: Preset = { fileTypes: [], rootMarkers: [], languageIds: {} };
 
-function documentLanguage(path: string, language: string): string {
-  const extension = extname(path).toLowerCase();
-  return extension === ".tsx"
-    ? "typescriptreact"
-    : extension === ".jsx"
-      ? "javascriptreact"
-      : language;
-}
-
-function serverLanguage(path: string): { family: ServerFamily; language: string } | undefined {
-  const detected = getLanguageFromPath(path);
-  const family = detected === "javascript" ? "typescript" : detected;
-  if (family !== "typescript" && family !== "python" && family !== "rust") return undefined;
+function definitionOf(name: string, config?: ServerConfig): ServerDefinition {
+  const preset = presetFor(name) ?? noPreset;
   return {
-    family,
-    language: documentLanguage(path, detected === "javascript" ? detected : family),
+    name,
+    fileTypes: config?.fileTypes ?? preset.fileTypes,
+    rootMarkers: config?.rootMarkers ?? preset.rootMarkers,
+    languageIds: { ...preset.languageIds, ...config?.languageId },
+    rootHook: preset.rootHook,
   };
 }
 
-export async function resolveRoute(file: string, boundary: string): Promise<Route> {
+function matchDefinition(
+  path: string,
+  definitions: readonly ServerDefinition[],
+): { definition: ServerDefinition; language: string } | undefined {
+  const extension = extname(path).toLowerCase();
+  const definition = definitions.find((candidate) => candidate.fileTypes.includes(extension));
+  if (!definition) return undefined;
+  return {
+    definition,
+    language: definition.languageIds[extension] ?? definition.name,
+  };
+}
+
+function projectRoot(
+  definition: ServerDefinition,
+  path: string,
+  base: string,
+): Promise<string | Refusal | undefined> {
+  const directory = dirname(path);
+  return definition.rootHook
+    ? definition.rootHook(directory, base, definition.rootMarkers)
+    : nearestRoot(directory, base, definition.rootMarkers);
+}
+
+export async function resolveRoute(
+  file: string,
+  boundary: string,
+  definitions: readonly ServerDefinition[] = serverDefinitions({}),
+): Promise<Route> {
   if (!isAbsolute(file) && /^[a-z][a-z0-9+.-]*:/iu.test(file))
     return {
       outcome: "unsupported",
@@ -87,14 +103,14 @@ export async function resolveRoute(file: string, boundary: string): Promise<Rout
       file: path,
       reason: "Expected a regular file",
     };
-  const language = serverLanguage(path);
-  if (!language)
+  const match = matchDefinition(path, definitions);
+  if (!match)
     return {
       outcome: "unsupported",
       file: path,
-      reason: "No supported language server family",
+      reason: "No server declares this file type",
     };
-  const root = await projectRoot(language.family, path, base);
+  const root = await projectRoot(match.definition, path, base);
   if (root === undefined)
     return {
       outcome: "unsupported",
@@ -102,14 +118,12 @@ export async function resolveRoute(file: string, boundary: string): Promise<Rout
       reason: "No recognized project marker",
     };
   if (typeof root !== "string") return { ...root, file: path };
-  const problem = await environmentProblem(language.family, root, base);
-  if (problem) return { ...problem, file: path };
   return {
     outcome: "completed",
     file: path,
     root,
-    server: language.family,
-    language: language.language,
+    server: match.definition.name,
+    language: match.language,
     coverage: "local-marker",
   };
 }

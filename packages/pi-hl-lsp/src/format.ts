@@ -457,7 +457,7 @@ function renderWorkspaceSymbol(
   return { text: `${head}  ${place.text}`, truncated: place.truncated };
 }
 
-// tsserver starts a declaration's range at its first token, so the name can sit later on that line.
+// Some servers start a declaration's range at its first token, so the name can sit later on that line.
 function namedPlace(
   place: Place,
   name: string,

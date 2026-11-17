@@ -1,4 +1,4 @@
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import { isMissingFileError } from "pi-hl-utils/errors";
@@ -11,6 +11,16 @@ export function outside(base: string, path: string): boolean {
 export async function isFile(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile();
+  } catch (error) {
+    if (isMissingFileError(error)) return false;
+    throw error;
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
   } catch (error) {
     if (isMissingFileError(error)) return false;
     throw error;
@@ -43,13 +53,20 @@ function insideDependencies(boundary: string, dir: string): boolean {
   return relative(boundary, dir).split(sep).includes("node_modules");
 }
 
+// A plain marker names a file or a directory; a marker with a leading * matches an entry whose name ends with the rest.
+async function hasMarker(dir: string, marker: string): Promise<boolean> {
+  if (!marker.startsWith("*")) return exists(join(dir, marker));
+  const suffix = marker.slice(1);
+  return (await readdir(dir)).some((name) => name.endsWith(suffix));
+}
+
 export async function nearestRoot(
   root: string,
   boundary: string,
-  markers: string[],
+  markers: readonly string[],
 ): Promise<string | undefined> {
   if (!insideDependencies(boundary, root)) {
-    const matches = await Promise.all(markers.map((marker) => isFile(join(root, marker))));
+    const matches = await Promise.all(markers.map((marker) => hasMarker(root, marker)));
     if (matches.some(Boolean)) return root;
   }
   return root === boundary ? undefined : nearestRoot(dirname(root), boundary, markers);

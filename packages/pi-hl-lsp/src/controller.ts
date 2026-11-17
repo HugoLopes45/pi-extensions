@@ -45,14 +45,9 @@ import {
   type ChangedFile,
   type FileMove,
 } from "./rename.js";
-import { resolveRoute, type Route } from "./routing.js";
+import { resolveRoute, serverDefinitions, type Route, type ServerDefinition } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
-import {
-  serverFamilies,
-  type LspSettings,
-  type ServerConfig,
-  type ServerFamily,
-} from "./settings.js";
+import { type LspSettings, type ServerConfig } from "./settings.js";
 import { bounded, isIdentifierCharacter } from "./text.js";
 
 export type Operation =
@@ -89,7 +84,7 @@ type Instance = {
   client: LanguageServer;
   ready: Promise<Initialization>;
   root: string;
-  server: ServerFamily;
+  server: string;
   generation: number;
   state: {
     document: Document | undefined;
@@ -105,7 +100,8 @@ export type InstanceStatus = {
   tools: Operation[] | undefined;
 };
 export type ServerStatus = {
-  server: ServerFamily;
+  server: string;
+  configured: boolean;
   instances: InstanceStatus[];
 };
 export type FormatOutcome =
@@ -135,7 +131,7 @@ const method = {
   incoming_calls: "callHierarchy/incomingCalls",
   outgoing_calls: "callHierarchy/outgoingCalls",
 } as const;
-// Measured on typescript-language-server; see lsp-dev/research/reports/publish-timing.md.
+// Measured on real language servers; see lsp-dev/research/reports/publish-timing.md.
 const SETTLE_MS = 500;
 const QUIET_MS = 1000;
 // Each baseline is a short error-count map. An evicted file reports all its errors as new on its next edit.
@@ -326,7 +322,7 @@ async function pulledObservation(
   return document.observation ? unionObservation(pulled, document.observation) : pulled;
 }
 
-// basedpyright registers the pull method in reply to the first open, after this call has read
+// Some servers register the pull method in reply to the first open, after this call has read
 // pullDiagnostics, so a push wait also starts a pull when that registration arrives.
 async function diagnosticsObservation(
   instance: Instance,
@@ -628,15 +624,18 @@ export class LspController {
   private readonly baseline = new Map<string, Map<string, number>>();
   private generation = 0;
   private selected: { instance: Instance; document: Document } | undefined;
+  private readonly definitions: ServerDefinition[];
 
   constructor(
     private readonly cwd: string,
     private readonly settings: LspSettings,
     private readonly trusted: boolean,
-  ) {}
+  ) {
+    this.definitions = serverDefinitions(settings.servers);
+  }
 
-  private configured(): ServerFamily[] {
-    return serverFamilies.filter((server) => this.settings.servers[server] !== undefined);
+  private configured(): string[] {
+    return Object.keys(this.settings.servers);
   }
 
   serverStatus() {
@@ -645,9 +644,10 @@ export class LspController {
     const instances = [...this.instances.values()];
     return {
       outcome: "completed" as const,
-      servers: this.configured().map((server): ServerStatus => ({
-        server,
-        instances: instances.filter((instance) => instance.server === server).map(instanceStatus),
+      servers: this.definitions.map(({ name }): ServerStatus => ({
+        server: name,
+        configured: Object.hasOwn(this.settings.servers, name),
+        instances: instances.filter((instance) => instance.server === name).map(instanceStatus),
       })),
     };
   }
@@ -657,13 +657,12 @@ export class LspController {
     const refusal = this.gate();
     if (refusal) return refusal;
     const configured = this.configured();
-    const family = configured.find((candidate) => candidate === server);
-    if (family === undefined)
+    if (!configured.includes(server))
       return {
         outcome: "unavailable" as const,
         reason: `Unknown server "${server}"; configured servers: ${configured.join(", ") || "none"}`,
       };
-    const stopped = [...this.instances].filter(([, instance]) => instance.server === family);
+    const stopped = [...this.instances].filter(([, instance]) => instance.server === server);
     await disposeAll(stopped.map(([, instance]) => instance));
     for (const [key, instance] of stopped)
       if (this.instances.get(key) === instance) this.instances.delete(key);
@@ -677,9 +676,7 @@ export class LspController {
       projectExecutionAllowed: this.settings.allowProjectExecution,
       timeoutMs: this.settings.timeoutMs,
       servers: Object.fromEntries(
-        Object.entries(this.settings.servers).flatMap(([family, server]) =>
-          server ? [[family, server.command]] : [],
-        ),
+        Object.entries(this.settings.servers).map(([name, server]) => [name, server.command]),
       ),
       instances: [...this.instances.values()].map(({ root, server, generation, client }) => ({
         root,
@@ -864,7 +861,7 @@ export class LspController {
       ...(signal ? [signal] : []),
     ]);
     deadline.throwIfAborted();
-    const route = await resolveRoute(file, this.cwd);
+    const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
     if (!config) return unconfigured(route);
@@ -889,7 +886,7 @@ export class LspController {
 
   // Errors of the file that the previous settled observation did not have; undefined when no check finished.
   async newErrors(file: string, signal: AbortSignal): Promise<Diagnostic[] | undefined> {
-    const route = await resolveRoute(file, this.cwd);
+    const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return undefined;
     const before = this.baseline.get(route.file) ?? new Map<string, number>();
     const result = await this.query("diagnostics", file, undefined, signal);
@@ -914,7 +911,7 @@ export class LspController {
       ...(signal ? [signal] : []),
     ]);
     deadline.throwIfAborted();
-    const route = await resolveRoute(file, this.cwd);
+    const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
     if (!config) return unconfigured(route);
@@ -958,7 +955,7 @@ export class LspController {
   // Formats the file an edit just wrote; the server's edits are applied all or none, as in rename.
   async format(file: string, signal: AbortSignal): Promise<FormatOutcome> {
     if (!this.settings.formatOnWrite || this.gate() !== undefined) return { outcome: "unchanged" };
-    const route = await resolveRoute(file, this.cwd);
+    const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return { outcome: "unchanged" };
     const config = this.settings.servers[route.server];
     if (!config) return { outcome: "unchanged" };
@@ -988,7 +985,7 @@ export class LspController {
     if (refusal) return refusal;
     const deadline = this.deadlineFor(signal);
     deadline.throwIfAborted();
-    const route = await resolveRoute(oldPath, this.cwd);
+    const route = await resolveRoute(oldPath, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
     if (!config) return unconfigured(route);
@@ -1070,7 +1067,7 @@ export class LspController {
   private async listedActions(file: string, target: NavigationTarget, deadline: AbortSignal) {
     // Readiness and diagnostics share half the call timeout, counted from the start of the listing.
     const budget = AbortSignal.timeout(this.settings.timeoutMs / 2);
-    const route = await resolveRoute(file, this.cwd);
+    const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
     if (!config) return unconfigured(route);
@@ -1192,7 +1189,7 @@ export class LspController {
   }
 
   private async snapshotMatches(document: Document, instance: Instance): Promise<boolean> {
-    const route = await resolveRoute(document.file, this.cwd);
+    const route = await resolveRoute(document.file, this.cwd, this.definitions);
     if (
       route.outcome !== "completed" ||
       route.file !== document.file ||

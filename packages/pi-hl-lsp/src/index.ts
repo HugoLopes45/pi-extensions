@@ -235,13 +235,13 @@ function unavailable(issue: string | undefined) {
   };
 }
 
-// One line per configured server; several instances of one server share that line.
+// One line per server; several instances of one server share that line.
 function serverLines(servers: ServerStatus[]): string {
   return servers
-    .map(
-      ({ server, instances }) =>
-        `${server}: ${instances.length === 0 ? "not started" : instances.map(instanceLine).join("; ")}`,
-    )
+    .map(({ server, configured, instances }) => {
+      if (!configured) return `${server}: not configured`;
+      return `${server}: ${instances.length === 0 ? "not started" : instances.map(instanceLine).join("; ")}`;
+    })
     .join("\n");
 }
 

@@ -179,6 +179,59 @@ it("rejects malformed global settings and excessive budgets", () => {
   }
 });
 
+it("accepts a custom server with its file types and root markers", () => {
+  const server = {
+    command: "/usr/local/bin/mylsp",
+    args: ["--stdio"],
+    fileTypes: [".foo"],
+    rootMarkers: ["project.foo-root", "*.foo-project"],
+  };
+  expect(readSettings({ servers: { mylsp: server } }, undefined, false).servers).toEqual({
+    mylsp: server,
+  });
+});
+
+it("refuses a custom server that omits its file types or root markers", () => {
+  const command = "/usr/local/bin/mylsp";
+  expect(() =>
+    readSettings({ servers: { mylsp: { command, args: [] } } }, undefined, false),
+  ).toThrow('Custom server "mylsp" needs fileTypes and rootMarkers');
+});
+
+it("refuses two servers that claim one file type and names both", () => {
+  expect(() =>
+    readSettings(
+      {
+        servers: {
+          typescript: { command: "/usr/bin/ts-ls", args: [] },
+          mylsp: {
+            command: "/usr/bin/mylsp",
+            args: [],
+            fileTypes: [".ts"],
+            rootMarkers: ["tsconfig.json"],
+          },
+        },
+      },
+      undefined,
+      false,
+    ),
+  ).toThrow('Servers "typescript" and "mylsp" both claim ".ts"');
+});
+
+it("refuses server names outside the lowercase name pattern and more than 32 servers", () => {
+  const custom = {
+    command: "/usr/bin/mylsp",
+    args: [],
+    fileTypes: [".foo"],
+    rootMarkers: ["a"],
+  };
+  expect(() => readSettings({ servers: { Bad_Name: custom } }, undefined, false)).toThrow(/global/);
+  const many = Object.fromEntries(
+    Array.from({ length: 33 }, (_, index) => [`server-${index}`, custom]),
+  );
+  expect(() => readSettings({ servers: many }, undefined, false)).toThrow(/global/);
+});
+
 it("rejects relative executables and control characters in names", () => {
   expect(() =>
     readSettings({ servers: { python: { command: "./server", args: [] } } }, undefined, false),

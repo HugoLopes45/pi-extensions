@@ -115,6 +115,38 @@ it("names the server key and its fix when no server is configured for the langua
   });
 });
 
+it("routes a custom server end to end by its name, file type and root marker", async () => {
+  const cwd = await directory();
+  await writeFile(join(cwd, "project.foo-root"), "");
+  const file = join(cwd, "main.foo");
+  await writeFile(file, "const value = 1;\n");
+  const instance = new LspController(
+    cwd,
+    {
+      enabled: true,
+      name: "HL LSP",
+      allowProjectExecution: true,
+      timeoutMs: 5000,
+      formatOnWrite: false,
+      servers: {
+        mylsp: {
+          command: process.execPath,
+          args: [fixture, "normal", join(cwd, "spawns.log")],
+          fileTypes: [".foo"],
+          rootMarkers: ["project.foo-root"],
+        },
+      },
+    },
+    true,
+  );
+  onTestFinished(() => instance.dispose());
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    server: "mylsp",
+    text: "const value: number",
+  });
+});
+
 it("reports the timeout and the configured server commands in status", async () => {
   const { instance } = await controller();
   expect(instance.status()).toMatchObject({

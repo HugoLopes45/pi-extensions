@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { resolveRoute } from "../src/routing.js";
+import { resolveRoute, serverDefinitions } from "../src/routing.js";
 import { directory } from "./fixtures.js";
 
 it("routes identical TSX filenames to independent nearest package roots", async () => {
@@ -25,6 +25,48 @@ it("routes identical TSX filenames to independent nearest package roots", async 
       });
     }),
   );
+});
+
+it("routes a custom server by its declared file type and root marker", async () => {
+  const root = await directory();
+  await mkdir(join(root, "project.foo-project"));
+  const file = join(root, "main.foo");
+  await writeFile(file, "");
+  const definitions = serverDefinitions({
+    mylsp: {
+      command: "/usr/bin/mylsp",
+      args: [],
+      fileTypes: [".foo"],
+      rootMarkers: ["*.foo-project"],
+    },
+  });
+  expect(await resolveRoute(file, root, definitions)).toEqual({
+    outcome: "completed",
+    file,
+    root,
+    language: "mylsp",
+    server: "mylsp",
+    coverage: "local-marker",
+  });
+});
+
+it("replaces the built-in file types of a configured built-in server", async () => {
+  const root = await directory();
+  await writeFile(join(root, "tsconfig.json"), "{}");
+  const file = join(root, "index.ts");
+  await writeFile(file, "");
+  const definitions = serverDefinitions({
+    typescript: {
+      command: "/usr/bin/ts-ls",
+      args: [],
+      fileTypes: [".vue"],
+      rootMarkers: ["tsconfig.json"],
+    },
+  });
+  expect(await resolveRoute(file, root, definitions)).toMatchObject({
+    outcome: "unsupported",
+    reason: "No server declares this file type",
+  });
 });
 
 it("rejects escaped file symlinks", async () => {

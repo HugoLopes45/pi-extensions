@@ -8,8 +8,14 @@ import {
 import type { SettingsCommandSpec } from "pi-hl-utils/settings-command";
 import { Type, type Static } from "typebox";
 
+import { presetFor } from "./presets.js";
 import { bounded } from "./text.js";
 
+const extensionSchema = Type.String({
+  minLength: 2,
+  maxLength: 32,
+  pattern: "^\\.[a-z0-9_+-]{1,31}$",
+});
 const serverSchema = Type.Object(
   {
     command: Type.Refine(
@@ -18,16 +24,59 @@ const serverSchema = Type.Object(
       () => "Server commands must use absolute paths",
     ),
     args: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 32 }),
+    fileTypes: Type.Optional(Type.Array(extensionSchema, { minItems: 1, maxItems: 32 })),
+    rootMarkers: Type.Optional(
+      Type.Array(
+        Type.String({
+          minLength: 1,
+          maxLength: 255,
+          pattern: "^[*]?[^*/\\\\\\u0000-\\u001f\\u007f]+$",
+        }),
+        { minItems: 1, maxItems: 32 },
+      ),
+    ),
+    languageId: Type.Optional(
+      Type.Record(extensionSchema, Type.String({ minLength: 1, maxLength: 64 })),
+    ),
   },
   { additionalProperties: false },
 );
-const serversSchema = Type.Object(
-  {
-    typescript: Type.Optional(serverSchema),
-    python: Type.Optional(serverSchema),
-    rust: Type.Optional(serverSchema),
-  },
-  { additionalProperties: false },
+
+// A custom server has no preset, so it must declare the file types and markers that route to it.
+function undeclaredCustom(servers: Record<string, ServerConfig>): string | undefined {
+  for (const [name, config] of Object.entries(servers))
+    if (!presetFor(name) && !(config.fileTypes && config.rootMarkers))
+      return `Custom server "${name}" needs fileTypes and rootMarkers`;
+  return undefined;
+}
+
+function fileTypesOf(name: string, config: ServerConfig): readonly string[] {
+  return config.fileTypes ?? presetFor(name)?.fileTypes ?? [];
+}
+
+function sharedFileType(servers: Record<string, ServerConfig>): string | undefined {
+  const owners = new Map<string, string>();
+  for (const [name, config] of Object.entries(servers))
+    for (const fileType of fileTypesOf(name, config)) {
+      const owner = owners.get(fileType);
+      if (owner !== undefined && owner !== name)
+        return `Servers "${owner}" and "${name}" both claim "${fileType}"; remove one fileTypes entry`;
+      owners.set(fileType, name);
+    }
+  return undefined;
+}
+
+function serverProblem(servers: Record<string, ServerConfig>): string | undefined {
+  return undeclaredCustom(servers) ?? sharedFileType(servers);
+}
+
+const serversSchema = Type.Refine(
+  Type.Record(Type.String({ pattern: "^[a-z][a-z0-9-]{0,39}$" }), serverSchema, {
+    additionalProperties: false,
+    maxProperties: 32,
+  }),
+  (servers) => serverProblem(servers) === undefined,
+  (servers) => serverProblem(servers) ?? "Servers are invalid",
 );
 const schema = Type.Object(
   {
@@ -52,9 +101,6 @@ const schema = Type.Object(
 );
 
 export type ServerConfig = Static<typeof serverSchema>;
-export type ServerFamily = keyof Static<typeof serversSchema>;
-// Every server key, in the order status lists them.
-export const serverFamilies: readonly ServerFamily[] = ["typescript", "python", "rust"];
 export type LspSettings = Required<Static<typeof schema>>;
 export type LspOptions = Static<typeof schema>;
 
