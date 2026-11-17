@@ -299,7 +299,8 @@ async function postEditNotes(
   const notes = formatted === undefined ? [] : [formatted];
   const errors = await current.newErrors(file, postEditDeadline(signal)).catch(() => undefined);
   if (!errors || errors.length === 0) return notes;
-  const header = `hl-lsp: ${errors.length} new errors in ${displayPath(cwd, file)}`;
+  const noun = errors.length === 1 ? "error" : "errors";
+  const header = `hl-lsp: ${errors.length} new ${noun} in ${displayPath(cwd, file)}`;
   return [...notes, `${header}\n${formatNewErrors(errors).text}`];
 }
 

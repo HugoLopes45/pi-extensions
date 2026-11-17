@@ -1427,7 +1427,7 @@ it("appends an error that an edit introduces", async () => {
       { type: "text", text: "Wrote index.ts" },
       {
         type: "text",
-        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+        text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
       },
     ],
   });
@@ -1449,7 +1449,7 @@ it("appends one error when an edit adds a second identical error", async () => {
       { type: "text", text: "Wrote index.ts" },
       {
         type: "text",
-        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+        text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
       },
     ],
   });
@@ -1514,7 +1514,7 @@ it("appends new errors after a write too", async () => {
       { type: "text", text: "Wrote index.ts" },
       {
         type: "text",
-        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+        text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
       },
     ],
   });
@@ -1605,7 +1605,7 @@ it("reports the format line before new errors", async () => {
       { type: "text", text: "hl-lsp: formatted index.ts (1 edits)" },
       {
         type: "text",
-        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+        text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
       },
     ],
   });
