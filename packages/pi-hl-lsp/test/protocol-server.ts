@@ -2,10 +2,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { Writable } from "node:stream";
-import {
-  setTimeout as delay,
-  setImmediate as tick,
-} from "node:timers/promises";
+import { setTimeout as delay, setImmediate as tick } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { Type } from "typebox";
@@ -14,17 +11,14 @@ import rpc from "vscode-jsonrpc/node";
 const mode = process.argv[2];
 // These servers outlive SIGTERM and a closed stdin, like a hung real server.
 const stubborn =
-  mode === "stubborn-server" ||
-  mode === "stubborn-garbage" ||
-  mode === "stubborn-mute";
+  mode === "stubborn-server" || mode === "stubborn-garbage" || mode === "stubborn-mute";
 if (stubborn) {
   process.on("SIGTERM", () => {});
   setInterval(() => {}, 1000);
 }
 // A launch appends one line here, so a test can count launches without reading internals.
 const spawnLog = process.argv[3];
-if (spawnLog !== undefined && spawnLog !== "--ready")
-  appendFileSync(spawnLog, `${process.pid}\n`);
+if (spawnLog !== undefined && spawnLog !== "--ready") appendFileSync(spawnLog, `${process.pid}\n`);
 const reader = new rpc.StreamMessageReader(process.stdin);
 reader.partialMessageTimeout = 0;
 const fragmented = new Writable({
@@ -40,9 +34,7 @@ const fragmented = new Writable({
 });
 const connection = rpc.createMessageConnection(
   reader,
-  new rpc.StreamMessageWriter(
-    mode === "fragmented" ? fragmented : process.stdout,
-  ),
+  new rpc.StreamMessageWriter(mode === "fragmented" ? fragmented : process.stdout),
 );
 function frames(count: number, padding = 0): string {
   const body = JSON.stringify({
@@ -63,11 +55,7 @@ const rawReplies = new Map<string | undefined, () => string>([
     () =>
       `content-length: 1000\r\nContent-Length: 30\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
   ],
-  [
-    "hex-length",
-    () =>
-      `Content-Length: 0x1E\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
-  ],
+  ["hex-length", () => `Content-Length: 0x1E\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`],
   ["cr-cr", () => `Content-Length: 2\r\r\n\r\n{}${frames(10)}`],
   [
     "double-length",
@@ -113,10 +101,7 @@ const replies = new Map<
   [
     "stubborn-grandchild",
     async () => {
-      const child = spawn("sh", [
-        "-c",
-        "trap '' TERM; echo ready; exec sleep 60",
-      ]);
+      const child = spawn("sh", ["-c", "trap '' TERM; echo ready; exec sleep 60"]);
       await once(child.stdout, "data");
       return { contents: "", group: process.pid };
     },
@@ -159,19 +144,9 @@ const renameModes = new Set<string | undefined>([
   "rename-outside",
   "rename-prepare-null",
 ]);
-const formattingModes = new Set<string | undefined>([
-  "format",
-  "format-race",
-  "format-errors",
-]);
-const renameFileModes = new Set<string | undefined>([
-  "rename-file",
-  "rename-file-null",
-]);
-const codeActionModes = new Set<string | undefined>([
-  "code-actions",
-  "code-actions-outside",
-]);
+const formattingModes = new Set<string | undefined>(["format", "format-race", "format-errors"]);
+const renameFileModes = new Set<string | undefined>(["rename-file", "rename-file-null"]);
+const codeActionModes = new Set<string | undefined>(["code-actions", "code-actions-outside"]);
 const codeActionRequest = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
   context: Type.Object({ diagnostics: Type.Array(Type.Unknown()) }),
@@ -185,9 +160,7 @@ const renameRequest = Type.Object({
   newName: Type.String(),
 });
 const renameFilesRequest = Type.Object({
-  files: Type.Array(
-    Type.Object({ oldUri: Type.String(), newUri: Type.String() }),
-  ),
+  files: Type.Array(Type.Object({ oldUri: Type.String(), newUri: Type.String() })),
 });
 function replaceAt(line: number, start: number, end: number, newText: string) {
   return {
@@ -209,8 +182,7 @@ const textDocumentPosition = Type.Object({
 });
 // Reports the 0-based position the controller sent, so tests can check the resolved target.
 function echoPosition(params: unknown): object {
-  if (!Value.Check(textDocumentPosition, params))
-    throw new Error("Invalid hover fixture request");
+  if (!Value.Check(textDocumentPosition, params)) throw new Error("Invalid hover fixture request");
   return { contents: `${params.position.line}:${params.position.character}` };
 }
 function span(line: number, character: number) {
@@ -228,14 +200,11 @@ function fileOperations() {
     : {};
 }
 function codeActions() {
-  return codeActionModes.has(mode)
-    ? { codeActionProvider: { resolveProvider: true } }
-    : {};
+  return codeActionModes.has(mode) ? { codeActionProvider: { resolveProvider: true } } : {};
 }
 function capabilities() {
   return {
-    textDocumentSync:
-      mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
+    textDocumentSync: mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
     hoverProvider: true,
     ...(navigationModes.has(mode) ? { definitionProvider: true } : {}),
     ...(staticPullModes.has(mode) ? { diagnosticProvider: true } : {}),
@@ -246,9 +215,7 @@ function capabilities() {
     ...(mode === "workspace-symbols" || loadingModes.has(mode)
       ? { workspaceSymbolProvider: true }
       : {}),
-    ...(renameModes.has(mode)
-      ? { renameProvider: { prepareProvider: true } }
-      : {}),
+    ...(renameModes.has(mode) ? { renameProvider: { prepareProvider: true } } : {}),
     documentFormattingProvider: formattingModes.has(mode),
     ...fileOperations(),
     ...codeActions(),
@@ -257,12 +224,10 @@ function capabilities() {
 }
 // Loading modes announce work before the initialize reply, so the first query starts while the server is busy.
 async function startLoading() {
-  void connection
-    .sendRequest("window/workDoneProgress/create", { token: "load" })
-    .then(
-      (reply) => log(`create ${reply === null ? "null" : "other"}`),
-      () => log("create failed"),
-    );
+  void connection.sendRequest("window/workDoneProgress/create", { token: "load" }).then(
+    (reply) => log(`create ${reply === null ? "null" : "other"}`),
+    () => log("create failed"),
+  );
   await connection.sendNotification("$/progress", {
     token: "load",
     value: { kind: "begin", title: "Loading" },
@@ -305,8 +270,7 @@ connection.onRequest("initialize", async () => {
     await connection.sendNotification("noise", {
       text: "x".repeat(9 * 1024 * 1024),
     });
-  if (mode === "progress-load" || mode === "progress-stuck")
-    await startLoading();
+  if (mode === "progress-load" || mode === "progress-stuck") await startLoading();
   if (mode === "server-status") await startStatus();
   return { capabilities: capabilities() };
 });
@@ -317,10 +281,8 @@ connection.onRequest(
       token.onCancellationRequested(() => log("cancel"));
       return new Promise<never>(() => {});
     }
-    if (mode === "error-hover")
-      throw new rpc.ResponseError(-32801, "content modified");
-    if (mode === "long-error")
-      throw new rpc.ResponseError(-32603, "z".repeat(5000));
+    if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
+    if (mode === "long-error") throw new rpc.ResponseError(-32603, "z".repeat(5000));
     if (mode === "echo-position") return echoPosition(params);
     const raw = rawReplies.get(mode);
     if (raw) {
@@ -348,8 +310,7 @@ const workspaceQuery = Type.Object({ query: Type.String() });
 function workspaceSymbols(query: string): unknown[] {
   const uri = synchronized ?? "file:///fixture-unopened";
   if (query === "bogus") return [{ bogus: 1 }];
-  if (query === "pathonly")
-    return [{ name: query, kind: 13, location: { uri } }];
+  if (query === "pathonly") return [{ name: query, kind: 13, location: { uri } }];
   if (query === "many")
     return Array.from({ length: 60 }, (_, line) => ({
       name: `${query}${line}`,
@@ -364,34 +325,24 @@ connection.onRequest("workspace/symbol", (params: unknown): unknown[] => {
   if (loadingModes.has(mode)) log(`symbol ${Date.now()}`);
   return workspaceSymbols(params.query);
 });
-connection.onRequest(
-  "textDocument/typeDefinition",
-  (params: unknown): object => {
-    if (!Value.Check(textDocumentUri, params))
-      throw new Error("Invalid type definition fixture request");
-    return location(params.textDocument.uri, 0, 6);
-  },
-);
-connection.onRequest(
-  "textDocument/implementation",
-  (params: unknown): object => {
-    if (!Value.Check(textDocumentUri, params))
-      throw new Error("Invalid implementation fixture request");
-    return location(new URL("./impl.ts", params.textDocument.uri).href, 2, 0);
-  },
-);
-connection.onRequest(
-  "textDocument/prepareRename",
-  (params: unknown): object | null => {
-    if (!Value.Check(textDocumentPosition, params))
-      throw new Error("Invalid prepareRename fixture request");
-    return mode === "rename-prepare-null" ? null : span(0, 6);
-  },
-);
+connection.onRequest("textDocument/typeDefinition", (params: unknown): object => {
+  if (!Value.Check(textDocumentUri, params))
+    throw new Error("Invalid type definition fixture request");
+  return location(params.textDocument.uri, 0, 6);
+});
+connection.onRequest("textDocument/implementation", (params: unknown): object => {
+  if (!Value.Check(textDocumentUri, params))
+    throw new Error("Invalid implementation fixture request");
+  return location(new URL("./impl.ts", params.textDocument.uri).href, 2, 0);
+});
+connection.onRequest("textDocument/prepareRename", (params: unknown): object | null => {
+  if (!Value.Check(textDocumentPosition, params))
+    throw new Error("Invalid prepareRename fixture request");
+  return mode === "rename-prepare-null" ? null : span(0, 6);
+});
 // Formatting removes the indentation of each line, reading the file as the server sees it on disk.
 connection.onRequest("textDocument/formatting", (params: unknown): object[] => {
-  if (!Value.Check(textDocumentUri, params))
-    throw new Error("Invalid formatting fixture request");
+  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid formatting fixture request");
   const file = fileURLToPath(params.textDocument.uri);
   log("format");
   // A race rewrites the file after the server read it, as a save by another program would.
@@ -400,15 +351,12 @@ connection.onRequest("textDocument/formatting", (params: unknown): object[] => {
     .split("\n")
     .flatMap((line, index) => {
       const indent = /^[ \t]*/u.exec(line)?.[0] ?? "";
-      return indent.length === 0
-        ? []
-        : [replaceAt(index, 0, indent.length, "")];
+      return indent.length === 0 ? [] : [replaceAt(index, 0, indent.length, "")];
     });
 });
 // index.ts holds `const value = 1;` and other.ts holds `import { value } from "./index";`.
 connection.onRequest("textDocument/rename", (params: unknown): object => {
-  if (!Value.Check(renameRequest, params))
-    throw new Error("Invalid rename fixture request");
+  if (!Value.Check(renameRequest, params)) throw new Error("Invalid rename fixture request");
   const { uri } = params.textDocument;
   const sibling = new URL("./other.ts", uri).href;
   const local = replaceAt(0, 6, 11, params.newName);
@@ -426,8 +374,7 @@ connection.onRequest("textDocument/rename", (params: unknown): object => {
     return {
       documentChanges: [{ textDocument: { uri, version: 7 }, edits: [local] }],
     };
-  if (mode === "rename-resource")
-    return { documentChanges: [{ kind: "create", uri: sibling }] };
+  if (mode === "rename-resource") return { documentChanges: [{ kind: "create", uri: sibling }] };
   if (mode === "rename-outside")
     return {
       changes: {
@@ -450,65 +397,50 @@ function callItem(name: string, uri: string, line: number, character: number) {
 const callItemParams = Type.Object({
   item: Type.Object({ name: Type.String(), uri: Type.String() }),
 });
-connection.onRequest(
-  "textDocument/prepareCallHierarchy",
-  (params: unknown): object[] => {
-    if (!Value.Check(textDocumentPosition, params))
-      throw new Error("Invalid prepare call hierarchy fixture request");
-    const { uri } = params.textDocument;
-    if (mode === "call-hierarchy-several")
-      return [callItem("value", uri, 0, 6), callItem("other", uri, 1, 0)];
-    return [callItem("value", uri, 0, 6)];
-  },
-);
-connection.onRequest(
-  "callHierarchy/incomingCalls",
-  (params: unknown): object[] => {
-    if (!Value.Check(callItemParams, params))
-      throw new Error("Invalid incoming calls fixture request");
-    if (mode === "call-hierarchy-bogus") return [{ bogus: 1 }];
-    const from = callItem(
-      `caller of ${params.item.name}`,
-      new URL("./caller.ts", params.item.uri).href,
-      2,
-      4,
-    );
-    return [{ from, fromRanges: [span(2, 4)] }];
-  },
-);
-connection.onRequest(
-  "callHierarchy/outgoingCalls",
-  (params: unknown): object[] => {
-    if (!Value.Check(callItemParams, params))
-      throw new Error("Invalid outgoing calls fixture request");
-    const to = callItem(
-      `callee of ${params.item.name}`,
-      new URL("./callee.ts", params.item.uri).href,
-      0,
-      0,
-    );
-    return [{ to, fromRanges: [span(1, 2)] }];
-  },
-);
+connection.onRequest("textDocument/prepareCallHierarchy", (params: unknown): object[] => {
+  if (!Value.Check(textDocumentPosition, params))
+    throw new Error("Invalid prepare call hierarchy fixture request");
+  const { uri } = params.textDocument;
+  if (mode === "call-hierarchy-several")
+    return [callItem("value", uri, 0, 6), callItem("other", uri, 1, 0)];
+  return [callItem("value", uri, 0, 6)];
+});
+connection.onRequest("callHierarchy/incomingCalls", (params: unknown): object[] => {
+  if (!Value.Check(callItemParams, params))
+    throw new Error("Invalid incoming calls fixture request");
+  if (mode === "call-hierarchy-bogus") return [{ bogus: 1 }];
+  const from = callItem(
+    `caller of ${params.item.name}`,
+    new URL("./caller.ts", params.item.uri).href,
+    2,
+    4,
+  );
+  return [{ from, fromRanges: [span(2, 4)] }];
+});
+connection.onRequest("callHierarchy/outgoingCalls", (params: unknown): object[] => {
+  if (!Value.Check(callItemParams, params))
+    throw new Error("Invalid outgoing calls fixture request");
+  const to = callItem(
+    `callee of ${params.item.name}`,
+    new URL("./callee.ts", params.item.uri).href,
+    0,
+    0,
+  );
+  return [{ to, fromRanges: [span(1, 2)] }];
+});
 // index.ts imports "./lib"; the edit names the moved module "./util" at characters 23 to 28.
-connection.onRequest(
-  "workspace/willRenameFiles",
-  (params: unknown): object | null => {
-    if (!Value.Check(renameFilesRequest, params))
-      throw new Error("Invalid willRenameFiles fixture request");
-    if (mode === "rename-file-null") return null;
-    const [moved] = params.files;
-    if (moved === undefined)
-      throw new Error("willRenameFiles fixture request has no file");
-    return {
-      changes: {
-        [new URL("./index.ts", moved.oldUri).href]: [
-          replaceAt(0, 23, 28, "./util"),
-        ],
-      },
-    };
-  },
-);
+connection.onRequest("workspace/willRenameFiles", (params: unknown): object | null => {
+  if (!Value.Check(renameFilesRequest, params))
+    throw new Error("Invalid willRenameFiles fixture request");
+  if (mode === "rename-file-null") return null;
+  const [moved] = params.files;
+  if (moved === undefined) throw new Error("willRenameFiles fixture request has no file");
+  return {
+    changes: {
+      [new URL("./index.ts", moved.oldUri).href]: [replaceAt(0, 23, 28, "./util")],
+    },
+  };
+});
 // The first action takes its title from the diagnostics the request carried; the third needs resolve.
 connection.onRequest("textDocument/codeAction", (params: unknown): object[] => {
   if (!Value.Check(codeActionRequest, params))
@@ -536,8 +468,7 @@ connection.onRequest("textDocument/codeAction", (params: unknown): object[] => {
   ];
 });
 connection.onRequest("codeAction/resolve", (params: unknown): object => {
-  if (!Value.Check(resolvableAction, params))
-    throw new Error("Invalid resolve fixture request");
+  if (!Value.Check(resolvableAction, params)) throw new Error("Invalid resolve fixture request");
   const uri = synchronized ?? "file:///fixture-unopened";
   return {
     ...params,
@@ -546,8 +477,7 @@ connection.onRequest("codeAction/resolve", (params: unknown): object => {
 });
 connection.onRequest("textDocument/definition", (params: unknown): object => {
   if (mode === "malformed-definition") return { bogus: 1 };
-  if (!Value.Check(textDocumentUri, params))
-    throw new Error("Invalid definition fixture request");
+  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid definition fixture request");
   const { uri } = params.textDocument;
   if (mode === "special-targets")
     return [
@@ -597,11 +527,7 @@ function errorLines(value: unknown): object[] {
   });
 }
 function reportedFindings(value: unknown): object[] {
-  if (
-    mode === "error-lines" ||
-    mode === "format-errors" ||
-    codeActionModes.has(mode)
-  )
+  if (mode === "error-lines" || mode === "format-errors" || codeActionModes.has(mode))
     return errorLines(value);
   const code = reportedCodes.get(mode);
   return code === undefined ? [] : [finding(code)];
@@ -639,8 +565,7 @@ const silentModes = new Set<string | undefined>([
 let synchronized: string | undefined;
 // `changed` marks didChange; dedupe-empty stays silent for it, as cli.mjs:21942 does.
 async function publishDiagnostics(value: unknown, changed: boolean) {
-  if (!Value.Check(opened, value))
-    throw new Error("Invalid didOpen fixture message");
+  if (!Value.Check(opened, value)) throw new Error("Invalid didOpen fixture message");
   const { uri, version } = value.textDocument;
   synchronized = uri;
   if (silentModes.has(mode) || (mode === "dedupe-empty" && changed)) return;
@@ -681,8 +606,7 @@ function startLateLoading() {
 }
 connection.onNotification("textDocument/didOpen", async (value: unknown) => {
   if (mode === "progress-late") startLateLoading();
-  if (syncLog && Value.Check(opened, value))
-    log(`didOpen ${value.textDocument.version}`);
+  if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
   await publishDiagnostics(value, false);
   // Like basedpyright, the fixture registers the pull method in reply to the first open.
   if (mode === "pull-late-registration")
@@ -691,8 +615,7 @@ connection.onNotification("textDocument/didOpen", async (value: unknown) => {
     });
 });
 connection.onNotification("textDocument/didChange", async (value: unknown) => {
-  if (syncLog && Value.Check(opened, value))
-    log(`didChange ${value.textDocument.version}`);
+  if (syncLog && Value.Check(opened, value)) log(`didChange ${value.textDocument.version}`);
   await publishDiagnostics(value, true);
 });
 connection.onNotification("textDocument/didClose", () => {
@@ -715,15 +638,11 @@ const pulledCodes = new Map<string | undefined, number | string>([
 ]);
 let pulls = 0;
 connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
-  if (!Value.Check(textDocumentUri, params))
-    throw new Error("Invalid pull fixture request");
+  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid pull fixture request");
   pulls += 1;
   log("pull");
   if (mode === "pull-error") throw new rpc.ResponseError(-32603, "pull failed");
-  if (
-    mode === "pull-cancel-always" ||
-    (mode === "pull-cancel-once" && pulls === 1)
-  )
+  if (mode === "pull-cancel-always" || (mode === "pull-cancel-once" && pulls === 1))
     throw new rpc.ResponseError(-32802, "server cancelled the request");
   const code = pulledCodes.get(mode);
   return { kind: "full", items: code === undefined ? [] : [finding(code)] };
@@ -767,8 +686,7 @@ const handshake = new Set([
 if (mode !== undefined && handshake.has(mode)) {
   connection.onRequest("shutdown", async () => {
     log("shutdown");
-    if (mode === "mute-shutdown" || mode === "stubborn-mute")
-      return new Promise<never>(() => {});
+    if (mode === "mute-shutdown" || mode === "stubborn-mute") return new Promise<never>(() => {});
     if (mode === "slow-shutdown") await delay(500);
     return null;
   });
