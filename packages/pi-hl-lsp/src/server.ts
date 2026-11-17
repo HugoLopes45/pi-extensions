@@ -195,6 +195,7 @@ export class LanguageServer {
   private readonly registered = new Set<string>();
   private readonly progressTokens = new Set<string | number>();
   private readonly pullListeners = new Set<() => void>();
+  private readonly refreshListeners = new Set<() => void>();
   private quiescent = true;
   private lastProgressAt = Number.NEGATIVE_INFINITY;
   private signaled = false;
@@ -305,8 +306,10 @@ export class LanguageServer {
       this.quiescent = value.quiescent;
       this.wake();
     });
-    // Pull results are requested per call, so a refresh has no cached result to drop.
-    this.connection.onRequest("workspace/diagnostic/refresh", () => null);
+    this.connection.onRequest("workspace/diagnostic/refresh", () => {
+      for (const listener of this.refreshListeners) listener();
+      return null;
+    });
     this.connection.onNotification("textDocument/publishDiagnostics", (value: unknown) => {
       if (this.stopped) return;
       try {
@@ -372,6 +375,14 @@ export class LanguageServer {
     this.pullListeners.add(listener);
     return () => {
       this.pullListeners.delete(listener);
+    };
+  }
+
+  // Runs when the server asks for pulled diagnostics again; the returned function removes the listener.
+  onDiagnosticRefresh(listener: () => void): () => void {
+    this.refreshListeners.add(listener);
+    return () => {
+      this.refreshListeners.delete(listener);
     };
   }
 

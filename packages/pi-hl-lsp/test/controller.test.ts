@@ -368,7 +368,7 @@ it("resolves a versioned publication without waiting for the settle period", asy
 
 it("answers from a pull the server offers, without waiting for a push", async () => {
   const { instance, file, spawnLog } = await controller("pull-static", true, true, {
-    timeoutMs: 1000,
+    timeoutMs: 3000,
   });
   expect(await instance.query("diagnostics", file)).toMatchObject({
     outcome: "completed",
@@ -380,7 +380,7 @@ it("answers from a pull the server offers, without waiting for a push", async ()
 
 it("pulls once the server registers the pull method after initialization", async () => {
   const { instance, file, spawnLog } = await controller("pull-dynamic", true, true, {
-    timeoutMs: 1000,
+    timeoutMs: 3000,
   });
   await instance.query("hover", file, { line: 1, column: 7 });
   expect(await instance.query("diagnostics", file)).toMatchObject({
@@ -392,7 +392,7 @@ it("pulls once the server registers the pull method after initialization", async
 
 it("pulls when the server registers the pull method in reply to the first open", async () => {
   const { instance, file, spawnLog } = await controller("pull-late-registration", true, true, {
-    timeoutMs: 1000,
+    timeoutMs: 3000,
   });
   expect(await instance.query("diagnostics", file)).toMatchObject({
     evidence: "revision_correlated",
@@ -401,9 +401,43 @@ it("pulls when the server registers the pull method in reply to the first open",
   expect(await events(spawnLog)).toEqual(["pull"]);
 });
 
+it("keeps an empty pull provisional, so a push inside the quiet window is reported", async () => {
+  const { instance, file, spawnLog } = await controller("pull-empty-then-push", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: 2322 }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("pulls again when the server asks for a refresh after an empty pull", async () => {
+  const { instance, file, spawnLog } = await controller("pull-empty-then-refresh", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("reports a clean file from a pull-only server after the quiet window", async () => {
+  const { instance, file, spawnLog } = await controller("pull-clean", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    reportedCount: 0,
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
 it("lists the pulled item and the pushed item for the same version", async () => {
   const { instance, file } = await controller("pull-and-push", true, true, {
-    timeoutMs: 1000,
+    timeoutMs: 3000,
   });
   expect(await instance.query("diagnostics", file)).toMatchObject({
     evidence: "revision_correlated",
@@ -414,7 +448,7 @@ it("lists the pulled item and the pushed item for the same version", async () =>
 
 it("lists an item that the pull and the push both return once", async () => {
   const { instance, file } = await controller("pull-duplicate", true, true, {
-    timeoutMs: 1000,
+    timeoutMs: 3000,
   });
   expect(await instance.query("diagnostics", file)).toMatchObject({
     evidence: "revision_correlated",
@@ -436,7 +470,7 @@ it("falls back to the push path when a pull fails with an error other than cance
 
 it("retries a pull the server cancels, once", async () => {
   const { instance, file, spawnLog } = await controller("pull-cancel-once", true, true, {
-    timeoutMs: 1000,
+    timeoutMs: 3000,
   });
   expect(await instance.query("diagnostics", file)).toMatchObject({
     evidence: "revision_correlated",

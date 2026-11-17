@@ -572,8 +572,18 @@ const silentModes = new Set<string | undefined>([
   "pull-static",
   "pull-dynamic",
   "pull-late-registration",
+  "pull-empty-then-push",
+  "pull-empty-then-refresh",
+  "pull-clean",
   "pull-cancel-once",
   "code-actions-silent",
+]);
+// Modes that register the pull method in reply to the first open, as basedpyright does.
+const lateRegistrationModes = new Set<string | undefined>([
+  "pull-late-registration",
+  "pull-empty-then-push",
+  "pull-empty-then-refresh",
+  "pull-clean",
 ]);
 // The most recently synchronized document, which workspace symbols answer with.
 let synchronized: string | undefined;
@@ -623,8 +633,22 @@ connection.onNotification("textDocument/didOpen", async (value: unknown) => {
   if (mode === "progress-late") startLateLoading();
   if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
   await publishDiagnostics(value, false);
+  if (mode === "pull-empty-then-push" && Value.Check(opened, value)) {
+    const { uri, version } = value.textDocument;
+    setTimeout(() => {
+      void connection.sendNotification("textDocument/publishDiagnostics", {
+        uri,
+        version,
+        diagnostics: [finding(2322)],
+      });
+    }, 300);
+  }
+  if (mode === "pull-empty-then-refresh")
+    setTimeout(() => {
+      void connection.sendRequest("workspace/diagnostic/refresh");
+    }, 300);
   // Like basedpyright, the fixture registers the pull method in reply to the first open.
-  if (mode === "pull-late-registration")
+  if (lateRegistrationModes.has(mode))
     await connection.sendRequest("client/registerCapability", {
       registrations: [pullRegistration],
     });
@@ -650,6 +674,7 @@ const pulledCodes = new Map<string | undefined, number | string>([
   ["pull-cancel-once", "E0308"],
   ["pull-and-push", "E0308"],
   ["pull-duplicate", 2322],
+  ["pull-empty-then-refresh", "E0308"],
 ]);
 let pulls = 0;
 connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
@@ -659,6 +684,7 @@ connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
   if (mode === "pull-error") throw new rpc.ResponseError(-32603, "pull failed");
   if (mode === "pull-cancel-always" || (mode === "pull-cancel-once" && pulls === 1))
     throw new rpc.ResponseError(-32802, "server cancelled the request");
+  if (mode === "pull-empty-then-refresh" && pulls === 1) return { kind: "full", items: [] };
   const code = pulledCodes.get(mode);
   return { kind: "full", items: code === undefined ? [] : [finding(code)] };
 });

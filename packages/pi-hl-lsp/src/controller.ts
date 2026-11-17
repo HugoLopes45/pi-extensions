@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { errorText } from "pi-hl-utils/errors";
@@ -322,6 +323,29 @@ async function pulledObservation(
   return document.observation ? unionObservation(pulled, document.observation) : pulled;
 }
 
+// A pull is provisional: the server may still be analyzing. For one quiet window a push joins
+// the answer, and a refresh request makes the client pull once more.
+async function provisionalPull(
+  client: LanguageServer,
+  document: Document,
+  signal: AbortSignal,
+): Promise<Observation | undefined> {
+  const refreshed = Promise.withResolvers<true>();
+  const stop = client.onDiagnosticRefresh(() => refreshed.resolve(true));
+  try {
+    const first = await pulledObservation(client, document, signal);
+    if (first === undefined) return undefined;
+    const quiet = delay(QUIET_MS, false, { signal }).catch(() => {
+      throw abortReason(signal, "No settled diagnostics before the timeout");
+    });
+    if (await Promise.race([refreshed.promise, quiet]))
+      return pulledObservation(client, document, signal);
+    return document.observation ? unionObservation(first, document.observation) : first;
+  } finally {
+    stop();
+  }
+}
+
 // Some servers register the pull method in reply to the first open, after this call has read
 // pullDiagnostics, so a push wait also starts a pull when that registration arrives.
 async function diagnosticsObservation(
@@ -331,12 +355,12 @@ async function diagnosticsObservation(
 ): Promise<Observation> {
   const { client } = instance;
   if (client.pullDiagnostics)
-    return (await pulledObservation(client, document, signal)) ?? diagnostics(document, signal);
+    return (await provisionalPull(client, document, signal)) ?? diagnostics(document, signal);
   const pulled = Promise.withResolvers<Observation | undefined>();
   const pushWait = new AbortController();
   const push = diagnostics(document, AbortSignal.any([signal, pushWait.signal]));
   const stop = client.onPullRegistration(() =>
-    pulled.resolve(pulledObservation(client, document, signal)),
+    pulled.resolve(provisionalPull(client, document, signal)),
   );
   try {
     return await Promise.race([push, pulled.promise.then((answer) => answer ?? push)]);
