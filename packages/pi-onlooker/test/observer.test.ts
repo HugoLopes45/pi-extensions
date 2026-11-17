@@ -462,7 +462,8 @@ it("pauses when a Review omits its terminating report", async () => {
   });
 });
 
-it("pauses on the independent review deadline without cancelling the observed agent", async () => {
+it("pauses after three Review deadlines in a row without cancelling the observed agent", async () => {
+  let reviews = 0;
   globalThis.onlookerObserverTest = {
     stream(model, context, options) {
       const stream = createAssistantMessageEventStream();
@@ -473,6 +474,7 @@ it("pauses on the independent review deadline without cancelling the observed ag
         api: model.api,
       };
       if (context.tools?.some((tool) => tool.name === "onlooker_report")) {
+        reviews++;
         options?.signal?.addEventListener(
           "abort",
           () => {
@@ -502,8 +504,11 @@ it("pauses on the independent review deadline without cancelling the observed ag
   globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
   onTestFinished(() => observer.dispose());
   await session.prompt("Finish normally");
+  await session.prompt("Finish again");
+  await session.prompt("Finish once more");
   expect(observer.status.state).toBe("paused");
   expect(observer.status.lastError).toMatch(/deadline/i);
+  expect(reviews).toBe(3);
   expect(session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
 });
 

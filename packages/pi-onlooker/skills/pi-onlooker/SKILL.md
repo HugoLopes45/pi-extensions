@@ -29,14 +29,14 @@ Rules:
 | error `Onlooker project settings require a trusted project` | Project settings need a trusted project.                  | Trust the project, or use `--global`.                                                 |
 | paused, with an error                                       | A Review or `onlooker_ask` failed.                        | Fix the named cause, then `/onlooker on`.                                             |
 | error `Onlooker model is unavailable`                       | `model` names a model with no credentials or no entry.    | `/onlooker set model "provider/model-id" --global`, then `/onlooker on`.              |
-| error `Onlooker review deadline exceeded`                   | A Review took more than 120 s.                            | Faster `model` or lower `thinkingLevel`. Then `/onlooker on`.                         |
+| error `Onlooker review deadline exceeded`                   | 3 Reviews in a row took more than 120 s.                  | Faster `model` or lower `thinkingLevel`. Then `/onlooker on`.                         |
 | `N findings without valid evidence dropped`                 | The finding cited no `ref` or quote, or an unknown `ref`. | If frequent, use a stronger `model`.                                                  |
 | `N Reviews ended by invalid reports`                        | The model sent 2 invalid `onlooker_report` calls.         | If frequent, use a stronger `model`.                                                  |
 | high cost                                                   | Each Review re-reads the Onlooker history.                | In this order: `reviewEvery` `"request"`, a cheaper `model`, a lower `thinkingLevel`. |
 
 Other symptoms:
 
-- **No Review.** `reviewEvery` `"turn"` skips a turn that only reads. `N` and `"request"` wait for their cadence point. A failed tool call always starts a Review.
+- **No Review.** `reviewEvery` `"turn"` skips a turn that only reads. `N` and `"request"` wait for their cadence point. A failed tool call always starts a Review. A Review past its 120 s deadline leaves its turns to the next Review.
 - **`onlooker_ask` missing.** The tool exists only while `enabled` is true. While paused, it returns the pause reason.
 - **A finding ignores long tool output.** Results longer than 4,000 characters keep their start and end; the Onlooker can `read` the full result in the session file.
 
