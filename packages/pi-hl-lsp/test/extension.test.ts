@@ -937,6 +937,15 @@ it("lists code actions with their kind, preferred marker and whether an edit is 
   });
 });
 
+it("lists code actions when the server never publishes diagnostics", async () => {
+  const state = await session(true, "code-actions-silent");
+  expect(await listCodeActions(state)).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [{ text: stringMatching(/1\. \[quickfix\] Fix 0 diagnostics/u) }],
+  });
+});
+
 it("sends the cached diagnostics that overlap the requested line", async () => {
   const state = await session(true, "code-actions");
   await writeFile(join(state.cwd, "index.ts"), "const value = ERROR;\n");

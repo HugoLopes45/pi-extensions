@@ -1033,6 +1033,8 @@ export class LspController {
 
   // Lists the code actions at a position, with the cached diagnostics that overlap its range as context.
   private async listedActions(file: string, target: NavigationTarget, deadline: AbortSignal) {
+    // Readiness and diagnostics share half the call timeout, counted from the start of the listing.
+    const budget = AbortSignal.timeout(this.settings.timeoutMs / 2);
     const route = await resolveRoute(file, this.cwd);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
@@ -1056,14 +1058,22 @@ export class LspController {
       supportsChange(capabilities),
     );
     await instance.client.settled(deadline, this.settings.timeoutMs / 2);
-    const observation = await diagnosticsObservation(instance, document, deadline);
+    const observation = await diagnosticsObservation(
+      instance,
+      document,
+      AbortSignal.any([deadline, budget]),
+    ).catch((error: unknown) => {
+      deadline.throwIfAborted();
+      if (!budget.aborted) throw error;
+      return document.observation;
+    });
     const response = await instance.client.request(
       "textDocument/codeAction",
       {
         textDocument: { uri: document.uri },
         range,
         context: {
-          diagnostics: contextDiagnostics(observation.diagnostics, range),
+          diagnostics: contextDiagnostics(observation?.diagnostics ?? [], range),
         },
       },
       deadline,

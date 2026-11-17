@@ -146,7 +146,11 @@ const renameModes = new Set<string | undefined>([
 ]);
 const formattingModes = new Set<string | undefined>(["format", "format-race", "format-errors"]);
 const renameFileModes = new Set<string | undefined>(["rename-file", "rename-file-null"]);
-const codeActionModes = new Set<string | undefined>(["code-actions", "code-actions-outside"]);
+const codeActionModes = new Set<string | undefined>([
+  "code-actions",
+  "code-actions-outside",
+  "code-actions-silent",
+]);
 const codeActionRequest = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
   context: Type.Object({ diagnostics: Type.Array(Type.Unknown()) }),
@@ -560,6 +564,7 @@ const silentModes = new Set<string | undefined>([
   "pull-dynamic",
   "pull-late-registration",
   "pull-cancel-once",
+  "code-actions-silent",
 ]);
 // The most recently synchronized document, which workspace symbols answer with.
 let synchronized: string | undefined;
