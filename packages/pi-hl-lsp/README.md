@@ -98,4 +98,4 @@ Global resource bounds and real-agent effectiveness remain unverified. No live a
 
 ## Conventions
 
-The package reuses public Pi APIs and `vscode-jsonrpc` framing. It has no separate extension host, watcher, scheduler, or mutation engine.
+The package reuses public Pi APIs and `vscode-jsonrpc` framing. Settings writes are the exception: they go through Pi's private settings storage via `pi-hl-utils`. It has no separate extension host, watcher, scheduler, or mutation engine.

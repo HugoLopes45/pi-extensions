@@ -268,25 +268,26 @@ export class LanguageServer {
     this.signal("SIGTERM");
     const deadline = performance.now() + 2000;
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
-    while (this.signal(0) && performance.now() < deadline) await delay(50);
-    this.signal("SIGKILL");
-    // SIGKILL can be refused (EPERM) or stall, and dispose must still settle.
-    await Promise.race([this.exited, delay(500)]);
+    while (this.signal(0) !== "gone" && performance.now() < deadline) await delay(50);
+    const killed = this.signal("SIGKILL");
+    // SIGKILL can be refused or stall; dispose still settles and reports the leftover group.
+    const exited = await Promise.race([this.exited.then(() => true), delay(500, false)]);
+    if (killed === "refused" || !exited) this.onClose(new Error("LSP process group did not stop"));
   }
 
-  /** Signals the server's process group on POSIX; returns whether it still exists. */
-  private signal(signal: NodeJS.Signals | 0): boolean {
+  /** Signals the server's process group on POSIX. */
+  private signal(signal: NodeJS.Signals | 0): "sent" | "gone" | "refused" {
     const pid = this.child.pid;
-    if (process.platform === "win32" || pid === undefined) return this.child.kill(signal);
+    if (process.platform === "win32" || pid === undefined)
+      return this.child.kill(signal) ? "sent" : "gone";
     try {
       process.kill(-pid, signal);
-      return true;
+      return "sent";
     } catch (error) {
-      if (!(error instanceof Error && "code" in error)) throw error;
-      // EPERM: a member exists but cannot be signalled, so the deadline stays.
-      if (error.code === "EPERM") return true;
-      if (error.code === "ESRCH") return false;
-      throw error;
+      // Only ESRCH proves the group is gone; EPERM from a setuid member means it remains.
+      return error instanceof Error && "code" in error && error.code === "ESRCH"
+        ? "gone"
+        : "refused";
     }
   }
 }

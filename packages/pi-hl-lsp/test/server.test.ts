@@ -136,22 +136,33 @@ it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () 
 });
 
 it.skipIf(process.platform === "win32").each([
-  ["grandchild", 1000],
-  ["stubborn-grandchild", 2500],
-])("stops the server's descendants before dispose resolves (%s)", async (mode, limit) => {
-  const client = await server(mode, 5000);
-  await client.initialize();
-  const reply = await client.request("textDocument/hover", {});
-  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
-    throw new Error("Fixture did not report its child pid");
-  const { pid } = reply;
-  if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
-  const started = performance.now();
-  await client.dispose();
-  expect(performance.now() - started).toBeLessThan(limit);
-  await delay(1000);
-  expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
-});
+  ["grandchild", 1000, ["SIGTERM"]],
+  ["stubborn-grandchild", 2500, ["SIGTERM", "SIGKILL"]],
+])(
+  "signals the server's process group before dispose resolves (%s)",
+  async (mode, limit, signals) => {
+    const client = await server(mode, 5000);
+    await client.initialize();
+    const reply = await client.request("textDocument/hover", {});
+    if (!(typeof reply === "object" && reply !== null && "group" in reply))
+      throw new Error("Fixture did not report its process group");
+    const { group } = reply;
+    const kill = vi.spyOn(process, "kill");
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const started = performance.now();
+    await client.dispose();
+    expect(performance.now() - started).toBeLessThan(limit);
+    const sent = kill.mock.calls
+      .filter(
+        ([target], index) =>
+          target === -Number(group) && kill.mock.results[index]?.type === "return",
+      )
+      .map(([, signal]) => signal);
+    for (const signal of signals) expect(sent).toContain(signal);
+  },
+);
 
 it.skipIf(process.platform === "win32")(
   "escalates on time when the wall clock moves back",
@@ -168,31 +179,38 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-it.skipIf(process.platform === "win32")(
-  "resolves dispose when SIGKILL does not stop the server",
-  async () => {
-    const client = await server("stubborn-server", 5000);
-    await client.initialize();
-    const reply = await client.request("textDocument/hover", {});
-    if (!(typeof reply === "object" && reply !== null && "pid" in reply))
-      throw new Error("Fixture did not report its pid");
-    const { pid } = reply;
-    if (typeof pid !== "number") throw new Error("Fixture pid is not a number");
-    const kill = process.kill.bind(process);
-    vi.spyOn(process, "kill").mockImplementation((target, signal) =>
-      signal === "SIGKILL" ? true : kill(target, signal),
-    );
-    onTestFinished(() => {
-      vi.restoreAllMocks();
-      process.kill(pid, "SIGKILL");
-    });
-    const outcome = await Promise.race([
-      client.dispose().then(() => "disposed"),
-      delay(3000, "waiting"),
-    ]);
-    expect(outcome).toBe("disposed");
-  },
-);
+it.skipIf(process.platform === "win32").each([
+  ["stalls", (): true => true],
+  [
+    "is refused",
+    (): true => {
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    },
+  ],
+])("reports once, without rejecting, when SIGKILL %s", async (_case, sigkill) => {
+  const errors: Error[] = [];
+  const client = await server("stubborn-server", 5000, undefined, (error) => errors.push(error));
+  await client.initialize();
+  const reply = await client.request("textDocument/hover", {});
+  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+    throw new Error("Fixture did not report its pid");
+  const { pid } = reply;
+  if (typeof pid !== "number") throw new Error("Fixture pid is not a number");
+  const kill = process.kill.bind(process);
+  vi.spyOn(process, "kill").mockImplementation((target, signal) =>
+    signal === "SIGKILL" ? sigkill() : kill(target, signal),
+  );
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+    process.kill(pid, "SIGKILL");
+  });
+  const outcome = await Promise.race([
+    client.dispose().then(() => "disposed"),
+    delay(3000, "waiting"),
+  ]);
+  expect(outcome).toBe("disposed");
+  expect(errors.filter((error) => /did not stop/u.test(error.message))).toHaveLength(1);
+});
 
 it("decodes frames split into single bytes", async () => {
   const client = await server("fragmented", 5000);
