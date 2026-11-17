@@ -299,13 +299,14 @@ export class LanguageServer {
     this.child.stderr.destroy();
     this.signal("SIGTERM");
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
-    // Doubling probes see a quick exit within milliseconds yet cost few wakeups when the group
-    // lingers; a wait that ended early does not count as elapsed.
+    // Probes double from 1 ms up to 8 ms, the nominal longest wait; a late timer can extend it.
+    // Over the 2 s deadline a lingering group costs about 250 wakeups; a wait that ended early
+    // does not count as elapsed.
     let wait = 1;
     while (this.signal(0) !== "gone" && performance.now() < killAt) {
       const started = performance.now();
       await delay(wait);
-      if (performance.now() - started >= wait) wait = Math.min(wait * 2, 50);
+      if (performance.now() - started >= wait) wait = Math.min(wait * 2, 8);
     }
     // A sent SIGKILL is enforced by the kernel; a refused one leaves the group alive.
     if (this.signal("SIGKILL") === "refused" && !(await this.reaped(deadline)))
