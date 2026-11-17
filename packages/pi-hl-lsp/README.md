@@ -14,6 +14,16 @@ Natural model requests can receive one transient summary of the latest revision-
 
 Files synchronize on explicit semantic requests. Edits do not trigger background analysis. The extension does not apply server edits or execute server-requested commands.
 
+## Output
+
+Each result starts with a header: `hl-lsp <operation> <file>: <outcome>`. The file is relative to the session cwd when it is inside that directory, otherwise absolute.
+
+Locations print as `path:line:col`, 1-based, followed by two spaces and the trimmed source line. Source lines appear only for readable files inside the session cwd.
+
+Outcomes other than `completed` and `partial` set `isError: true`.
+
+Output is capped. Hover is limited to 8 KiB and 100 lines. Other bodies are limited to 16 KiB and 250 lines. Output lists at most 50 locations after de-duplication, 200 symbol lines and 20 diagnostics. Omitted items end with `... N more`.
+
 ## Configuration
 
 The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `allowProjectExecution`, and `timeoutMs` are global-only. Trusted project settings and session overrides may change `enabled` and `name`. Untrusted project settings are ignored.
@@ -82,7 +92,7 @@ Session overrides cannot approve executables or bypass project trust. All writes
 - Each file snapshot is limited to 1 MiB. Each session keeps at most eight server/root pairs running. A ninth pair stops the least recently used one first; a request still running on the stopped server fails with "LSP instance is closed".
 - Incoming server data that is not yet handled is limited to 8 MiB per instance. Bytes are released when the connection takes their message off its queue. Total traffic over a session is not limited.
 - Explicit output includes at most 20 diagnostics, with bounded messages and omission counts. Only numeric diagnostic codes are retained.
-- Navigation text is limited to 8 KiB and reports truncation. It remains untrusted server data.
+- Output is bounded as described under Output. It remains untrusted server data.
 - Transport requests and notification writes have cancellation deadlines. A request timeout, a cancel or an LSP error response leaves the server running. Server start has its own 60-second budget; a request that arrives while the server is still starting fails with "LSP server is still starting; retry the request", and the start continues.
 - On POSIX, each server runs in its own process group. Disposal first sends `shutdown` and then `exit` to a healthy initialized server. It then sends SIGTERM to the group, and SIGKILL if a member remains two seconds after disposal started. If SIGKILL is refused, disposal fails with "LSP process group did not stop". A descendant that leaves the group, for example by starting a new session, is not stopped. On Windows, only the server process is stopped, and process cleanup is not certified.
 - Executable identity binding, CPU limits, and resident-memory limits are not certified.

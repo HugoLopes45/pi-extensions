@@ -106,7 +106,8 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
         noThemes: true,
         noContextFiles: true,
         additionalExtensionPaths: [fileURLToPath(new URL("../dist/index.js", import.meta.url))],
-        systemPromptOverride: () => "Offline extension test.",
+        // Undefined keeps Pi's default prompt, which lists tools that have a promptSnippet.
+        systemPromptOverride: () => undefined,
       });
       await resourceLoader.reload();
       expect(resourceLoader.getExtensions().errors).toEqual([]);
@@ -487,6 +488,49 @@ it("keeps a bounded leading part of an oversized single-line error reason", asyn
       reason: stringMatching(/^z{100}/u),
     },
   });
+});
+
+it("shows the header path relative to the session cwd when the file is inside it", async () => {
+  const state = await session(true);
+  expect(
+    await tool(state, "hl_lsp_hover", {
+      file: join(state.cwd, "index.ts"),
+      line: 0,
+      character: 6,
+    }),
+  ).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: stringMatching(/^hl-lsp hover index\.ts: completed\n/u),
+      },
+    ],
+  });
+});
+
+it("shows the header path absolute when the file is outside the session cwd", async () => {
+  const state = await session(true);
+  const outside = join(state.cwd, "..", "outside.ts");
+  expect(
+    await tool(state, "hl_lsp_hover", {
+      file: outside,
+      line: 0,
+      character: 6,
+    }),
+  ).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: `hl-lsp hover ${outside}: unavailable\nFile does not exist`,
+      },
+    ],
+  });
+});
+
+it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {
+  const { runtime } = await session(true);
+  for (const name of ["hover", "definition", "references", "symbols", "diagnostics"])
+    expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- hl_lsp_${name}: .+$`, "mu"));
 });
 
 it("keeps fifty edited revisions out of persistent diagnostic context", async () => {
