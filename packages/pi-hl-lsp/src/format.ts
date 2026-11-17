@@ -5,7 +5,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import type { Observation } from "./diagnostics.js";
-import { bounded } from "./text.js";
+import { bounded, isIdentifierCharacter } from "./text.js";
 
 type Formatted = { text: string; truncated: boolean };
 export type LineReader = (file: string) => Promise<string[] | undefined>;
@@ -391,8 +391,20 @@ function namedPlace(
   cwd: string,
   sources: Map<string, string[] | undefined>,
 ): Place {
-  const character = sourceLine(place, cwd, sources)?.indexOf(name, place.character) ?? -1;
+  const character = wholeName(sourceLine(place, cwd, sources), name, place.character);
   return character < 0 ? place : { ...place, character };
+}
+
+// The name must not be part of a longer identifier, so `port` skips `portal`.
+function wholeName(line: string | undefined, name: string, from: number): number {
+  if (line === undefined || name.length === 0) return -1;
+  for (let index = line.indexOf(name, from); index !== -1; index = line.indexOf(name, index + 1))
+    if (
+      !isIdentifierCharacter(line[index - 1]) &&
+      !isIdentifierCharacter(line[index + name.length])
+    )
+      return index;
+  return -1;
 }
 
 function uriPath(uri: string, cwd: string): string {

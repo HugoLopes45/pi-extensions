@@ -32,7 +32,7 @@ import {
   type ServerConfig,
   type ServerFamily,
 } from "./settings.js";
-import { bounded } from "./text.js";
+import { bounded, isIdentifierCharacter } from "./text.js";
 
 export type Operation =
   | "hover"
@@ -122,11 +122,6 @@ async function snapshot(file: string, signal: AbortSignal): Promise<string> {
 }
 
 const lineBreak = /\r\n|\r|\n/u;
-const identifierCharacter = /[A-Za-z0-9_$]/u;
-
-function isIdentifierCharacter(character: string | undefined): boolean {
-  return character !== undefined && identifierCharacter.test(character);
-}
 
 function symbolCharacter(line: string, symbol: string): number {
   if (symbol.length === 0) throw new Error("Symbol must not be empty");

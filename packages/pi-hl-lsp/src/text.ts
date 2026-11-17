@@ -1,6 +1,11 @@
 import { truncateHead } from "@earendil-works/pi-coding-agent";
 
 const marker = "... [truncated]";
+const identifierCharacter = /[A-Za-z0-9_$]/u;
+
+export function isIdentifierCharacter(character: string | undefined): boolean {
+  return character !== undefined && identifierCharacter.test(character);
+}
 
 // truncateHead returns empty content when its first line exceeds maxBytes, so cap each line first.
 export function bounded(

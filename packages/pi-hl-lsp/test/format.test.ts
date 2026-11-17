@@ -368,6 +368,27 @@ it("keeps the server position when the name occurs only before the range start",
   });
 });
 
+it("matches the workspace symbol name only as a whole identifier", async () => {
+  const portLines = ["const portal = 1; export function port(value: number) {}"];
+  const readPortLines: LineReader = async (file) =>
+    file === "/repo/src/b.ts" ? portLines : undefined;
+  const result = await formatWorkspaceSymbols(
+    [
+      {
+        name: "port",
+        kind: 12,
+        location: location("file:///repo/src/b.ts", 0, 0),
+      },
+    ],
+    cwd,
+    readPortLines,
+  );
+  expect(result).toEqual({
+    text: "function port  src/b.ts:1:35  const portal = 1; export function port(value: number) {}",
+    truncated: false,
+  });
+});
+
 it("prints a workspace symbol without a range as its path", async () => {
   const result = await formatWorkspaceSymbols(
     [{ name: "Server", kind: 5, location: { uri: "file:///repo/src/a.ts" } }],
