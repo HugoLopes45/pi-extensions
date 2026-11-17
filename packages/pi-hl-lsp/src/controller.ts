@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-import { truncateHead } from "@earendil-works/pi-coding-agent";
+import { truncateHead, truncateLine } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
@@ -110,13 +110,18 @@ async function readResponse(
   );
   const serialized = JSON.stringify(response);
   if (serialized === undefined) throw new Error("Invalid LSP response");
-  const bounded = truncateHead(serialized, { maxBytes: 8192, maxLines: 100 });
+  // truncateHead drops a first line longer than the budget, so cap each line first.
+  const lines = serialized.split("\n").map((line) => truncateLine(line, 1000));
+  const bounded = truncateHead(lines.map((line) => line.text).join("\n"), {
+    maxBytes: 8192,
+    maxLines: 100,
+  });
   return {
     outcome: "completed",
     source: "untrusted_lsp",
     format: "lsp-json",
     response: bounded.content,
-    truncated: bounded.truncated,
+    truncated: bounded.truncated || lines.some((line) => line.wasTruncated),
   };
 }
 

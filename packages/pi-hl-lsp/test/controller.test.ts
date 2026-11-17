@@ -67,6 +67,15 @@ it("routes, synchronizes, and returns bounded read-only hover output", async () 
   });
 });
 
+it("keeps a bounded leading part of an oversized single-line response", async () => {
+  const { instance, file } = await controller("chatty");
+  const result = await instance.query("hover", file, { line: 0, character: 6 });
+  expect(result).toMatchObject({ outcome: "completed", truncated: true });
+  const response = "response" in result ? result.response : undefined;
+  expect(response).toMatch(/^\{"contents":"x{500}/u);
+  expect(Buffer.byteLength(String(response))).toBeLessThanOrEqual(8192);
+});
+
 it("reports unversioned empty diagnostics as partial and omits automatic certification", async () => {
   const { instance, file } = await controller();
   expect(await instance.query("diagnostics", file)).toMatchObject({
