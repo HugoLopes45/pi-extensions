@@ -11,40 +11,41 @@
   "license": "MIT",
   "author": "HugoLopes45",
   "files": [
-    "src",
+    "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
   ],
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit && vitest --run"
-  },
-  "dependencies": {
-    "pi-hl-utils": "workspace:*",
-    "vscode-jsonrpc": "10.0.0"
+    "build": "rolldown -c rolldown.config.mjs",
+    "prepack": "rolldown -c rolldown.config.mjs",
+    "check": "rolldown -c rolldown.config.mjs && tsc --noEmit && vitest --run"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "^1.5.2",
     "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@earendil-works/pi-tui": "^1.5.2",
     "@types/node": "^26.6.6",
+    "pi-hl-utils": "workspace:*",
+    "rolldown": "1.2.19",
     "typebox": "^1.4.3",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "vscode-jsonrpc": "10.0.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
-  "bundledDependencies": [
-    "pi-hl-utils"
-  ],
   "engines": {
     "node": ">=22.19.0",
     "pi": ">=1.5.2"
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ]
   }
 }

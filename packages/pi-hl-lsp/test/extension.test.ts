@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -22,6 +24,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { stringMatching } from "pi-hl-utils/testing/matchers";
 import { createMenuTui, keys, menuDriver } from "pi-hl-utils/testing/menu-ui";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { expect, it, onTestFinished } from "vitest";
 
 import { directory } from "./fixtures.js";
@@ -101,7 +105,7 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        additionalExtensionPaths: [fileURLToPath(new URL("../src/index.ts", import.meta.url))],
+        additionalExtensionPaths: [fileURLToPath(new URL("../dist/index.js", import.meta.url))],
         systemPromptOverride: () => "Offline extension test.",
       });
       await resourceLoader.reload();
@@ -636,4 +640,34 @@ it("keeps a valid session enable blocked without global project-execution consen
   await expect(readFile(spawnLog, "utf8")).rejects.toMatchObject({
     code: "ENOENT",
   });
+});
+
+const packageDirectory = fileURLToPath(new URL("..", import.meta.url));
+const packResult = Type.Array(
+  Type.Object({ files: Type.Array(Type.Object({ path: Type.String() })) }),
+);
+
+it("packs the compiled entry, its chunks and the notices without sources", () => {
+  const output: unknown = JSON.parse(
+    execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+      cwd: packageDirectory,
+      encoding: "utf8",
+    }),
+  );
+  if (!Value.Check(packResult, output)) throw new Error("Unexpected npm pack output");
+  const files = output.flatMap((pack) => pack.files.map((file) => file.path));
+  expect(files).toEqual(expect.arrayContaining(["dist/index.js", "THIRD_PARTY_NOTICES"]));
+  expect(files.filter((path) => path.startsWith("dist/")).length).toBeGreaterThan(1);
+  expect(files.filter((path) => path.startsWith("src/"))).toEqual([]);
+});
+
+it("ships the full license and notices of the bundled vscode-jsonrpc", async () => {
+  const jsonrpc = join(
+    dirname(createRequire(import.meta.url).resolve("vscode-jsonrpc/node")),
+    "..",
+    "..",
+  );
+  const notices = await readFile(join(packageDirectory, "THIRD_PARTY_NOTICES"), "utf8");
+  for (const name of ["License.txt", "thirdpartynotices.txt"])
+    expect(notices).toContain((await readFile(join(jsonrpc, name), "utf8")).trim());
 });
