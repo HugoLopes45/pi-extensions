@@ -74,6 +74,18 @@ const replies = new Map<
   ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
   ["stubborn-server", () => ({ pid: process.pid })],
   [
+    "lingering-child",
+    async () => {
+      // Ignores SIGTERM and leaves 5 ms after its parent exits, closing its stdin.
+      const child = spawn(process.execPath, [
+        "-e",
+        "process.on('SIGTERM', () => {}); process.stdin.on('end', () => setTimeout(() => process.exit(0), 5)); process.stdin.resume(); console.log('ready');",
+      ]);
+      await once(child.stdout, "data");
+      return {};
+    },
+  ],
+  [
     "grandchild",
     () => {
       spawn("sleep", ["60"]);
@@ -177,6 +189,7 @@ connection.onNotification("test/fail", async () => {
 });
 const handshake = new Set([
   "handshake",
+  "lingering-child",
   "mute-shutdown",
   "slow-shutdown",
   "stubborn-mute",
