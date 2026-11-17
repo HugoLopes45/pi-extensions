@@ -18,6 +18,12 @@ Files synchronize on explicit semantic requests. Edits do not trigger background
 
 The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `allowProjectExecution`, and `timeoutMs` are global-only. Trusted project settings and session overrides may change `enabled` and `name`. Untrusted project settings are ignored.
 
+LSP runs only when all three conditions hold. A refusal names each failed condition and its fix.
+
+- LSP is on: run `/hl-lsp on`.
+- The project is trusted: run `/trust`.
+- Project execution is allowed: run `/hl-lsp set allowProjectExecution true --global`.
+
 Example global settings fragment:
 
 ```json
@@ -38,6 +44,10 @@ Example global settings fragment:
 ```
 
 Commands must be absolute paths. Supported server keys are `typescript`, `python`, and `rust`. No server is downloaded or selected automatically.
+
+`set servers` replaces the whole `servers` map, so include every server in the same JSON value.
+
+Servers receive only `HOME` and `PATH` from the environment.
 
 `allowProjectExecution` acknowledges that an approved server may execute project-controlled code. Project trust is also required. This is not a sandbox.
 
@@ -86,7 +96,7 @@ pnpm --filter pi-hl-lsp run check
 pnpm check
 ```
 
-The package check runs strict type checks and tests. The root check runs formatting and lint. Cyclomatic complexity is limited to 10.
+The package check builds `dist`, runs strict type checks, and then runs tests. The root check runs formatting and lint. Cyclomatic complexity is limited to 10.
 
 Tests use temporary homes, controlled stdio servers, public Pi SDK lifecycle APIs, in-memory model services, and a faux provider. They make no external model calls.
 

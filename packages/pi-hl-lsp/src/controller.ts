@@ -223,6 +223,12 @@ export class LspController {
       enabled: this.settings.enabled,
       trusted: this.trusted,
       projectExecutionAllowed: this.settings.allowProjectExecution,
+      timeoutMs: this.settings.timeoutMs,
+      servers: Object.fromEntries(
+        Object.entries(this.settings.servers).flatMap(([family, server]) =>
+          server ? [[family, server.command]] : [],
+        ),
+      ),
       instances: [...this.instances.values()].map(({ root, server, generation, client }) => ({
         root,
         server,

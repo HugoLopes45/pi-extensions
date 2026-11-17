@@ -1,7 +1,11 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { SettingsManager, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "vitest";
 
 import { lspSettings, readSettings as readLayeredSettings } from "../src/settings.js";
+import { directory } from "./fixtures.js";
 
 function readSettings(global: unknown, project: unknown, trusted: boolean) {
   const settingsManager = SettingsManager.fromStorage(
@@ -17,6 +21,55 @@ function readSettings(global: unknown, project: unknown, trusted: boolean) {
     sessionManager: { getBranch: () => [] },
   }).settings;
 }
+
+function readFromDisk(cwd: string, agentDir: string) {
+  return readLayeredSettings({
+    settingsManager: SettingsManager.create(cwd, agentDir, {
+      projectTrusted: true,
+    }),
+    sessionManager: { getBranch: () => [] },
+  }).settings;
+}
+
+function thrownMessage(read: () => unknown): string {
+  try {
+    read();
+  } catch (error) {
+    if (error instanceof Error) return error.message;
+    throw error;
+  }
+  throw new Error("expected settings read to throw");
+}
+
+it("names the unreadable settings file and its parse error", async () => {
+  const agentDir = await directory();
+  const cwd = await directory();
+  await writeFile(join(agentDir, "settings.json"), "x");
+  const message = thrownMessage(() => readFromDisk(cwd, agentDir));
+  expect(message).toContain(join(agentDir, "settings.json"));
+  expect(message).toContain("Unexpected token");
+  expect(message).not.toContain("more)");
+});
+
+it("counts the unreadable settings files after the first", async () => {
+  const agentDir = await directory();
+  const cwd = await directory();
+  await writeFile(join(agentDir, "settings.json"), "x");
+  await mkdir(join(cwd, ".pi"));
+  await writeFile(join(cwd, ".pi", "settings.json"), "x");
+  expect(thrownMessage(() => readFromDisk(cwd, agentDir))).toContain("(+1 more)");
+});
+
+it("bounds a settings error with a long path to 512 bytes", async () => {
+  const agentDir = join(await directory(), "a".repeat(200), "b".repeat(200), "c".repeat(200));
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, "settings.json"), "x");
+  expect(Buffer.byteLength(join(agentDir, "settings.json"))).toBeGreaterThan(512);
+  const cwd = await directory();
+  const message = thrownMessage(() => readFromDisk(cwd, agentDir));
+  expect(message).toContain("Pi settings could not be read: /");
+  expect(Buffer.byteLength(message)).toBeLessThanOrEqual(512);
+});
 
 it.each(["node", "./x"])("rejects command %s through direct shared writes", async (command) => {
   const manager = SettingsManager.inMemory({});

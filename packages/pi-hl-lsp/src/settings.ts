@@ -4,6 +4,8 @@ import { defineLayeredSettings, type LayeredSettingsSession } from "pi-hl-utils/
 import type { SettingsCommandSpec } from "pi-hl-utils/settings-command";
 import { Type, type Static } from "typebox";
 
+import { bounded } from "./text.js";
+
 const serverSchema = Type.Object(
   {
     command: Type.Refine(
@@ -67,8 +69,16 @@ export const lspSettings = defineLayeredSettings({
 });
 
 export function readSettings(session: LayeredSettingsSession) {
-  if (session.settingsManager.drainErrors().length)
-    throw new Error("Pi settings could not be read; correct them before enabling LSP");
+  const errors = session.settingsManager.drainErrors();
+  const [first] = errors;
+  if (first) {
+    const prefix = "Pi settings could not be read: ";
+    const suffix = errors.length > 1 ? ` (+${errors.length - 1} more)` : "";
+    const detail = `${first.path ?? first.scope}: ${first.error.message}`;
+    const budget = 512 - Buffer.byteLength(prefix + suffix);
+    const shown = bounded(detail, { maxBytes: budget, maxLines: 1 });
+    throw new Error(`${prefix}${shown.content}${suffix}`);
+  }
   return lspSettings.readSettings(session);
 }
 

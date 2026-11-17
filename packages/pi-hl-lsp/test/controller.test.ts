@@ -100,6 +100,14 @@ it("names the server key and its fix when no server is configured for the langua
   );
 });
 
+it("reports the timeout and the configured server commands in status", async () => {
+  const { instance } = await controller();
+  expect(instance.status()).toMatchObject({
+    timeoutMs: 5000,
+    servers: { typescript: process.execPath },
+  });
+});
+
 it("routes, synchronizes, and returns bounded read-only hover output", async () => {
   const { instance, file } = await controller();
   const result = await instance.query("hover", file, { line: 0, character: 6 });
