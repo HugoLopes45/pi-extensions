@@ -1133,6 +1133,72 @@ it("adds one bounded transient summary per natural request without raw diagnosti
   ).toHaveLength(0);
 });
 
+it("checks several files in one call and collapses the clean ones into one line", async () => {
+  const state = await session(true, "error-lines");
+  await writeFile(join(state.cwd, "index.ts"), "ERROR\n");
+  await writeFile(join(state.cwd, "a.ts"), "const a = 1;\n");
+  await writeFile(join(state.cwd, "b.ts"), "const b = 1;\n");
+  expect(
+    await tool(state, "hl_lsp_diagnostics", {
+      paths: ["index.ts", "a.ts", "b.ts"],
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp diagnostics: 3 files, 1 with diagnostics, 2 clean, 0 not checked\nhl-lsp diagnostics index.ts: completed\n1:1 error 2322 Untrusted diagnostic prose\nclean: a.ts, b.ts",
+      },
+    ],
+    details: { outcome: "completed" },
+  });
+});
+
+it("shows a file whose type has no server as one refusal line and checks the rest", async () => {
+  const state = await session(true, "error-lines");
+  await writeFile(join(state.cwd, "index.ts"), "ERROR\n");
+  await writeFile(join(state.cwd, "notes.txt"), "plain\n");
+  const result = await tool(state, "hl_lsp_diagnostics", {
+    paths: ["notes.txt", "index.ts"],
+  });
+  expect(result).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: stringMatching(
+          /^hl-lsp diagnostics: 2 files, 1 with diagnostics, 0 clean, 1 not checked\nnotes\.txt: unsupported: .+\nhl-lsp diagnostics index\.ts: completed\n1:1 error 2322 Untrusted diagnostic prose$/u,
+        ),
+      },
+    ],
+  });
+});
+
+it.each([
+  ["both file and paths", { file: "index.ts", paths: ["index.ts"] }],
+  ["neither", {}],
+])("refuses diagnostics given %s before any server launch", async (_label, args) => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "hl_lsp_diagnostics", args)).toMatchObject({
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp diagnostics: give exactly one of file or paths",
+      },
+    ],
+  });
+  await expect(readFile(state.spawnLog, "utf8")).rejects.toThrow("ENOENT");
+});
+
+it("refuses more than twenty paths in one call", async () => {
+  const state = await session(true, "error-lines");
+  const paths = Array.from({ length: 21 }, (_item, index) => `file${index}.ts`);
+  expect(await tool(state, "hl_lsp_diagnostics", { paths })).toMatchObject({
+    isError: true,
+  });
+});
+
 it("keeps the real SDK tool blocked when the extension is disabled", async () => {
   const { runtime, faux } = await session(false);
   faux.setResponses([
