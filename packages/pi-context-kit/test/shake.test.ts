@@ -54,12 +54,52 @@ describe("shake", () => {
     expect(JSON.stringify(edits[0]?.content)).toContain("[Elided block: about 303 tokens.");
   });
 
+  it("elides blocks quickly in output with unclosed fences of many lengths", () => {
+    const runs = (mark: string) =>
+      Array.from({ length: 300 }, (_, i) => `a${mark.repeat(i + 3)}\n`).join("");
+    const t = new Transcript();
+    const id = t.assistant(
+      `${fenced(300)}\n${"`".repeat(400)}\n${"~".repeat(400)}\n${runs("`")}${runs("~")}${"x\n".repeat(55_000)}`,
+    );
+    t.assistant(filler(600));
+    const started = performance.now();
+    const edits = shake(t.entries(), ELIDE);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(edits[0]?.targetId).toBe(id);
+  });
+
+  it("elides blocks quickly in output with many fences on one line", () => {
+    const t = new Transcript();
+    const id = t.assistant(`${fenced(300)}\n${"``` ~~~ ".repeat(60_000)}\n`);
+    t.assistant(filler(600));
+    const started = performance.now();
+    const edits = shake(t.entries(), ELIDE);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(edits[0]?.targetId).toBe(id);
+  });
+
   it("keeps a fence that only a shorter fence follows", () => {
     const t = new Transcript();
     const text = `\`\`\`\`ts\n${filler(300)}\n\`\`\``;
     t.assistant(text);
     t.assistant(filler(600));
     expect(shake(t.entries(), ELIDE)).toEqual([]);
+  });
+
+  it("elides a fence that a shorter and then a longer fence follow", () => {
+    const t = new Transcript();
+    const id = t.assistant(`\`\`\`\`\n${filler(300)}\n\`\`\`\n${filler(10)}\n\`\`\`\`\`\`\nafter`);
+    t.assistant(filler(600));
+    const [elided] = shake(t.entries(), ELIDE);
+    expect(elided?.targetId).toBe(id);
+    expect(JSON.stringify(elided?.content)).toMatch(/it\.\]\\nafter/);
+  });
+
+  it("elides the whole closing fence when it is longer than the opening fence", () => {
+    const t = new Transcript();
+    t.assistant(`~~~\n${filler(300)}\n~~~~~\nafter`);
+    t.assistant(filler(600));
+    expect(JSON.stringify(shake(t.entries(), ELIDE)[0]?.content)).toMatch(/it\.\]\\nafter/);
   });
 
   it("preserves user instructions and user images", () => {
