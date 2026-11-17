@@ -137,6 +137,8 @@ const method = {
 // Measured on typescript-language-server; see lsp-dev/research/reports/publish-timing.md.
 const SETTLE_MS = 500;
 const QUIET_MS = 1000;
+// Each baseline is a short error-count map. An evicted file reports all its errors as new on its next edit.
+const BASELINE_LIMIT = 128;
 
 async function snapshot(file: string, signal: AbortSignal): Promise<string> {
   const input: AsyncIterable<unknown> = createReadStream(file, { signal });
@@ -767,6 +769,15 @@ export class LspController {
     return instance;
   }
 
+  // Re-inserting moves the file to the newest position, so the first key is the least recently used.
+  private rememberBaseline(file: string, counts: Map<string, number>): void {
+    this.baseline.delete(file);
+    this.baseline.set(file, counts);
+    if (this.baseline.size <= BASELINE_LIMIT) return;
+    const oldest = this.baseline.keys().next().value;
+    if (oldest !== undefined) this.baseline.delete(oldest);
+  }
+
   private async evictOldest(): Promise<void> {
     if (this.instances.size < 8) return;
     const [key, oldest] = this.instances.entries().next().value ?? [];
@@ -871,7 +882,7 @@ export class LspController {
       text,
       deadline,
     );
-    if ("diagnostics" in result) this.baseline.set(route.file, errorCounts(result.diagnostics));
+    if ("diagnostics" in result) this.rememberBaseline(route.file, errorCounts(result.diagnostics));
     return result;
   }
 
@@ -1245,6 +1256,7 @@ export class LspController {
     this.lifetime.abort(new Error("Controller is closed"));
     const instances = [...this.instances.values()];
     this.instances.clear();
+    this.baseline.clear();
     this.selected = undefined;
     await disposeAll(instances);
   }

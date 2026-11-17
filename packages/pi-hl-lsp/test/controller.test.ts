@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +46,21 @@ async function controller(
   onTestFinished(() => instance.dispose());
   return { instance, file, spawnLog };
 }
+
+it("evicts the least recently used baseline once 128 files have one", async () => {
+  const { instance, file } = await controller("error-lines");
+  const folder = dirname(file);
+  const paths = Array.from({ length: 129 }, (_, index) => join(folder, `file${index}.ts`));
+  const first = join(folder, "file0.ts");
+  const last = join(folder, "file128.ts");
+  for (const path of paths) await writeFile(path, "ERROR\n");
+  const signal = new AbortController().signal;
+  for (const path of paths) await instance.newErrors(path, signal);
+  // The 129th file pushed out the first file's baseline, so its error reads as new again.
+  expect(await instance.newErrors(first, signal)).toHaveLength(1);
+  // The newest file keeps its baseline, so its error is no longer new.
+  expect(await instance.newErrors(last, signal)).toEqual([]);
+}, 60_000);
 
 it("requires separate global project-execution consent before launch", async () => {
   const { instance, file } = await controller("normal", false);
