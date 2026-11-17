@@ -62,7 +62,9 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     return new Promise<never>(() => {});
   }
   if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
-  if (mode === "grandchild") return { pid: spawn("sh", ["-c", "trap '' TERM; sleep 60"]).pid };
+  if (mode === "grandchild") return { pid: spawn("sleep", ["60"]).pid };
+  if (mode === "stubborn-grandchild")
+    return { pid: spawn("sh", ["-c", "trap '' TERM; sleep 60"]).pid };
   if (mode === "effects") {
     try {
       await connection.sendRequest("workspace/applyEdit", {
