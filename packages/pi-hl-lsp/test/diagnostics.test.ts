@@ -65,8 +65,15 @@ it("bounds oversized single-line multibyte messages by bytes", () => {
   });
 });
 
-it("marks a single-line message that fits maxBytes but exceeds the marker budget", () => {
-  const result = diagnosticResult({ diagnostics: [{ ...finding, message: "a".repeat(500) }] }, 1);
+it("keeps a single-line message that fits maxBytes whole", () => {
+  const result = diagnosticResult({ diagnostics: [{ ...finding, message: "a".repeat(512) }] }, 1);
+  expect(result).toMatchObject({
+    diagnostics: [{ message: "a".repeat(512), truncated: false }],
+  });
+});
+
+it("cuts a single-line message one byte over maxBytes to the marker budget", () => {
+  const result = diagnosticResult({ diagnostics: [{ ...finding, message: "a".repeat(513) }] }, 1);
   expect(result).toMatchObject({
     diagnostics: [{ message: `${"a".repeat(497)}... [truncated]`, truncated: true }],
   });

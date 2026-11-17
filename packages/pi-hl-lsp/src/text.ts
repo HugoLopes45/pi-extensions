@@ -10,7 +10,7 @@ export function bounded(
   const lineBudget = limits.maxBytes - Buffer.byteLength(marker);
   let lineTruncated = false;
   const lines = text.split("\n").map((line) => {
-    if (Buffer.byteLength(line) <= lineBudget) return line;
+    if (Buffer.byteLength(line) <= limits.maxBytes) return line;
     lineTruncated = true;
     return `${prefix(line, lineBudget)}${marker}`;
   });
