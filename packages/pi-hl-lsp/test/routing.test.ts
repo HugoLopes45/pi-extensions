@@ -206,3 +206,28 @@ it("distinguishes virtual, missing and unmarked files", async () => {
     outcome: "unsupported",
   });
 });
+
+it("routes a dependency file under node_modules to the project root", async () => {
+  const root = await directory();
+  await writeFile(join(root, "package.json"), "{}");
+  const pkg = join(root, "node_modules", "pkg");
+  await mkdir(pkg, { recursive: true });
+  await writeFile(join(pkg, "package.json"), "{}");
+  await writeFile(join(pkg, "index.d.ts"), "");
+  expect(await resolveRoute(join(pkg, "index.d.ts"), root)).toMatchObject({
+    outcome: "completed",
+    root,
+  });
+});
+
+it("ignores node_modules segments above the boundary", async () => {
+  const outer = await directory();
+  const boundary = join(outer, "node_modules", "app");
+  await mkdir(join(boundary, "src"), { recursive: true });
+  await writeFile(join(boundary, "package.json"), "{}");
+  await writeFile(join(boundary, "src", "index.ts"), "");
+  expect(await resolveRoute(join(boundary, "src", "index.ts"), boundary)).toMatchObject({
+    outcome: "completed",
+    root: boundary,
+  });
+});

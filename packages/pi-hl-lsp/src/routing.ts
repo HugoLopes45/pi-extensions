@@ -63,13 +63,19 @@ const projectMarkers: Record<ServerFamily, string[]> = {
   rust: ["Cargo.toml", "rust-project.json"],
 };
 
+function insideDependencies(boundary: string, dir: string): boolean {
+  return relative(boundary, dir).split(sep).includes("node_modules");
+}
+
 async function nearestRoot(
   root: string,
   boundary: string,
   markers: string[],
 ): Promise<string | undefined> {
-  const matches = await Promise.all(markers.map((marker) => isFile(join(root, marker))));
-  if (matches.some(Boolean)) return root;
+  if (!insideDependencies(boundary, root)) {
+    const matches = await Promise.all(markers.map((marker) => isFile(join(root, marker))));
+    if (matches.some(Boolean)) return root;
+  }
   return root === boundary ? undefined : nearestRoot(dirname(root), boundary, markers);
 }
 
