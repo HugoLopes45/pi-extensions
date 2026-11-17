@@ -93,12 +93,55 @@ it("rejects an unnegotiated position encoding", async () => {
   await expect(client.initialize()).rejects.toThrow(/encoding/iu);
 });
 
-it("rejects unsolicited server writes through the native RPC default", async () => {
+it("answers workspace/applyEdit without applying the edit", async () => {
   const client = await server("effects");
   await client.initialize();
   expect(await client.request("textDocument/hover", {})).toEqual({
-    rejected: -32601,
+    reply: {
+      applied: false,
+      failureReason: "client applies edits only through its tools",
+    },
   });
+});
+
+it("answers each standard server request with its LSP 3.17 reply", async () => {
+  const published = Promise.withResolvers<unknown>();
+  const client = await server("normal", 1000, published.resolve);
+  await client.initialize();
+  await client.notify("test/server-requests", {});
+  const value = await published.promise;
+  // The folder entry is checked by its uri and name below.
+  expect(value).toMatchObject({
+    uri: "file:///server-requests",
+    diagnostics: [],
+    replies: {
+      "window/workDoneProgress/create": null,
+      "client/registerCapability": null,
+      "client/unregisterCapability": null,
+      "workspace/configuration": [null, null],
+      "workspace/workspaceFolders": [{}],
+      "workspace/applyEdit": {
+        applied: false,
+        failureReason: "client applies edits only through its tools",
+      },
+      "window/showMessageRequest": null,
+      "window/showDocument": { success: false },
+      "workspace/semanticTokens/refresh": null,
+      "workspace/inlayHint/refresh": null,
+      "workspace/inlineValue/refresh": null,
+      "workspace/codeLens/refresh": null,
+      "workspace/diagnostic/refresh": null,
+      "test/unknown": { error: -32601 },
+    },
+  });
+  expect(value).toHaveProperty(
+    ["replies", "workspace/workspaceFolders", 0, "uri"],
+    expect.stringMatching(/\/hl-lsp-fixture-/u),
+  );
+  expect(value).toHaveProperty(
+    ["replies", "workspace/workspaceFolders", 0, "name"],
+    expect.stringMatching(/^hl-lsp-fixture-/u),
+  );
 });
 
 it("settles ignored requests at the total deadline", async () => {

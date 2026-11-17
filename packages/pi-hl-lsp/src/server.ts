@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { homedir } from "node:os";
+import { basename } from "node:path";
 import { Transform, type TransformCallback } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -68,6 +69,7 @@ const unregistrationParams = Type.Object({
 });
 const progressToken = Type.Union([Type.String(), Type.Integer()]);
 const progressCreateParams = Type.Object({ token: progressToken });
+const configurationParams = Type.Object({ items: Type.Array(Type.Unknown()) });
 const progressParams = Type.Object({
   token: progressToken,
   value: Type.Object({
@@ -75,6 +77,22 @@ const progressParams = Type.Object({
   }),
 });
 const serverStatusParams = Type.Object({ quiescent: Type.Boolean() });
+// LSP 3.17 replies to server requests that need no client state, keyed by method.
+const fixedRequestReplies = new Map<string, unknown>([
+  ["window/showMessageRequest", null],
+  ["window/showDocument", { success: false }],
+  [
+    "workspace/applyEdit",
+    {
+      applied: false,
+      failureReason: "client applies edits only through its tools",
+    },
+  ],
+  ["workspace/semanticTokens/refresh", null],
+  ["workspace/inlayHint/refresh", null],
+  ["workspace/inlineValue/refresh", null],
+  ["workspace/codeLens/refresh", null],
+]);
 // Servers pause briefly between loading phases, so a server counts as ready only after this quiet window.
 const READY_QUIET_MS = 300;
 // Servers start loading after the first document opens, so a query in this window waits for the first signal.
@@ -133,6 +151,11 @@ class FrameSizes {
     }
     return chunk.subarray(taken);
   }
+}
+
+// Answers null per section so servers keep their defaults; replace this to serve settings.
+function configurationReplies(params: Static<typeof configurationParams>): null[] {
+  return params.items.map(() => null);
 }
 
 export class LanguageServer {
@@ -232,6 +255,16 @@ export class LanguageServer {
         return this.reject("Invalid window/workDoneProgress/create payload");
       return null;
     });
+    for (const [method, reply] of fixedRequestReplies)
+      this.connection.onRequest(method, () => reply);
+    this.connection.onRequest("workspace/configuration", (value: unknown) => {
+      if (!Value.Check(configurationParams, value))
+        return this.reject("Invalid workspace/configuration payload");
+      return configurationReplies(value);
+    });
+    this.connection.onRequest("workspace/workspaceFolders", () => [
+      { uri: pathToFileURL(this.root).href, name: basename(this.root) },
+    ]);
     this.connection.onNotification("$/progress", (value: unknown) => {
       if (!Value.Check(progressParams, value))
         return this.fail(new Error("Invalid progress notification"));
@@ -347,7 +380,10 @@ export class LanguageServer {
               dataSupport: true,
             },
           },
-          workspace: { fileOperations: { willRename: true, didRename: true } },
+          workspace: {
+            fileOperations: { willRename: true, didRename: true },
+            diagnostics: { refreshSupport: true },
+          },
           window: { workDoneProgress: true },
           experimental: { serverStatusNotification: true },
         },

@@ -295,16 +295,12 @@ connection.onRequest(
     }
     const reply = replies.get(mode);
     if (reply) return reply(token);
-    if (mode === "effects") {
-      try {
-        await connection.sendRequest("workspace/applyEdit", {
+    if (mode === "effects")
+      return {
+        reply: await connection.sendRequest("workspace/applyEdit", {
           edit: { changes: {} },
-        });
-      } catch (error) {
-        if (error instanceof rpc.ResponseError) return { rejected: error.code };
-        throw error;
-      }
-    }
+        }),
+      };
     return { contents: { kind: "plaintext", value: "const value: number" } };
   },
 );
@@ -658,6 +654,38 @@ connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
     throw new rpc.ResponseError(-32802, "server cancelled the request");
   const code = pulledCodes.get(mode);
   return { kind: "full", items: code === undefined ? [] : [finding(code)] };
+});
+// Each method is a standard server request; the fixture publishes the reply or error code for each.
+const serverRequests = new Map<string, unknown>([
+  ["window/workDoneProgress/create", { token: "t" }],
+  ["client/registerCapability", { registrations: [] }],
+  ["client/unregisterCapability", { unregisterations: [] }],
+  ["workspace/configuration", { items: [{ section: "a" }, { section: "b" }] }],
+  ["workspace/workspaceFolders", undefined],
+  ["workspace/applyEdit", { edit: { changes: {} } }],
+  ["window/showMessageRequest", { type: 3, message: "m" }],
+  ["window/showDocument", { uri: "file:///doc.ts" }],
+  ["workspace/semanticTokens/refresh", undefined],
+  ["workspace/inlayHint/refresh", undefined],
+  ["workspace/inlineValue/refresh", undefined],
+  ["workspace/codeLens/refresh", undefined],
+  ["workspace/diagnostic/refresh", undefined],
+  ["test/unknown", undefined],
+]);
+connection.onNotification("test/server-requests", async () => {
+  const replies: Record<string, unknown> = {};
+  for (const [method, params] of serverRequests)
+    replies[method] = await connection.sendRequest(method, params).then(
+      (reply: unknown) => reply,
+      (error: unknown) => ({
+        error: error instanceof rpc.ResponseError ? error.code : "other",
+      }),
+    );
+  await connection.sendNotification("textDocument/publishDiagnostics", {
+    uri: "file:///server-requests",
+    diagnostics: [],
+    replies,
+  });
 });
 connection.onNotification("test/unregister", async () => {
   await connection.sendRequest("client/unregisterCapability", {
