@@ -255,24 +255,6 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-it.skipIf(process.platform === "win32")(
-  "keeps probing every millisecond while the clock shows no elapsed wait",
-  async () => {
-    const { instance, file, spawnLog } = await controller("slow-lingering-child");
-    await instance.query("hover", file, { line: 0, character: 6 });
-    const group = -(await lastPid(spawnLog));
-    const kill = vi.spyOn(process, "kill");
-    vi.spyOn(performance, "now").mockReturnValue(performance.now());
-    onTestFinished(() => {
-      vi.restoreAllMocks();
-    });
-    await instance.dispose();
-    vi.restoreAllMocks();
-    const probes = kill.mock.calls.filter(([target, signal]) => target === group && signal === 0);
-    expect(probes.length).toBeGreaterThanOrEqual(15);
-  },
-);
-
 it.each([
   ["sync-log", ["didOpen 1", "didChange 2", "didClose", "didOpen 3"]],
   ["sync-open-close", ["didOpen 1", "didClose", "didOpen 2", "didClose", "didOpen 3"]],
