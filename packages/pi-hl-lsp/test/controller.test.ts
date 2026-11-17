@@ -236,6 +236,14 @@ it("shuts a healthy initialized server down with shutdown, then exit", async () 
   expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
 
+it("returns soon after a healthy server exits", async () => {
+  const { instance, file } = await controller("handshake");
+  await instance.query("hover", file, { line: 0, character: 6 });
+  const started = performance.now();
+  await instance.dispose();
+  expect(performance.now() - started).toBeLessThan(40);
+});
+
 it.each([
   ["sync-log", ["didOpen 1", "didChange 2", "didClose", "didOpen 3"]],
   ["sync-open-close", ["didOpen 1", "didClose", "didOpen 2", "didClose", "didOpen 3"]],
