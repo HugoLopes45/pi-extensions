@@ -301,6 +301,26 @@ it("falls back to signals within the budget when shutdown gets no answer", async
 });
 
 it.skipIf(process.platform === "win32")(
+  "accepts a SIGKILL refused by a group whose server is exiting",
+  async () => {
+    const { instance, file, spawnLog } = await controller("mute-shutdown");
+    await instance.query("hover", file, { line: 0, character: 6 });
+    const group = -(await lastPid(spawnLog));
+    const kill = process.kill.bind(process);
+    // macOS answers EPERM while the dying server is a zombie that Node has not reaped yet.
+    vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+      if (target === group && signal === "SIGKILL")
+        throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      return kill(target, signal);
+    });
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    await expect(instance.dispose()).resolves.toBeUndefined();
+  },
+);
+
+it.skipIf(process.platform === "win32")(
   "keeps one two-second budget for a server that ignores shutdown and SIGTERM",
   async () => {
     const { instance, file, spawnLog } = await controller("stubborn-mute");

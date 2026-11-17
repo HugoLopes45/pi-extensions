@@ -31,6 +31,9 @@ const initializedSchema = Type.Object({
   }),
 });
 export type Initialization = Static<typeof initializedSchema>;
+// Part of the two-second budget kept after SIGKILL: macOS answers EPERM for a group whose only
+// member is a zombie that Node has not reaped yet, so the server's exit event is awaited first.
+const REAP_RESERVE_MS = 100;
 
 class FrameSizes {
   readonly sizes: number[] = [];
@@ -260,7 +263,8 @@ export class LanguageServer {
     this.stopped = true;
     this.onClose(this.failure ?? new Error("LSP instance is closed"));
     const deadline = performance.now() + 2000;
-    if (graceful) await this.shutdown(deadline);
+    const killAt = deadline - REAP_RESERVE_MS;
+    if (graceful) await this.shutdown(killAt);
     this.connection.dispose();
     this.child.stdout.unpipe(this.input);
     this.input.destroy();
@@ -272,13 +276,22 @@ export class LanguageServer {
     // Doubling probes see a quick exit within milliseconds yet cost few wakeups when the group
     // lingers; a wait that ended early does not count as elapsed.
     let wait = 1;
-    while (this.signal(0) !== "gone" && performance.now() < deadline) {
+    while (this.signal(0) !== "gone" && performance.now() < killAt) {
       const started = performance.now();
       await delay(wait);
       if (performance.now() - started >= wait) wait = Math.min(wait * 2, 50);
     }
     // A sent SIGKILL is enforced by the kernel; a refused one leaves the group alive.
-    if (this.signal("SIGKILL") === "refused") throw new Error("LSP process group did not stop");
+    if (this.signal("SIGKILL") === "refused" && !(await this.reaped(deadline)))
+      throw new Error("LSP process group did not stop");
+  }
+
+  /** Whether a refused group was only the server awaiting its reap, and is now gone. */
+  private async reaped(deadline: number): Promise<boolean> {
+    if (this.child.exitCode !== null || this.child.signalCode !== null) return false;
+    const exit = once(this.child, "exit").then(() => true);
+    const late = delay(Math.max(0, deadline - performance.now()), false, { ref: false });
+    return (await Promise.race([exit, late])) && this.signal(0) === "gone";
   }
 
   // Lets a healthy server finish its work; the same deadline still bounds the signals after it.
