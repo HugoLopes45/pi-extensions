@@ -153,6 +153,16 @@ connection.onNotification("textDocument/didChange", publishDiagnostics);
 connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
 });
+if (mode === "handshake" || mode === "mute-shutdown") {
+  connection.onRequest("shutdown", () => {
+    if (spawnLog !== undefined) appendFileSync(spawnLog, "shutdown\n");
+    return mode === "handshake" ? null : new Promise<never>(() => {});
+  });
+  connection.onNotification("exit", () => {
+    if (spawnLog !== undefined) appendFileSync(spawnLog, "exit\n");
+    process.exit(0);
+  });
+}
 connection.onClose(() => {
   if (!stubborn) process.exit(0);
 });

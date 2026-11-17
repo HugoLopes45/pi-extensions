@@ -170,6 +170,13 @@ function missingCapability(
   return undefined;
 }
 
+// Every cleanup must finish before the caller continues, even when another one fails first.
+async function disposeAll(instances: Instance[]): Promise<void> {
+  const results = await Promise.allSettled(instances.map((instance) => instance.client.dispose()));
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
+}
+
 export class LspController {
   private readonly instances = new Map<string, Instance>();
   private readonly lifetime = new AbortController();
@@ -216,7 +223,7 @@ export class LspController {
     const failed = [...this.instances].filter(([, existing]) => !existing.client.active);
     // Evicted instances stay visible to dispose() until their process group is stopped.
     try {
-      await Promise.all(failed.map(([, existing]) => existing.client.dispose()));
+      await disposeAll(failed.map(([, existing]) => existing));
     } finally {
       for (const [other, existing] of failed)
         if (this.instances.get(other) === existing) this.instances.delete(other);
@@ -383,6 +390,6 @@ export class LspController {
     const instances = [...this.instances.values()];
     this.instances.clear();
     this.selected = undefined;
-    await Promise.all(instances.map((instance) => instance.client.dispose()));
+    await disposeAll(instances);
   }
 }

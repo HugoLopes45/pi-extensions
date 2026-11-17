@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -155,6 +156,76 @@ it.skipIf(process.platform === "win32")(
     await next;
   },
 );
+
+// The first server's group looks gone and refuses SIGKILL, so its cleanup rejects at once
+// while the other servers still run their two-second escalation.
+function refuseFirstGroup(spawnLog: string) {
+  const first = () => Number(readFileSync(spawnLog, "utf8").split("\n")[0]);
+  const kill = process.kill.bind(process);
+  const spy = vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+    if (target !== -first()) return kill(target, signal);
+    if (signal === 0) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    if (signal === "SIGKILL") throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    return kill(target, signal);
+  });
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+    process.kill(first(), "SIGKILL");
+  });
+  return spy;
+}
+
+const lastPid = async (spawnLog: string) =>
+  Number((await readFile(spawnLog, "utf8")).trim().split("\n").at(-1));
+
+it.skipIf(process.platform === "win32")(
+  "rejects dispose only after every other instance finishes its cleanup",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-server");
+    for (const path of await packages(join(file, ".."), 2))
+      await instance.query("hover", path, { line: 0, character: 6 });
+    const group = -(await lastPid(spawnLog));
+    const kill = refuseFirstGroup(spawnLog);
+    await expect(instance.dispose()).rejects.toThrow("LSP process group did not stop");
+    expect(kill.mock.calls).toContainEqual([group, "SIGKILL"]);
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "evicts failed instances only after every cleanup finishes",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-garbage");
+    const kill = refuseFirstGroup(spawnLog);
+    for (const path of await packages(join(file, ".."), 2))
+      await instance.query("hover", path, { line: 0, character: 6 });
+    const group = -(await lastPid(spawnLog));
+    await delay(300);
+    await expect(instance.query("hover", file, { line: 0, character: 6 })).rejects.toThrow(
+      "LSP process group did not stop",
+    );
+    await instance.dispose();
+    expect(kill.mock.calls).toContainEqual([group, "SIGKILL"]);
+  },
+);
+
+it("shuts a healthy initialized server down with shutdown, then exit", async () => {
+  const { instance, file, spawnLog } = await controller("handshake");
+  await instance.query("hover", file, { line: 0, character: 6 });
+  await instance.dispose();
+  expect((await readFile(spawnLog, "utf8")).trim().split("\n").slice(1)).toEqual([
+    "shutdown",
+    "exit",
+  ]);
+});
+
+it("falls back to signals within the budget when shutdown gets no answer", async () => {
+  const { instance, file, spawnLog } = await controller("mute-shutdown");
+  await instance.query("hover", file, { line: 0, character: 6 });
+  const started = performance.now();
+  await instance.dispose();
+  expect(performance.now() - started).toBeLessThan(2500);
+  expect((await readFile(spawnLog, "utf8")).trim().split("\n").slice(1)).toEqual(["shutdown"]);
+});
 
 it("prevents use after disposal", async () => {
   const { instance, file } = await controller();

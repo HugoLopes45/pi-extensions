@@ -88,6 +88,7 @@ export class LanguageServer {
   private closing: Promise<void> | undefined;
   private failure: Error | undefined;
   private stopped = false;
+  private initialized = false;
   private stderr = "";
 
   constructor(
@@ -192,6 +193,7 @@ export class LanguageServer {
       throw new Error("Unsupported LSP position encoding");
     }
     await this.notify("initialized", {}, signal);
+    this.initialized = true;
     return result;
   }
 
@@ -251,8 +253,11 @@ export class LanguageServer {
   }
 
   private async stop(): Promise<void> {
+    const graceful = this.initialized && !this.failure;
     this.stopped = true;
     this.onClose(this.failure ?? new Error("LSP instance is closed"));
+    const deadline = performance.now() + 2000;
+    if (graceful) await this.shutdown(deadline);
     this.connection.dispose();
     this.child.stdout.unpipe(this.input);
     this.input.destroy();
@@ -260,11 +265,30 @@ export class LanguageServer {
     this.child.stdout.destroy();
     this.child.stderr.destroy();
     this.signal("SIGTERM");
-    const deadline = performance.now() + 2000;
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
     while (this.signal(0) !== "gone" && performance.now() < deadline) await delay(50);
     // A sent SIGKILL is enforced by the kernel; a refused one leaves the group alive.
     if (this.signal("SIGKILL") === "refused") throw new Error("LSP process group did not stop");
+  }
+
+  // Lets a healthy server finish its work; the same deadline still bounds the signals after it.
+  private async shutdown(deadline: number): Promise<void> {
+    const remaining = () => delay(Math.max(0, deadline - performance.now()), false, { ref: false });
+    // A connection closed by an aborted request throws synchronously, which means no answer.
+    const send = async (message: () => Promise<unknown>) => {
+      await message();
+      return true;
+    };
+    const answered = send(() => this.connection.sendRequest("shutdown")).catch(() => false);
+    if (!(await Promise.race([answered, remaining()]))) return;
+    const sent = send(() => this.connection.sendNotification("exit")).catch(() => false);
+    if (!(await Promise.race([sent, remaining()]))) return;
+    while (
+      this.child.exitCode === null &&
+      this.child.signalCode === null &&
+      performance.now() < deadline
+    )
+      await delay(50);
   }
 
   private signal(signal: NodeJS.Signals | 0): "sent" | "gone" | "refused" {

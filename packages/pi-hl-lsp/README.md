@@ -70,7 +70,7 @@ Session overrides cannot approve executables or bypass project trust. All writes
 - Explicit output includes at most 20 diagnostics, with bounded messages and omission counts. Only numeric diagnostic codes are retained.
 - Navigation text is limited to 8 KiB and reports truncation. It remains untrusted server data.
 - Transport requests and notification writes have cancellation deadlines.
-- On POSIX, each server runs in its own process group. Disposal sends SIGTERM to the group and SIGKILL two seconds later if a member remains. If SIGKILL is refused, disposal fails with "LSP process group did not stop". A descendant that leaves the group, for example by starting a new session, is not stopped. On Windows, only the server process is stopped, and process cleanup is not certified.
+- On POSIX, each server runs in its own process group. Disposal first sends `shutdown` and then `exit` to a healthy initialized server. It then sends SIGTERM to the group, and SIGKILL if a member remains two seconds after disposal started. If SIGKILL is refused, disposal fails with "LSP process group did not stop". A descendant that leaves the group, for example by starting a new session, is not stopped. On Windows, only the server process is stopped, and process cleanup is not certified.
 - Executable identity binding, CPU limits, and resident-memory limits are not certified.
 
 ## Verification
