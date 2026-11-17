@@ -345,7 +345,25 @@ it("formats a workspace symbol with its 1-based location and source line", async
     readSource,
   );
   expect(result).toEqual({
-    text: "function start  src/a.ts:12:5  export function start(port: number) {",
+    text: "function start  src/a.ts:12:21  export function start(port: number) {",
+    truncated: false,
+  });
+});
+
+it("keeps the server position when the name occurs only before the range start", async () => {
+  const result = await formatWorkspaceSymbols(
+    [
+      {
+        name: "start",
+        kind: 12,
+        location: location("file:///repo/src/a.ts", 11, 21),
+      },
+    ],
+    cwd,
+    readSource,
+  );
+  expect(result).toEqual({
+    text: "function start  src/a.ts:12:22  export function start(port: number) {",
     truncated: false,
   });
 });

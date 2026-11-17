@@ -329,13 +329,21 @@ async function readSources(
   return new Map(entries);
 }
 
+function sourceLine(
+  place: Place,
+  cwd: string,
+  sources: Map<string, string[] | undefined>,
+): string | undefined {
+  const file = readableFile(place, cwd);
+  return file === undefined ? undefined : sources.get(file)?.[place.line];
+}
+
 function sourceText(
   place: Place,
   cwd: string,
   sources: Map<string, string[] | undefined>,
 ): Rendered {
-  const file = readableFile(place, cwd);
-  const text = file === undefined ? undefined : sources.get(file)?.[place.line];
+  const text = sourceLine(place, cwd, sources);
   if (text === undefined) return { text: "", truncated: false };
   const source = bounded(oneLine(text.trim()), sourceLimits);
   return { text: source.content, truncated: source.truncated };
@@ -364,11 +372,27 @@ function renderWorkspaceSymbol(
   if (!("range" in location))
     return { text: `${head}  ${uriPath(location.uri, cwd)}`, truncated: false };
   const place = renderPlace(
-    toPlace(location.uri, location.range.start, "workspace_symbols"),
+    namedPlace(
+      toPlace(location.uri, location.range.start, "workspace_symbols"),
+      item.name,
+      cwd,
+      sources,
+    ),
     cwd,
     sources,
   );
   return { text: `${head}  ${place.text}`, truncated: place.truncated };
+}
+
+// tsserver starts a declaration's range at its first token, so the name can sit later on that line.
+function namedPlace(
+  place: Place,
+  name: string,
+  cwd: string,
+  sources: Map<string, string[] | undefined>,
+): Place {
+  const character = sourceLine(place, cwd, sources)?.indexOf(name, place.character) ?? -1;
+  return character < 0 ? place : { ...place, character };
 }
 
 function uriPath(uri: string, cwd: string): string {

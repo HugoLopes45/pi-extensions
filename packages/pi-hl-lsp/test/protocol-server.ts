@@ -249,6 +249,7 @@ connection.onRequest(
 );
 const workspaceQuery = Type.Object({ query: Type.String() });
 // Answers by query: "bogus" is malformed, "pathonly" omits the range, "many" exceeds the fifty-symbol cap.
+// Other queries start the range at column 0, as tsserver does for a declaration, so the name sits later.
 function workspaceSymbols(query: string): unknown[] {
   const uri = synchronized ?? "file:///fixture-unopened";
   if (query === "bogus") return [{ bogus: 1 }];
@@ -259,7 +260,7 @@ function workspaceSymbols(query: string): unknown[] {
       kind: 13,
       location: location(uri, line, 0),
     }));
-  return [{ name: query, kind: 13, location: location(uri, 0, 6) }];
+  return [{ name: query, kind: 13, location: location(uri, 0, 0) }];
 }
 connection.onRequest("workspace/symbol", (params: unknown): unknown[] => {
   if (!Value.Check(workspaceQuery, params))
