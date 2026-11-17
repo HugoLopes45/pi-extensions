@@ -1,6 +1,7 @@
-import { truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+
+import { bounded } from "./text.js";
 
 const coordinate = Type.Integer({
   minimum: 0,
@@ -38,7 +39,7 @@ export function diagnosticResult(report: unknown, version: number) {
     if (end.line < start.line || (end.line === start.line && end.character < start.character)) {
       throw new Error("Invalid diagnostic range");
     }
-    const message = truncateHead(item.message, { maxBytes: 512, maxLines: 8 });
+    const message = bounded(item.message, { maxBytes: 512, maxLines: 8 });
     return {
       message: message.content,
       truncated: message.truncated,

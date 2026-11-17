@@ -1,8 +1,4 @@
-import {
-  truncateHead,
-  type ExtensionAPI,
-  type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { errorText } from "pi-hl-utils/errors";
 import { layeredSettingsSession, type LayeredSettingScope } from "pi-hl-utils/layered-settings";
 import { registerSettingsCommand } from "pi-hl-utils/settings-command";
@@ -11,6 +7,7 @@ import { Type } from "typebox";
 import { LspController, type Operation } from "./controller.js";
 import type { LspChange } from "./menu.js";
 import { commandSpec, lspSettings, readSettings } from "./settings.js";
+import { bounded } from "./text.js";
 
 const file = Type.String({ minLength: 1, maxLength: 4096 });
 const coordinate = Type.Integer({
@@ -159,7 +156,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
         details,
       };
     } catch (error) {
-      const reason = truncateHead(error instanceof Error ? error.message : "LSP request failed", {
+      const reason = bounded(error instanceof Error ? error.message : "LSP request failed", {
         maxBytes: 2048,
         maxLines: 8,
       });

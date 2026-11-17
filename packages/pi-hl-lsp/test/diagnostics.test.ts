@@ -51,6 +51,27 @@ it("bounds output and discloses omissions", () => {
   expect(JSON.stringify(result).length).toBeLessThan(16000);
 });
 
+it("keeps a bounded leading part of an oversized single-line message", () => {
+  const result = diagnosticResult({ diagnostics: [{ ...finding, message: "y".repeat(2000) }] }, 1);
+  expect(result).toMatchObject({
+    diagnostics: [{ message: `${"y".repeat(497)}... [truncated]`, truncated: true }],
+  });
+});
+
+it("bounds oversized single-line multibyte messages by bytes", () => {
+  const result = diagnosticResult({ diagnostics: [{ ...finding, message: "é".repeat(2000) }] }, 1);
+  expect(result).toMatchObject({
+    diagnostics: [{ message: `${"é".repeat(248)}... [truncated]`, truncated: true }],
+  });
+});
+
+it("marks a single-line message that fits maxBytes but exceeds the marker budget", () => {
+  const result = diagnosticResult({ diagnostics: [{ ...finding, message: "a".repeat(500) }] }, 1);
+  expect(result).toMatchObject({
+    diagnostics: [{ message: `${"a".repeat(497)}... [truncated]`, truncated: true }],
+  });
+});
+
 it("rejects invalid ranges and invalid publication versions", () => {
   expect(() => diagnosticResult({ version: -1, diagnostics: [] }, 1)).toThrow(
     "Invalid diagnostic publication",

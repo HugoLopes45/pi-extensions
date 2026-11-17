@@ -416,6 +416,31 @@ it("loads the real extension through Pi and executes its registered tool offline
   expect(faux.state.callCount).toBe(2);
 });
 
+it("keeps a bounded leading part of an oversized single-line error reason", async () => {
+  const { runtime, faux } = await session(true, "long-error");
+  faux.setResponses([
+    fauxAssistantMessage(
+      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("done"),
+  ]);
+  await runtime.session.sendCustomMessage(
+    { customType: "test", content: "inspect", display: false },
+    { triggerTurn: true },
+  );
+  const result = runtime.session.messages.find(
+    (message) => message.role === "toolResult" && message.toolName === "hl_lsp_hover",
+  );
+  expect(result).toMatchObject({
+    details: {
+      outcome: "failed",
+      truncated: true,
+      reason: stringMatching(/^z{100}/u),
+    },
+  });
+});
+
 it("keeps fifty edited revisions out of persistent diagnostic context", async () => {
   const state = await session(true, "versioned");
   for (let revision = 1; revision <= 50; revision++) {

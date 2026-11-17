@@ -136,6 +136,7 @@ connection.onRequest(
       return new Promise<never>(() => {});
     }
     if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
+    if (mode === "long-error") throw new rpc.ResponseError(-32603, "z".repeat(5000));
     const raw = rawReplies.get(mode);
     if (raw) {
       process.stdout.write(raw());
