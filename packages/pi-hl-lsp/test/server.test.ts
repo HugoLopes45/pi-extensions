@@ -128,7 +128,10 @@ it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () 
   expect(await hoverWithin("burst", 4000)).toMatch(/wire budget/iu);
 });
 
-async function childServer(mode: string) {
+it.skipIf(process.platform === "win32").each([
+  ["grandchild", 1000],
+  ["stubborn-grandchild", 2500],
+])("stops the server's descendants before dispose resolves (%s)", async (mode, limit) => {
   const client = await server(mode, 5000);
   await client.initialize();
   const reply = await client.request("textDocument/hover", {});
@@ -136,14 +139,6 @@ async function childServer(mode: string) {
     throw new Error("Fixture did not report its child pid");
   const { pid } = reply;
   if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
-  return { client, pid };
-}
-
-it.skipIf(process.platform === "win32").each([
-  ["grandchild", 1000],
-  ["stubborn-grandchild", 2500],
-])("stops the server's descendants before dispose resolves (%s)", async (mode, limit) => {
-  const { client, pid } = await childServer(mode);
   const started = performance.now();
   await client.dispose();
   expect(performance.now() - started).toBeLessThan(limit);
@@ -154,7 +149,9 @@ it.skipIf(process.platform === "win32").each([
 it.skipIf(process.platform === "win32")(
   "escalates on time when the wall clock moves back",
   async () => {
-    const { client } = await childServer("stubborn-grandchild");
+    const client = await server("stubborn-grandchild", 5000);
+    await client.initialize();
+    await client.request("textDocument/hover", {});
     const closing = client.dispose();
     vi.spyOn(Date, "now").mockReturnValue(Date.now() - 60_000);
     const outcome = await Promise.race([closing.then(() => "disposed"), delay(2500, "waiting")]);
