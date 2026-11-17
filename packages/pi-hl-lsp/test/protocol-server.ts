@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { appendFileSync } from "node:fs";
 import { Writable } from "node:stream";
 import { setImmediate as tick } from "node:timers/promises";
@@ -72,8 +73,11 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     );
   if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
   if (mode === "grandchild") return { pid: spawn("sleep", ["60"]).pid };
-  if (mode === "stubborn-grandchild")
-    return { pid: spawn("sh", ["-c", "trap '' TERM; sleep 60"]).pid };
+  if (mode === "stubborn-grandchild") {
+    const child = spawn("sh", ["-c", "trap '' TERM; echo ready; sleep 60"]);
+    await once(child.stdout, "data");
+    return { pid: child.pid };
+  }
   if (mode === "effects") {
     try {
       await connection.sendRequest("workspace/applyEdit", {

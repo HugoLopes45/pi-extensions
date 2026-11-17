@@ -128,21 +128,21 @@ it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () 
   expect(await hoverWithin("burst", 4000)).toMatch(/wire budget/iu);
 });
 
-it.skipIf(process.platform === "win32").each([
-  ["grandchild", 200],
-  ["stubborn-grandchild", 2500],
-])("stops the server's descendants when it is disposed (%s)", async (mode, wait) => {
-  const client = await server(mode, 5000);
-  await client.initialize();
-  const reply = await client.request("textDocument/hover", {});
-  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
-    throw new Error("Fixture did not report its child pid");
-  const { pid } = reply;
-  if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
-  await client.dispose();
-  await delay(wait);
-  expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
-});
+it.skipIf(process.platform === "win32").each(["grandchild", "stubborn-grandchild"])(
+  "stops the server's descendants before dispose resolves (%s)",
+  async (mode) => {
+    const client = await server(mode, 5000);
+    await client.initialize();
+    const reply = await client.request("textDocument/hover", {});
+    if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+      throw new Error("Fixture did not report its child pid");
+    const { pid } = reply;
+    if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
+    await client.dispose();
+    await delay(200);
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+  },
+);
 
 it("decodes frames split into single bytes", async () => {
   const client = await server("fragmented", 5000);

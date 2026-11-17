@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { homedir } from "node:os";
 import { Transform, type TransformCallback } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import { Type, type Static } from "typebox";
@@ -263,10 +264,11 @@ export class LanguageServer {
     this.child.stdout.destroy();
     this.child.stderr.destroy();
     this.signal("SIGTERM");
-    const deadline = setTimeout(() => this.signal("SIGKILL"), 2000);
+    const deadline = Date.now() + 2000;
+    // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
+    while (this.signal(0) && Date.now() < deadline) await delay(50);
+    this.signal("SIGKILL");
     await this.exited;
-    // Descendants that ignore SIGTERM outlive the server; keep their deadline.
-    if (!this.signal(0)) clearTimeout(deadline);
   }
 
   /** Signals the server's process group on POSIX; returns whether it still exists. */
