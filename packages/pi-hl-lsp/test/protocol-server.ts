@@ -60,6 +60,15 @@ const rawReplies = new Map<string | undefined, () => string>([
 const log = (event: string) => {
   if (spawnLog !== undefined) appendFileSync(spawnLog, `${event}\n`);
 };
+// A descendant that ignores SIGTERM and leaves `ms` after its parent exits, closing its stdin.
+async function lingering(ms: number) {
+  const child = spawn(process.execPath, [
+    "-e",
+    `process.on('SIGTERM', () => {}); process.stdin.on('end', () => setTimeout(() => process.exit(0), ${ms})); process.stdin.resume(); console.log('ready');`,
+  ]);
+  await once(child.stdout, "data");
+  return {};
+}
 const replies = new Map<
   string | undefined,
   (token: rpc.CancellationToken) => object | Promise<object>
@@ -73,18 +82,8 @@ const replies = new Map<
   ],
   ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
   ["stubborn-server", () => ({ pid: process.pid })],
-  [
-    "lingering-child",
-    async () => {
-      // Ignores SIGTERM and leaves 5 ms after its parent exits, closing its stdin.
-      const child = spawn(process.execPath, [
-        "-e",
-        "process.on('SIGTERM', () => {}); process.stdin.on('end', () => setTimeout(() => process.exit(0), 5)); process.stdin.resume(); console.log('ready');",
-      ]);
-      await once(child.stdout, "data");
-      return {};
-    },
-  ],
+  ["lingering-child", () => lingering(5)],
+  ["slow-lingering-child", () => lingering(30)],
   [
     "grandchild",
     () => {
@@ -190,6 +189,7 @@ connection.onNotification("test/fail", async () => {
 const handshake = new Set([
   "handshake",
   "lingering-child",
+  "slow-lingering-child",
   "mute-shutdown",
   "slow-shutdown",
   "stubborn-mute",

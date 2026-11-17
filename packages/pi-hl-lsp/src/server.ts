@@ -269,13 +269,14 @@ export class LanguageServer {
     this.child.stderr.destroy();
     this.signal("SIGTERM");
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
-    // Doubling probes see a quick exit within milliseconds yet cost few wakeups when the group lingers.
-    for (
-      let wait = 1;
-      this.signal(0) !== "gone" && performance.now() < deadline;
-      wait = Math.min(wait * 2, 50)
-    )
+    // Doubling probes see a quick exit within milliseconds yet cost few wakeups when the group
+    // lingers; a wait that ended early does not count as elapsed.
+    let wait = 1;
+    while (this.signal(0) !== "gone" && performance.now() < deadline) {
+      const started = performance.now();
       await delay(wait);
+      if (performance.now() - started >= wait) wait = Math.min(wait * 2, 50);
+    }
     // A sent SIGKILL is enforced by the kernel; a refused one leaves the group alive.
     if (this.signal("SIGKILL") === "refused") throw new Error("LSP process group did not stop");
   }
