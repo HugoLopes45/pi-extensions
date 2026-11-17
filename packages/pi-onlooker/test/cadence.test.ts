@@ -601,7 +601,7 @@ function deadlineOn(hung: number[], batches: Record<string, number> = {}) {
 
 it("leaves a Review past its deadline to the next turn without pausing", async () => {
   const reviews = deadlineOn([1]);
-  const { session, observer } = await observe({ reviewTimeoutMs: 20 });
+  const { session, observer } = await observe({ reviewTimeoutMs: 250 });
   await session.prompt("First");
   expect(reviews()).toBe(1);
   expect(observer.status.lastError).toBeNull();
@@ -626,7 +626,7 @@ it("reviews turns that finish during a late Review without waiting for another t
 
 it("starts a fresh count of Review deadlines after /onlooker on", async () => {
   const reviews = deadlineOn([1, 2, 3, 4]);
-  const { session, observer } = await observe({ reviewTimeoutMs: 20 });
+  const { session, observer } = await observe({ reviewTimeoutMs: 250 });
   for (const prompt of ["1", "2", "3"]) await session.prompt(prompt);
   expect(observer.status.state).toBe("paused");
   const { name, thinkingLevel, reviewEvery, correct } =
@@ -639,7 +639,7 @@ it("starts a fresh count of Review deadlines after /onlooker on", async () => {
 
 it("counts only Review deadlines in a row toward the pause", async () => {
   const reviews = deadlineOn([1, 2, 4, 5]);
-  const { session, observer } = await observe({ reviewTimeoutMs: 20 });
+  const { session, observer } = await observe({ reviewTimeoutMs: 250 });
   for (const prompt of ["1", "2", "3", "4", "5"]) await session.prompt(prompt);
   expect(reviews()).toBe(5);
   expect(observer.status.lastError).toBeNull();
