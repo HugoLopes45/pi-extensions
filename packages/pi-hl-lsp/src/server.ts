@@ -171,13 +171,14 @@ function sectionValue(settings: Settings, section: string): unknown {
   return value;
 }
 
-// Unset settings and a missing section both answer null, so servers keep their defaults.
+// Unset settings and a missing section answer null, so servers keep their defaults; no section asks for the whole object.
 function configurationReplies(
   params: Static<typeof configurationParams>,
   settings: Settings | undefined,
 ): unknown[] {
   return params.items.map(({ section }) => {
-    if (settings === undefined || section === undefined) return null;
+    if (settings === undefined) return null;
+    if (section === undefined) return settings;
     return sectionValue(settings, section) ?? null;
   });
 }

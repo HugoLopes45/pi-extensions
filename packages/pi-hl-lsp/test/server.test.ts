@@ -183,7 +183,7 @@ it("answers workspace/configuration by section path and sends settings after ini
         { method: "initialized" },
         { method: "workspace/didChangeConfiguration", params: { settings } },
       ],
-      configuration: [".venv", { venv: ".venv" }, null, null],
+      configuration: [".venv", { venv: ".venv" }, null, settings],
     },
   });
 });
