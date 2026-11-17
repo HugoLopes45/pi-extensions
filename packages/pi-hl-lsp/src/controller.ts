@@ -381,9 +381,15 @@ export class LspController {
     return this.exchange(route, instance, operation, position, text, deadline);
   }
 
-  private async snapshotMatches(document: Document): Promise<boolean> {
+  private async snapshotMatches(document: Document, instance: Instance): Promise<boolean> {
     const route = await resolveRoute(document.file, this.cwd);
-    if (route.outcome !== "completed" || route.file !== document.file) return false;
+    if (
+      route.outcome !== "completed" ||
+      route.file !== document.file ||
+      route.root !== instance.root ||
+      route.server !== instance.server
+    )
+      return false;
     const text = await snapshot(
       document.file,
       AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.settings.timeoutMs)]),
@@ -392,9 +398,12 @@ export class LspController {
   }
 
   // A failed check deselects the document so the failure surfaces once, not on every turn.
-  private async selectionMatches(selected: { document: Document }): Promise<boolean> {
+  private async selectionMatches(selected: {
+    instance: Instance;
+    document: Document;
+  }): Promise<boolean> {
     try {
-      return await this.snapshotMatches(selected.document);
+      return await this.snapshotMatches(selected.document, selected.instance);
     } catch (error) {
       if (this.selected === selected) this.selected = undefined;
       throw error;

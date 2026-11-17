@@ -149,6 +149,19 @@ it("reports an unreadable summary snapshot once, then drops the stale summary", 
   expect(await instance.summary()).toBeUndefined();
 });
 
+it("drops the automatic summary when the file's route changes", async () => {
+  const { instance, file } = await controller("versioned");
+  const sub = join(file, "..", "sub");
+  await mkdir(sub);
+  await writeFile(join(sub, "index.ts"), "const value = 1;\n");
+  expect(await instance.query("diagnostics", join(sub, "index.ts"))).toMatchObject({
+    evidence: "revision_correlated",
+  });
+  expect(await instance.summary()).toMatchObject({ reportedCount: 1 });
+  await writeFile(join(sub, "tsconfig.json"), "{}");
+  expect(await instance.summary()).toBeUndefined();
+});
+
 it("does not issue requests for capabilities that the server did not advertise", async () => {
   const { instance, file } = await controller();
   expect(await instance.query("definition", file, { line: 0, character: 6 })).toMatchObject({

@@ -294,6 +294,17 @@ it("distinguishes virtual, missing and unmarked files", async () => {
   });
 });
 
+it("refuses a directory named like a source file", async () => {
+  const root = await directory();
+  await writeFile(join(root, "package.json"), "{}");
+  await mkdir(join(root, "dir.ts"));
+  expect(await resolveRoute(join(root, "dir.ts"), root)).toEqual({
+    outcome: "unsupported",
+    file: join(root, "dir.ts"),
+    reason: "Expected a regular file",
+  });
+});
+
 it("routes a dependency file under node_modules to the project root", async () => {
   const root = await directory();
   await writeFile(join(root, "package.json"), "{}");
