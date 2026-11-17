@@ -1,4 +1,7 @@
+import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
+import { Writable } from "node:stream";
+import { setImmediate as tick } from "node:timers/promises";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -9,7 +12,32 @@ const spawnLog = process.argv[3];
 if (spawnLog !== undefined && spawnLog !== "--ready") appendFileSync(spawnLog, `${process.pid}\n`);
 const reader = new rpc.StreamMessageReader(process.stdin);
 reader.partialMessageTimeout = 0;
-const connection = rpc.createMessageConnection(reader, new rpc.StreamMessageWriter(process.stdout));
+// Fragmented mode writes one byte per event-loop turn so frames arrive split.
+const fragmented = new Writable({
+  write(chunk: Buffer, _encoding, done) {
+    void (async () => {
+      for (const byte of chunk) {
+        process.stdout.write(Buffer.of(byte));
+        await tick();
+      }
+      done();
+    })();
+  },
+});
+const connection = rpc.createMessageConnection(
+  reader,
+  new rpc.StreamMessageWriter(mode === "fragmented" ? fragmented : process.stdout),
+);
+function frames(count: number): string {
+  const body = JSON.stringify({ jsonrpc: "2.0", method: "noise", params: {} });
+  return `Content-Length: ${body.length}\r\n\r\n${body}`.repeat(count);
+}
+// Raw hover replies written past the RPC writer; the request never completes.
+const rawReplies = new Map<string | undefined, () => string>([
+  ["invalid-frame", () => "Content-Length: 2\r\n\r\n{x"],
+  ["endless-header", () => `X-Pad: ${"a".repeat(9 * 1024 * 1024)}`],
+  ["burst", () => frames(400_000)],
+]);
 connection.onRequest("initialize", async () => {
   if (mode === "backpressure")
     setImmediate(() => {
@@ -30,6 +58,15 @@ connection.onRequest("initialize", async () => {
 });
 connection.onRequest("textDocument/hover", async (): Promise<object> => {
   if (mode === "ignore") return new Promise<never>(() => {});
+  const raw = rawReplies.get(mode);
+  if (raw) {
+    process.stdout.write(raw());
+    return new Promise<never>(() => {});
+  }
+  if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
+  if (mode === "grandchild") return { pid: spawn("sleep", ["60"]).pid };
+  if (mode === "stubborn-grandchild")
+    return { pid: spawn("sh", ["-c", "trap '' TERM; sleep 60"]).pid };
   if (mode === "effects") {
     try {
       await connection.sendRequest("workspace/applyEdit", {

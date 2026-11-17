@@ -135,7 +135,7 @@ export async function resolveRoute(file: string, boundary: string): Promise<Rout
   if (outside(base, path))
     return {
       outcome: "blocked",
-      file: path,
+      file,
       reason: "File is outside the workspace boundary",
     };
   if (!(await isFile(path)))

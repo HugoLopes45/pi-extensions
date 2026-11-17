@@ -88,6 +88,63 @@ it("settles ignored requests at the total deadline", async () => {
   await expect(client.request("textDocument/hover", {})).rejects.toThrow(/timeout|deadline/iu);
 });
 
+// The hover outcome within `ms`, well before the 5 s request deadline.
+async function hoverWithin(mode: string, ms = 1000) {
+  const client = await server(mode, 5000);
+  await client.initialize();
+  return Promise.race([
+    client.request("textDocument/hover", {}).then(
+      () => "completed",
+      (error: unknown) => (error instanceof Error ? error.message : "rejected"),
+    ),
+    delay(ms, "still waiting"),
+  ]);
+}
+
+it("fails a pending request on an invalid frame instead of waiting for the deadline", async () => {
+  expect(await hoverWithin("invalid-frame")).toMatch(/JSON/u);
+});
+
+it("keeps a server whose total output exceeds 8 MiB across many messages", async () => {
+  const client = await server("chatty", 5000);
+  await client.initialize();
+  for (let index = 0; index < 10; index += 1)
+    await expect(client.request("textDocument/hover", {})).resolves.toBeDefined();
+  expect(client.active).toBe(true);
+});
+
+it("fails on a header that never ends", async () => {
+  expect(await hoverWithin("endless-header", 4000)).toMatch(/wire budget/iu);
+});
+
+it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () => {
+  expect(await hoverWithin("burst", 4000)).toMatch(/wire budget/iu);
+});
+
+it.skipIf(process.platform === "win32").each([
+  ["grandchild", 200],
+  ["stubborn-grandchild", 2500],
+])("stops the server's descendants when it is disposed (%s)", async (mode, wait) => {
+  const client = await server(mode, 5000);
+  await client.initialize();
+  const reply = await client.request("textDocument/hover", {});
+  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+    throw new Error("Fixture did not report its child pid");
+  const { pid } = reply;
+  if (typeof pid !== "number") throw new Error("Fixture child pid is not a number");
+  await client.dispose();
+  await delay(wait);
+  expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+});
+
+it("decodes frames split into single bytes", async () => {
+  const client = await server("fragmented", 5000);
+  await client.initialize();
+  await expect(client.request("textDocument/hover", {})).resolves.toMatchObject({
+    contents: { value: "const value: number" },
+  });
+});
+
 it("propagates cancellation without leaving a live request", async () => {
   const client = await server("ignore");
   await client.initialize();

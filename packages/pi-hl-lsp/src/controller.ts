@@ -213,8 +213,9 @@ export class LspController {
     const key = `${route.server}:${route.root}`;
     const previous = this.instances.get(key);
     if (previous?.client.active) return previous;
-    await previous?.client.dispose();
-    this.instances.delete(key);
+    const failed = [...this.instances].filter(([, existing]) => !existing.client.active);
+    for (const [other] of failed) this.instances.delete(other);
+    await Promise.all(failed.map(([, existing]) => existing.client.dispose()));
     if (this.instances.size >= 8) return undefined;
     signal.throwIfAborted();
     const state: Instance["state"] = { document: undefined };
@@ -330,13 +331,23 @@ export class LspController {
     return text === document.text;
   }
 
+  // A failed check deselects the document so the failure surfaces once, not on every turn.
+  private async selectionMatches(selected: { document: Document }): Promise<boolean> {
+    try {
+      return await this.snapshotMatches(selected.document);
+    } catch (error) {
+      if (this.selected === selected) this.selected = undefined;
+      throw error;
+    }
+  }
+
   async summary() {
     const selected = this.selected;
     if (!selected || !this.current(selected.instance, selected.document)) return undefined;
     const { instance, document } = selected;
     const observation = document.observation;
     if (!observation || observation.evidence !== "revision_correlated") return undefined;
-    if (!(await this.snapshotMatches(document))) return undefined;
+    if (!(await this.selectionMatches(selected))) return undefined;
     if (
       this.selected !== selected ||
       !this.current(instance, document) ||

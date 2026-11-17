@@ -35,6 +35,7 @@ it("rejects escaped file symlinks", async () => {
   await symlink(file, join(root, "link.ts"));
   expect(await resolveRoute(join(root, "link.ts"), root)).toMatchObject({
     outcome: "blocked",
+    file: join(root, "link.ts"),
   });
 });
 

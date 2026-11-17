@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -69,11 +69,40 @@ it("reports unversioned empty diagnostics as partial and omits automatic certifi
   expect(await instance.summary()).toBeUndefined();
 });
 
+it("reports an unreadable summary snapshot once, then drops the stale summary", async () => {
+  const { instance, file } = await controller("versioned");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+  });
+  expect(await instance.summary()).toMatchObject({ reportedCount: 1 });
+  await writeFile(file, "x".repeat(1024 * 1024 + 1));
+  await expect(instance.summary()).rejects.toThrow("1 MiB snapshot limit");
+  expect(await instance.summary()).toBeUndefined();
+});
+
 it("does not issue requests for capabilities that the server did not advertise", async () => {
   const { instance, file } = await controller();
   expect(await instance.query("definition", file, { line: 0, character: 6 })).toMatchObject({
     outcome: "unsupported",
   });
+});
+
+it("does not count failed instances toward the eight-instance limit", async () => {
+  const { instance, file, spawnLog } = await controller("wrong-encoding");
+  const cwd = join(file, "..");
+  for (let index = 0; index < 9; index += 1) {
+    const root = join(cwd, `package-${index}`);
+    await mkdir(root);
+    await writeFile(join(root, "tsconfig.json"), "{}");
+    await writeFile(join(root, "index.ts"), "const value = 1;\n");
+    await expect(
+      instance.query("hover", join(root, "index.ts"), {
+        line: 0,
+        character: 6,
+      }),
+    ).rejects.toThrow("Unsupported LSP position encoding");
+  }
+  expect((await readFile(spawnLog, "utf8")).trim().split("\n")).toHaveLength(9);
 });
 
 it("prevents use after disposal", async () => {

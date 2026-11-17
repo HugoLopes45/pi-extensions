@@ -66,11 +66,12 @@ Session overrides cannot approve executables or bypass project trust. All writes
 - Competing Python environments and nested Cargo manifests are not guessed. Explicit unsupported or ambiguous outcomes preserve uncertainty.
 - Virtual documents and unmarked files are unsupported.
 - Each file snapshot is limited to 1 MiB. Each session tracks at most eight server/root pairs.
-- Incoming wire data is limited to 8 MiB per instance lifetime, not per message.
+- Incoming server data that is not yet handled is limited to 8 MiB per instance. Bytes are released when the connection takes their message off its queue. Total traffic over a session is not limited.
 - Explicit output includes at most 20 diagnostics, with bounded messages and omission counts. Only numeric diagnostic codes are retained.
 - Navigation text is limited to 8 KiB and reports truncation. It remains untrusted server data.
-- Transport requests and notification writes have cancellation deadlines. Primary-process termination escalates after two seconds.
-- Descendant-process cleanup, executable identity binding, CPU limits, and resident-memory limits are not certified.
+- Transport requests and notification writes have cancellation deadlines.
+- On POSIX, each server runs in its own process group. Disposal sends SIGTERM to the group and SIGKILL two seconds later if a member remains. A descendant that leaves the group, for example by starting a new session, is not stopped. On Windows, only the server process is stopped, and process cleanup is not certified.
+- Executable identity binding, CPU limits, and resident-memory limits are not certified.
 
 ## Verification
 

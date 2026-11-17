@@ -30,6 +30,51 @@ const initializedSchema = Type.Object({
 });
 export type Initialization = Static<typeof initializedSchema>;
 
+class FrameSizes {
+  readonly sizes: number[] = [];
+  private header: Buffer = Buffer.alloc(0);
+  private body: number | undefined;
+  private size = 0;
+
+  scan(chunk: Buffer): void {
+    let rest = chunk;
+    while (rest.length > 0 || this.body === 0)
+      rest = this.body === undefined ? this.readHeader(rest) : this.readBody(rest, this.body);
+  }
+
+  private readHeader(chunk: Buffer): Buffer {
+    const data = this.header.length === 0 ? chunk : Buffer.concat([this.header, chunk]);
+    const end = data.indexOf("\r\n\r\n");
+    if (end < 0) {
+      this.header = data;
+      return Buffer.alloc(0);
+    }
+    const lengths = [
+      ...data
+        .subarray(0, end)
+        .toString("ascii")
+        .matchAll(/^content-length: *(\d+) *$/gimu),
+    ];
+    if (lengths.length !== 1) throw new Error("LSP frame needs exactly one numeric Content-Length");
+    const rest = data.subarray(end + 4);
+    this.size = end + 4;
+    this.body = Number(lengths[0]?.[1]);
+    this.header = Buffer.alloc(0);
+    return rest;
+  }
+
+  private readBody(chunk: Buffer, body: number): Buffer {
+    const taken = Math.min(body, chunk.length);
+    this.size += taken;
+    this.body = body - taken;
+    if (this.body === 0) {
+      this.sizes.push(this.size);
+      this.body = undefined;
+    }
+    return chunk.subarray(taken);
+  }
+}
+
 export class LanguageServer {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly connection: rpc.MessageConnection;
@@ -50,17 +95,26 @@ export class LanguageServer {
     this.child = spawn(config.command, config.args, {
       cwd: root,
       stdio: "pipe",
+      detached: process.platform !== "win32",
       env: {
         HOME: homedir(),
         ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
       },
     });
-    let bytes = 0;
+    // Bytes stay held until the connection dequeues their message, because the
+    // reader and the connection both queue messages before handling them.
+    const frames = new FrameSizes();
+    let held = 0;
     this.input = new Transform({
       transform(chunk: Buffer, _encoding: BufferEncoding, done: TransformCallback) {
-        bytes += chunk.length;
-        if (bytes > 8 * 1024 * 1024) done(new Error("LSP wire budget exceeded"));
-        else done(null, chunk);
+        held += chunk.length;
+        if (held > 8 * 1024 * 1024) return done(new Error("LSP wire budget exceeded"));
+        try {
+          frames.scan(chunk);
+        } catch (error) {
+          return done(error instanceof Error ? error : new Error("Invalid LSP frame"));
+        }
+        done(null, chunk);
       },
     });
     this.child.stdout.pipe(this.input);
@@ -70,12 +124,22 @@ export class LanguageServer {
     this.connection = rpc.createMessageConnection(
       reader,
       new rpc.StreamMessageWriter(this.child.stdin),
+      undefined,
+      {
+        messageStrategy: {
+          handleMessage: (message, next) => {
+            held -= frames.sizes.shift() ?? 0;
+            return next(message);
+          },
+        },
+      },
     );
     this.child.stderr.on("data", (chunk: Buffer) => {
       this.stderr = (this.stderr + chunk.toString("utf8")).slice(-4000);
     });
     this.input.on("error", (error: Error) => this.fail(error));
     this.connection.onClose(() => this.fail(new Error("LSP connection closed")));
+    this.connection.onError(([error]) => this.fail(error));
     this.exited = new Promise((resolve) => {
       this.child.once("error", (error: Error) => {
         this.fail(error);
@@ -195,12 +259,26 @@ export class LanguageServer {
     this.child.stdin.destroy();
     this.child.stdout.destroy();
     this.child.stderr.destroy();
-    if (this.child.exitCode === null && this.child.signalCode === null) this.child.kill();
-    const deadline = setTimeout(() => this.child.kill("SIGKILL"), 2000);
+    this.signal("SIGTERM");
+    const deadline = setTimeout(() => this.signal("SIGKILL"), 2000);
+    await this.exited;
+    // Descendants that ignore SIGTERM outlive the server; keep their deadline.
+    if (!this.signal(0)) clearTimeout(deadline);
+  }
+
+  /** Signals the server's process group on POSIX; returns whether it still exists. */
+  private signal(signal: NodeJS.Signals | 0): boolean {
+    const pid = this.child.pid;
+    if (process.platform === "win32" || pid === undefined) return this.child.kill(signal);
     try {
-      await this.exited;
-    } finally {
-      clearTimeout(deadline);
+      process.kill(-pid, signal);
+      return true;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error)) throw error;
+      // EPERM: a member exists but cannot be signalled, so the deadline stays.
+      if (error.code === "EPERM") return true;
+      if (error.code === "ESRCH") return false;
+      throw error;
     }
   }
 }
