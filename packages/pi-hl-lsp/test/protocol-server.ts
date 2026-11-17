@@ -8,6 +8,12 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 import rpc from "vscode-jsonrpc/node";
 const mode = process.argv[2];
+// These servers outlive SIGTERM and a closed stdin, like a hung real server.
+const stubborn = mode === "stubborn-server" || mode === "stubborn-garbage";
+if (stubborn) {
+  process.on("SIGTERM", () => {});
+  setInterval(() => {}, 1000);
+}
 // A launch appends one line here, so a test can count launches without reading internals.
 const spawnLog = process.argv[3];
 if (spawnLog !== undefined && spawnLog !== "--ready") appendFileSync(spawnLog, `${process.pid}\n`);
@@ -41,11 +47,38 @@ const rawReplies = new Map<string | undefined, () => string>([
     () =>
       `content-length: 1000\r\nContent-Length: 30\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
   ],
+  ["hex-length", () => `Content-Length: 0x1E\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`],
   ["cr-cr", () => `Content-Length: 2\r\r\n\r\n{}${frames(10)}`],
   [
     "double-length",
     () =>
       `Content-Length: 1000\r\nContent-Length: 30x\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
+  ],
+]);
+const replies = new Map<string | undefined, () => object | Promise<object>>([
+  ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
+  ["stubborn-server", () => ({ pid: process.pid })],
+  [
+    "stubborn-garbage",
+    () => {
+      setTimeout(() => process.stdout.write("Content-Length: 2\r\n\r\n{x"), 100);
+      return {};
+    },
+  ],
+  [
+    "grandchild",
+    () => {
+      spawn("sleep", ["60"]);
+      return { group: process.pid };
+    },
+  ],
+  [
+    "stubborn-grandchild",
+    async () => {
+      const child = spawn("sh", ["-c", "trap '' TERM; echo ready; exec sleep 60"]);
+      await once(child.stdout, "data");
+      return { group: process.pid };
+    },
   ],
 ]);
 connection.onRequest("initialize", async () => {
@@ -77,21 +110,8 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     process.stdout.write(raw());
     return new Promise<never>(() => {});
   }
-  if (mode === "stubborn-server") {
-    process.on("SIGTERM", () => {});
-    setInterval(() => {}, 1000);
-    return { pid: process.pid };
-  }
-  if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
-  if (mode === "grandchild") {
-    spawn("sleep", ["60"]);
-    return { group: process.pid };
-  }
-  if (mode === "stubborn-grandchild") {
-    const child = spawn("sh", ["-c", "trap '' TERM; echo ready; exec sleep 60"]);
-    await once(child.stdout, "data");
-    return { group: process.pid };
-  }
+  const reply = replies.get(mode);
+  if (reply) return reply();
   if (mode === "effects") {
     try {
       await connection.sendRequest("workspace/applyEdit", {
@@ -134,7 +154,7 @@ connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
 });
 connection.onClose(() => {
-  if (mode !== "stubborn-server") process.exit(0);
+  if (!stubborn) process.exit(0);
 });
 connection.listen();
 if (spawnLog === "--ready")

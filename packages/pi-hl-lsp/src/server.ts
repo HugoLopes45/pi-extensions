@@ -85,7 +85,6 @@ export class LanguageServer {
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly connection: rpc.MessageConnection;
   private readonly input: Transform;
-  private readonly exited: Promise<void>;
   private closing: Promise<void> | undefined;
   private failure: Error | undefined;
   private stopped = false;
@@ -146,15 +145,9 @@ export class LanguageServer {
     this.input.on("error", (error: Error) => this.fail(error));
     this.connection.onClose(() => this.fail(new Error("LSP connection closed")));
     this.connection.onError(([error]) => this.fail(error));
-    this.exited = new Promise((resolve) => {
-      this.child.once("error", (error: Error) => {
-        this.fail(error);
-        resolve();
-      });
-      this.child.once("exit", (code) => {
-        if (!this.stopped) this.fail(new Error(`LSP process exited (${code}): ${this.stderr}`));
-        resolve();
-      });
+    this.child.once("error", (error: Error) => this.fail(error));
+    this.child.once("exit", (code) => {
+      if (!this.stopped) this.fail(new Error(`LSP process exited (${code}): ${this.stderr}`));
     });
     this.connection.onNotification("textDocument/publishDiagnostics", (value: unknown) => {
       if (this.stopped) return;
@@ -167,9 +160,10 @@ export class LanguageServer {
     this.connection.listen();
   }
 
-  private fail(error: Error): void {
-    this.failure ??= error;
-    void this.dispose();
+  private fail(cause: Error): void {
+    this.failure ??= cause;
+    // Callers of dispose() receive the same rejection; this path only starts the cleanup.
+    this.dispose().catch(() => {});
   }
 
   get active(): boolean {
@@ -269,10 +263,8 @@ export class LanguageServer {
     const deadline = performance.now() + 2000;
     // Pi may exit once dispose resolves, so a pending SIGKILL timer would never fire.
     while (this.signal(0) !== "gone" && performance.now() < deadline) await delay(50);
-    const killed = this.signal("SIGKILL");
-    // SIGKILL can be refused or stall; dispose still settles and reports the leftover group.
-    const exited = await Promise.race([this.exited.then(() => true), delay(500, false)]);
-    if (killed === "refused" || !exited) this.onClose(new Error("LSP process group did not stop"));
+    // A sent SIGKILL is enforced by the kernel; a refused one leaves the group alive.
+    if (this.signal("SIGKILL") === "refused") throw new Error("LSP process group did not stop");
   }
 
   private signal(signal: NodeJS.Signals | 0): "sent" | "gone" | "refused" {

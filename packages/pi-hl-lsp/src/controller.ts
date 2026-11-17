@@ -214,8 +214,13 @@ export class LspController {
     const previous = this.instances.get(key);
     if (previous?.client.active) return previous;
     const failed = [...this.instances].filter(([, existing]) => !existing.client.active);
-    for (const [other] of failed) this.instances.delete(other);
-    await Promise.all(failed.map(([, existing]) => existing.client.dispose()));
+    // Evicted instances stay visible to dispose() until their process group is stopped.
+    try {
+      await Promise.all(failed.map(([, existing]) => existing.client.dispose()));
+    } finally {
+      for (const [other, existing] of failed)
+        if (this.instances.get(other) === existing) this.instances.delete(other);
+    }
     if (this.instances.size >= 8) return undefined;
     signal.throwIfAborted();
     const state: Instance["state"] = { document: undefined };
@@ -375,8 +380,9 @@ export class LspController {
 
   async dispose(): Promise<void> {
     this.lifetime.abort();
-    await Promise.all([...this.instances.values()].map((instance) => instance.client.dispose()));
+    const instances = [...this.instances.values()];
     this.instances.clear();
     this.selected = undefined;
+    await Promise.all(instances.map((instance) => instance.client.dispose()));
   }
 }

@@ -34,7 +34,13 @@ async function server(
       onClose(error);
     },
   );
-  onTestFinished(() => client.dispose());
+  onTestFinished(() =>
+    client.dispose().catch((error: unknown) => {
+      // A test that makes SIGKILL fail has already asserted this rejection.
+      if (!(error instanceof Error && error.message === "LSP process group did not stop"))
+        throw error;
+    }),
+  );
   await ready.promise;
   return client;
 }
@@ -108,7 +114,7 @@ it("rejects a frame whose Content-Length the reader would read differently", asy
   expect(await hoverWithin("double-length")).toMatch(/Content-Length/u);
 });
 
-it.each(["mixed-case-length", "cr-cr"])(
+it.each(["mixed-case-length", "cr-cr", "hex-length"])(
   "rejects a frame header the reader would split differently (%s)",
   async (mode) => {
     expect(await hoverWithin(mode)).toMatch(/^LSP frame/u);
@@ -179,38 +185,37 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
-it.skipIf(process.platform === "win32").each([
-  ["stalls", (): true => true],
-  [
-    "is refused",
-    (): true => {
-      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-    },
-  ],
-])("reports once, without rejecting, when SIGKILL %s", async (_case, sigkill) => {
-  const errors: Error[] = [];
-  const client = await server("stubborn-server", 5000, undefined, (error) => errors.push(error));
-  await client.initialize();
-  const reply = await client.request("textDocument/hover", {});
-  if (!(typeof reply === "object" && reply !== null && "pid" in reply))
-    throw new Error("Fixture did not report its pid");
-  const { pid } = reply;
-  if (typeof pid !== "number") throw new Error("Fixture pid is not a number");
-  const kill = process.kill.bind(process);
-  vi.spyOn(process, "kill").mockImplementation((target, signal) =>
-    signal === "SIGKILL" ? sigkill() : kill(target, signal),
-  );
-  onTestFinished(() => {
-    vi.restoreAllMocks();
-    process.kill(pid, "SIGKILL");
-  });
-  const outcome = await Promise.race([
-    client.dispose().then(() => "disposed"),
-    delay(3000, "waiting"),
-  ]);
-  expect(outcome).toBe("disposed");
-  expect(errors.filter((error) => /did not stop/u.test(error.message))).toHaveLength(1);
-});
+it.skipIf(process.platform === "win32")(
+  "leaves no unhandled rejection when a failed server refuses SIGKILL",
+  async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", record);
+    const client = await server("stubborn-server", 5000, () => {
+      throw new Error("Publication rejected");
+    });
+    await client.initialize();
+    const reply = await client.request("textDocument/hover", {});
+    if (!(typeof reply === "object" && reply !== null && "pid" in reply))
+      throw new Error("Fixture did not report its pid");
+    const { pid } = reply;
+    if (typeof pid !== "number") throw new Error("Fixture pid is not a number");
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+      if (signal === "SIGKILL") throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      return kill(target, signal);
+    });
+    onTestFinished(() => {
+      process.off("unhandledRejection", record);
+      vi.restoreAllMocks();
+      process.kill(pid, "SIGKILL");
+    });
+    await client.notify("test/fail", {});
+    await delay(2600);
+    expect(client.active).toBe(false);
+    expect(unhandled).toEqual([]);
+  },
+);
 
 it("decodes frames split into single bytes", async () => {
   const client = await server("fragmented", 5000);
