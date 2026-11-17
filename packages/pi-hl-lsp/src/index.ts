@@ -23,7 +23,7 @@ import {
 } from "./controller.js";
 import { formatNewErrors } from "./format.js";
 import type { LspChange } from "./menu.js";
-import { outside } from "./routing.js";
+import { outside } from "./project-files.js";
 import { commandSpec, lspSettings, readSettings } from "./settings.js";
 import { bounded } from "./text.js";
 

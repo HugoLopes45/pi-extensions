@@ -7,7 +7,7 @@ import { errorText } from "pi-hl-utils/errors";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
-import { outside } from "./routing.js";
+import { outside } from "./project-files.js";
 
 const MAX_EDITS = 1000;
 const lineBreakPattern = /\r\n|\r|\n/gu;

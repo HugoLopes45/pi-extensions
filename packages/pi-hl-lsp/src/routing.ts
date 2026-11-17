@@ -1,9 +1,10 @@
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { realpath } from "node:fs/promises";
+import { dirname, extname, isAbsolute, resolve } from "node:path";
 
 import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
-import { isMissingFileError } from "pi-hl-utils/errors";
 
+import { presets, type Refusal } from "./presets.js";
+import { isFile, nearestRoot, outside, realpathIfExists } from "./project-files.js";
 import type { ServerFamily } from "./settings.js";
 
 export type Route =
@@ -21,86 +22,28 @@ export type Route =
       reason: string;
     };
 
-export function outside(base: string, path: string): boolean {
-  const rel = relative(base, path);
-  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+async function projectRoot(
+  family: ServerFamily,
+  path: string,
+  base: string,
+): Promise<string | Refusal | undefined> {
+  const preset = presets[family];
+  const directory = dirname(path);
+  const nearest =
+    (await nearestRoot(directory, base, preset.rootMarkers)) ??
+    (preset.fallbackMarkers
+      ? await nearestRoot(directory, base, preset.fallbackMarkers)
+      : undefined);
+  if (!nearest || !preset.workspaceRoot) return nearest;
+  return preset.workspaceRoot(nearest, base);
 }
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch (error) {
-    if (isMissingFileError(error)) return false;
-    throw error;
-  }
-}
-
-const maxManifestBytes = 64 * 1024;
-
-async function readManifest(path: string): Promise<string | undefined> {
-  try {
-    const info = await lstat(path);
-    if (!info.isFile() || info.size > maxManifestBytes) return undefined;
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (isMissingFileError(error)) return undefined;
-    throw error;
-  }
-}
-
-async function realpathIfExists(path: string): Promise<string | undefined> {
-  try {
-    return await realpath(path);
-  } catch (error) {
-    if (isMissingFileError(error)) return undefined;
-    throw error;
-  }
-}
-
-const projectMarkers: Record<ServerFamily, string[]> = {
-  typescript: ["tsconfig.json", "jsconfig.json", "package.json"],
-  python: ["pyproject.toml", "pyrightconfig.json", "setup.py", "setup.cfg"],
-  rust: ["Cargo.toml", "rust-project.json"],
-};
-
-function insideDependencies(boundary: string, dir: string): boolean {
-  return relative(boundary, dir).split(sep).includes("node_modules");
-}
-
-async function nearestRoot(
+async function environmentProblem(
+  family: ServerFamily,
   root: string,
-  boundary: string,
-  markers: string[],
-): Promise<string | undefined> {
-  if (!insideDependencies(boundary, root)) {
-    const matches = await Promise.all(markers.map((marker) => isFile(join(root, marker))));
-    if (matches.some(Boolean)) return root;
-  }
-  return root === boundary ? undefined : nearestRoot(dirname(root), boundary, markers);
-}
-
-type Refusal = { outcome: "blocked" | "ambiguous"; reason: string };
-
-async function pythonEnvironment(root: string, boundary: string): Promise<Refusal | undefined> {
-  const environments = await Promise.all(
-    [".venv", "venv"].map(async (name) => {
-      return (await isFile(join(root, name, "pyvenv.cfg")))
-        ? realpath(join(root, name))
-        : undefined;
-    }),
-  );
-  const candidates = environments.filter((path) => path !== undefined);
-  if (candidates.some((path) => outside(boundary, path)))
-    return {
-      outcome: "blocked",
-      reason: "Environment is outside the workspace boundary",
-    };
-  if (candidates.length > 1)
-    return {
-      outcome: "ambiguous",
-      reason: "Two Python environments (.venv and venv); ask the user which to keep",
-    };
-  return undefined;
+  base: string,
+): Promise<Refusal | undefined> {
+  return presets[family].environment?.(root, base);
 }
 
 function documentLanguage(path: string, language: string): string {
@@ -120,48 +63,6 @@ function serverLanguage(path: string): { family: ServerFamily; language: string 
     family,
     language: documentLanguage(path, detected === "javascript" ? detected : family),
   };
-}
-
-const workspaceHeader = /^\s*\[workspace\]\s*$/mu;
-
-async function cargoWorkspace(root: string, base: string): Promise<string | Refusal> {
-  let parentManifest = false;
-  for (let dir = root; ; dir = dirname(dir)) {
-    const text = await readManifest(join(dir, "Cargo.toml"));
-    if (text !== undefined && workspaceHeader.test(text)) return dir;
-    if (dir !== root && (await isFile(join(dir, "Cargo.toml")))) parentManifest = true;
-    if (dir === base) break;
-  }
-  return parentManifest
-    ? {
-        outcome: "ambiguous",
-        reason:
-          "Parent Cargo.toml without a readable [workspace]; declare [workspace] in the parent or open the crate on its own",
-      }
-    : root;
-}
-
-async function projectRoot(
-  family: ServerFamily,
-  path: string,
-  base: string,
-): Promise<string | Refusal | undefined> {
-  const directory = dirname(path);
-  // requirements.txt marks a Python root only when no projectMarkers entry is found.
-  const nearest =
-    (await nearestRoot(directory, base, projectMarkers[family])) ??
-    (family === "python" ? await nearestRoot(directory, base, ["requirements.txt"]) : undefined);
-  if (!nearest || family !== "rust") return nearest;
-  return cargoWorkspace(nearest, base);
-}
-
-async function environmentProblem(
-  family: ServerFamily,
-  root: string,
-  base: string,
-): Promise<Refusal | undefined> {
-  if (family === "python") return pythonEnvironment(root, base);
-  return undefined;
 }
 
 export async function resolveRoute(file: string, boundary: string): Promise<Route> {

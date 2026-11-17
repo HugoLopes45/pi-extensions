@@ -36,6 +36,7 @@ import {
   formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
+import { outside } from "./project-files.js";
 import {
   applyTextEdits,
   applyWorkspaceEdit,
@@ -44,7 +45,7 @@ import {
   type ChangedFile,
   type FileMove,
 } from "./rename.js";
-import { outside, resolveRoute, type Route } from "./routing.js";
+import { resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import {
   serverFamilies,
