@@ -35,6 +35,7 @@ const initializedSchema = Type.Object({
     renameProvider: Type.Optional(
       Type.Union([Type.Boolean(), Type.Object({ prepareProvider: Type.Optional(Type.Boolean()) })]),
     ),
+    callHierarchyProvider: provider,
   }),
 });
 export type Initialization = Static<typeof initializedSchema>;
@@ -317,6 +318,7 @@ export class LanguageServer {
             diagnostic: { dynamicRegistration: true },
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             hover: { contentFormat: ["markdown", "plaintext"] },
+            callHierarchy: {},
           },
           window: { workDoneProgress: true },
           experimental: { serverStatusNotification: true },

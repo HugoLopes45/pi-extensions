@@ -122,6 +122,11 @@ const staticPullModes = new Set<string | undefined>([
 ]);
 const pullRegistration = { id: "pull", method: "textDocument/diagnostic" };
 const typeNavigationModes = new Set<string | undefined>(["type-navigation"]);
+const callModes = new Set<string | undefined>([
+  "call-hierarchy",
+  "call-hierarchy-several",
+  "call-hierarchy-bogus",
+]);
 // Loading modes report project work, and their workspace symbol replies log when the server answered.
 const loadingModes = new Set<string | undefined>([
   "progress-load",
@@ -183,6 +188,7 @@ function capabilities() {
     ...(typeNavigationModes.has(mode)
       ? { typeDefinitionProvider: true, implementationProvider: true }
       : {}),
+    ...(callModes.has(mode) ? { callHierarchyProvider: true } : {}),
     ...(mode === "workspace-symbols" || loadingModes.has(mode)
       ? { workspaceSymbolProvider: true }
       : {}),
@@ -337,6 +343,50 @@ connection.onRequest("textDocument/rename", (params: unknown): object => {
       },
     };
   return { changes: { [uri]: [local], [sibling]: [imported] } };
+});
+// Call hierarchy items are named after the item they answer for, so a test sees which item was sent.
+function callItem(name: string, uri: string, line: number, character: number) {
+  return {
+    name,
+    kind: 12,
+    uri,
+    range: span(line, character),
+    selectionRange: span(line, character),
+  };
+}
+const callItemParams = Type.Object({
+  item: Type.Object({ name: Type.String(), uri: Type.String() }),
+});
+connection.onRequest("textDocument/prepareCallHierarchy", (params: unknown): object[] => {
+  if (!Value.Check(textDocumentPosition, params))
+    throw new Error("Invalid prepare call hierarchy fixture request");
+  const { uri } = params.textDocument;
+  if (mode === "call-hierarchy-several")
+    return [callItem("value", uri, 0, 6), callItem("other", uri, 1, 0)];
+  return [callItem("value", uri, 0, 6)];
+});
+connection.onRequest("callHierarchy/incomingCalls", (params: unknown): object[] => {
+  if (!Value.Check(callItemParams, params))
+    throw new Error("Invalid incoming calls fixture request");
+  if (mode === "call-hierarchy-bogus") return [{ bogus: 1 }];
+  const from = callItem(
+    `caller of ${params.item.name}`,
+    new URL("./caller.ts", params.item.uri).href,
+    2,
+    4,
+  );
+  return [{ from, fromRanges: [span(2, 4)] }];
+});
+connection.onRequest("callHierarchy/outgoingCalls", (params: unknown): object[] => {
+  if (!Value.Check(callItemParams, params))
+    throw new Error("Invalid outgoing calls fixture request");
+  const to = callItem(
+    `callee of ${params.item.name}`,
+    new URL("./callee.ts", params.item.uri).href,
+    0,
+    0,
+  );
+  return [{ to, fromRanges: [span(1, 2)] }];
 });
 connection.onRequest("textDocument/definition", (params: unknown): object => {
   if (mode === "malformed-definition") return { bogus: 1 };

@@ -426,6 +426,40 @@ it("queries type definition and implementation when the server advertises them",
   });
 });
 
+it("queries incoming and outgoing calls of the prepared item", async () => {
+  const { instance, file } = await controller("call-hierarchy");
+  expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "caller.ts:3:5 caller of value",
+  });
+  expect(await instance.query("outgoing_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "callee.ts:1:1 callee of value",
+  });
+});
+
+it("says which prepared item the calls belong to when prepare returns several", async () => {
+  const { instance, file } = await controller("call-hierarchy-several");
+  expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "prepare returned 2 items; calls of the first: value\ncaller.ts:3:5 caller of value",
+  });
+});
+
+it("does not issue call hierarchy requests when the server lacks the provider", async () => {
+  const { instance, file } = await controller();
+  expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "unsupported",
+  });
+});
+
+it("fails a malformed call hierarchy response", async () => {
+  const { instance, file } = await controller("call-hierarchy-bogus");
+  await expect(instance.query("incoming_calls", file, { line: 1, column: 7 })).rejects.toThrow(
+    "Unexpected LSP incoming_calls response shape",
+  );
+});
+
 it("finds a symbol by name in a project, opening the queried file first", async () => {
   const { instance, file } = await controller("workspace-symbols");
   expect(

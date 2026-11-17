@@ -16,6 +16,8 @@ import {
   type Observation,
 } from "./diagnostics.js";
 import {
+  callHierarchyItems,
+  formatCalls,
   formatDiagnostics,
   formatHover,
   formatLocations,
@@ -40,6 +42,8 @@ export type Operation =
   | "type_definition"
   | "implementation"
   | "references"
+  | "incoming_calls"
+  | "outgoing_calls"
   | "symbols"
   | "workspace_symbols"
   | "diagnostics";
@@ -94,6 +98,8 @@ const capability = {
   references: "referencesProvider",
   symbols: "documentSymbolProvider",
   workspace_symbols: "workspaceSymbolProvider",
+  incoming_calls: "callHierarchyProvider",
+  outgoing_calls: "callHierarchyProvider",
 } as const;
 const method = {
   hover: "textDocument/hover",
@@ -103,6 +109,8 @@ const method = {
   references: "textDocument/references",
   symbols: "textDocument/documentSymbol",
   workspace_symbols: "workspace/symbol",
+  incoming_calls: "callHierarchy/incomingCalls",
+  outgoing_calls: "callHierarchy/outgoingCalls",
 } as const;
 // Measured on typescript-language-server; see lsp-dev/research/reports/publish-timing.md.
 const SETTLE_MS = 500;
@@ -215,7 +223,7 @@ function sourceLines(document: Document, cwd: string, signal: AbortSignal): Line
 }
 
 async function formatResponse(
-  operation: Exclude<Operation, "diagnostics">,
+  operation: Exclude<Operation, "diagnostics" | "incoming_calls" | "outgoing_calls">,
   response: unknown,
   cwd: string,
   lines: LineReader,
@@ -300,6 +308,18 @@ async function readResponse(
     const observation = await diagnosticsObservation(instance, document, signal);
     return { ...observation, ...formatDiagnostics(observation) };
   }
+  if (operation === "incoming_calls" || operation === "outgoing_calls") {
+    if (!position) throw new Error("A line and a symbol or column are required");
+    const formatted = await callsResponse(
+      operation,
+      instance.client,
+      document.uri,
+      position,
+      cwd,
+      signal,
+    );
+    return { outcome: "completed", source: "untrusted_lsp", ...formatted };
+  }
   const response = await instance.client.request(
     method[operation],
     operation === "workspace_symbols"
@@ -318,6 +338,28 @@ async function readResponse(
     sourceLines(document, cwd, signal),
   );
   return { outcome: "completed", source: "untrusted_lsp", ...formatted };
+}
+
+// Calls belong to the first item that prepare returns for the position.
+async function callsResponse(
+  operation: "incoming_calls" | "outgoing_calls",
+  client: LanguageServer,
+  uri: string,
+  position: Position,
+  cwd: string,
+  signal: AbortSignal,
+) {
+  const prepared = callHierarchyItems(
+    await client.request(
+      "textDocument/prepareCallHierarchy",
+      { textDocument: { uri }, position },
+      signal,
+    ),
+  );
+  const [first] = prepared;
+  const response =
+    first === undefined ? null : await client.request(method[operation], { item: first }, signal);
+  return formatCalls(response, operation, prepared, cwd);
 }
 
 // A changed file keeps the silence memory of its previous observation.

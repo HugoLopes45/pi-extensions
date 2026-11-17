@@ -784,6 +784,26 @@ it("restores the written files when a later file cannot be written", async () =>
   );
 });
 
+it("returns call hierarchy items as the location tools do", async () => {
+  const state = await session(true, "call-hierarchy");
+  expect(
+    await tool(state, "hl_lsp_incoming_calls", {
+      file: "index.ts",
+      line: 1,
+      column: 7,
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp incoming_calls index.ts: completed\ncaller.ts:3:5 caller of value",
+      },
+    ],
+    details: { outcome: "completed" },
+  });
+});
+
 it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {
   const { runtime } = await session(true);
   for (const name of [
@@ -792,6 +812,8 @@ it("lists each hl_lsp tool with a one-line snippet in the system prompt", async 
     "type_definition",
     "implementation",
     "references",
+    "incoming_calls",
+    "outgoing_calls",
     "symbols",
     "workspace_symbols",
     "diagnostics",
@@ -809,6 +831,8 @@ it("names each hl_lsp tool in its own prompt guideline", async () => {
     "type_definition",
     "implementation",
     "references",
+    "incoming_calls",
+    "outgoing_calls",
     "symbols",
     "workspace_symbols",
     "diagnostics",

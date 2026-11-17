@@ -4,7 +4,7 @@ Private, disabled-by-default read-only LSP extension for Pi. Requires Pi 1.5.2 o
 
 ## Scope
 
-The extension provides eight read-only tools: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_type_definition`, `hl_lsp_implementation`, `hl_lsp_references`, `hl_lsp_symbols`, `hl_lsp_workspace_symbols`, and `hl_lsp_diagnostics`. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column. `hl_lsp_workspace_symbols` takes a query and finds matching symbols across the project of any file you pass.
+The extension provides ten read-only tools: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_type_definition`, `hl_lsp_implementation`, `hl_lsp_references`, `hl_lsp_incoming_calls`, `hl_lsp_outgoing_calls`, `hl_lsp_symbols`, `hl_lsp_workspace_symbols`, and `hl_lsp_diagnostics`. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column. Call tools use the first item that the server prepares for the position, and name it when the server prepares several. `hl_lsp_workspace_symbols` takes a query and finds matching symbols across the project of any file you pass.
 
 `hl_lsp_status` lists each configured server key with its state, root, open document count and supported tools. It starts no server. `hl_lsp_reload` takes one configured server key and stops its running instances; the next request starts a fresh one. Both tools obey the same enablement, trust and consent gate as the others.
 

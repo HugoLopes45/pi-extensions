@@ -52,6 +52,8 @@ const promptSnippet = {
   type_definition: "Returns type definition locations for a file position.",
   implementation: "Returns implementation locations for a file position.",
   references: "Returns reference locations for a file position.",
+  incoming_calls: "Returns the callers of the function or method at a file position.",
+  outgoing_calls: "Returns the callees of the function or method at a file position.",
   symbols: "Returns the symbol outline of a file.",
   workspace_symbols:
     "Returns project symbols whose name matches a query; any file of the project selects it.",
@@ -72,6 +74,10 @@ const promptGuidelines = {
     "Use hl_lsp_implementation for implementations of an interface or abstract member; pass the 1-based line from read or grep and the symbol name.",
   references:
     "Use hl_lsp_references for references; pass the 1-based line from read or grep and the symbol name.",
+  incoming_calls:
+    "Use hl_lsp_incoming_calls for callers of a function or method; pass the 1-based line from read or grep and the symbol name.",
+  outgoing_calls:
+    "Use hl_lsp_outgoing_calls for callees of a function or method; pass the 1-based line from read or grep and the symbol name.",
   symbols: "Use hl_lsp_symbols for a file outline before reading the whole file.",
   workspace_symbols:
     "Use hl_lsp_workspace_symbols to find where a named symbol is defined; pass any file of the project and the name as query.",
@@ -315,6 +321,8 @@ export default function hlLsp(pi: ExtensionAPI): void {
     "type_definition",
     "implementation",
     "references",
+    "incoming_calls",
+    "outgoing_calls",
   ] as const) {
     pi.registerTool({
       name: `hl_lsp_${operation}`,

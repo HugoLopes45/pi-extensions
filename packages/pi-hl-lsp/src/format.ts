@@ -93,6 +93,21 @@ const workspaceSymbol = Type.Object({
   kind: symbolKind,
   location: Type.Union([location, Type.Object({ uri: Type.String() })]),
 });
+const callHierarchyItem = Type.Object({
+  name: Type.String(),
+  kind: symbolKind,
+  uri: Type.String(),
+  range,
+  selectionRange: range,
+});
+const incomingCall = Type.Object({
+  from: callHierarchyItem,
+  fromRanges: Type.Array(range),
+});
+const outgoingCall = Type.Object({
+  to: callHierarchyItem,
+  fromRanges: Type.Array(range),
+});
 
 type Place = {
   uri: string;
@@ -130,6 +145,41 @@ export async function formatLocations(
     places.length - shown.length,
     rendered.some((line) => line.truncated),
   );
+}
+
+// Items keep the fields the schema does not name, so the server receives them back unchanged.
+export function callHierarchyItems(response: unknown) {
+  if (response === null) return [];
+  if (!Value.Check(Type.Array(Type.Unknown()), response))
+    throw unexpected("prepare_call_hierarchy");
+  return response.map((item) => checked(callHierarchyItem, item, "prepare_call_hierarchy"));
+}
+
+// The first prepared item is the one whose calls were requested; several items are named in the output.
+export function formatCalls(
+  response: unknown,
+  operation: "incoming_calls" | "outgoing_calls",
+  prepared: ReturnType<typeof callHierarchyItems>,
+  cwd: string,
+): Formatted {
+  if (response === null) return emptyResult();
+  if (!Value.Check(Type.Array(Type.Unknown()), response)) throw unexpected(operation);
+  if (response.length === 0) return emptyResult();
+  const targets = response.map((call) => callTarget(call, operation));
+  const shown = targets.slice(0, locationLimit);
+  const rendered = shown.map((target) => renderCall(target, operation, cwd));
+  const body = renderBody(
+    rendered.map((line) => line.text),
+    targets.length - shown.length,
+    rendered.some((line) => line.truncated),
+  );
+  const [first] = prepared;
+  if (first === undefined || prepared.length < 2) return body;
+  const name = bounded(oneLine(first.name), sourceLimits);
+  return {
+    text: `prepare returned ${prepared.length} items; calls of the first: ${name.content}\n${body.text}`,
+    truncated: body.truncated || name.truncated,
+  };
 }
 
 export function formatSymbols(response: unknown): Formatted {
@@ -251,6 +301,23 @@ function flatSymbols(nodes: unknown[], lines: string[]): void {
     const name = oneLine(info.name);
     lines.push(`${symbolKindName(info.kind)} ${name} ${lineSpan(info.location.range)}`);
   }
+}
+
+function callTarget(call: unknown, operation: "incoming_calls" | "outgoing_calls") {
+  if (operation === "incoming_calls") return checked(incomingCall, call, operation).from;
+  return checked(outgoingCall, call, operation).to;
+}
+
+// The caller or callee is printed at the start of its selection, with its name in place of source text.
+function renderCall(
+  target: ReturnType<typeof callTarget>,
+  operation: string,
+  cwd: string,
+): Rendered {
+  const place = toPlace(target.uri, target.selectionRange.start, operation);
+  const name = bounded(oneLine(target.name), sourceLimits);
+  const head = oneLine(`${displayPath(place, cwd)}:${place.line + 1}:${place.character + 1}`);
+  return { text: `${head} ${name.content}`, truncated: name.truncated };
 }
 
 function responseItems(response: unknown, operation: string): unknown[] {
