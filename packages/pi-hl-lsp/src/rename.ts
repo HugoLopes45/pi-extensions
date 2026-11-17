@@ -1,5 +1,5 @@
-import { readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { relative } from "node:path";
+import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
@@ -43,6 +43,11 @@ export type ApplyOutcome =
   | { outcome: "refused"; reason: string }
   | { outcome: "failed"; reason: string };
 
+export type FileMove = { from: string; to: string };
+export type MovePlan =
+  | { outcome: "planned"; move: FileMove }
+  | { outcome: "refused"; reason: string };
+
 type Edit = Static<typeof textEdit>;
 type Target = {
   file: string;
@@ -55,11 +60,13 @@ type Group = { uri: string; version: number | null | undefined; edits: Edit[] };
 // Thrown before any write; it becomes a refusal of the whole edit.
 class Refusal extends Error {}
 
-// Validates the edit, then plans and writes each file under its queue; a refusal or write error leaves files as they were.
+// Validates the edit, then plans and writes each file under its queue; afterWrite runs once all files are written.
+// A refusal, write error or afterWrite error leaves files as they were.
 export async function applyWorkspaceEdit(
   response: unknown,
   root: string,
   synced: SyncedDocument | undefined,
+  afterWrite?: () => Promise<void>,
 ): Promise<ApplyOutcome> {
   try {
     const targets = await targetsOf(response, root);
@@ -67,7 +74,7 @@ export async function applyWorkspaceEdit(
       targets.map((target) => target.file),
       async () => {
         const planned = await planAll(targets, root, synced);
-        return writeAll(planned, root);
+        return writeAll(planned, root, afterWrite);
       },
     );
   } catch (error) {
@@ -250,29 +257,87 @@ function applyEdits(text: string, edits: Edit[], name: string): string {
   return result;
 }
 
-// Writes every planned file, or restores the written ones when a write fails.
-async function writeAll(planned: Planned[], root: string): Promise<ApplyOutcome> {
+// Checks the new path before any server is asked: it must be free and, after realpath, inside the project.
+export async function planMove(from: string, newPath: string, root: string): Promise<MovePlan> {
+  try {
+    const target = resolve(root, newPath);
+    if ((await realpathOrMissing(target)) !== undefined)
+      throw new Refusal(`${newPath} already exists`);
+    const to = await nearestRealpath(target);
+    if (outside(root, to)) throw new Refusal("The new path is outside the project");
+    return { outcome: "planned", move: { from, to } };
+  } catch (error) {
+    if (error instanceof Refusal) return { outcome: "refused", reason: error.message };
+    throw error;
+  }
+}
+
+export async function moveFile({ from, to }: FileMove): Promise<void> {
+  await mkdir(dirname(to), { recursive: true });
+  await rename(from, to);
+}
+
+function isMissingPath(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
+}
+
+async function realpathOrMissing(path: string): Promise<string | undefined> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if (isMissingPath(error)) return undefined;
+    throw error;
+  }
+}
+
+// The real path a new file would have: its nearest existing ancestor, resolved, plus the missing names.
+async function nearestRealpath(path: string): Promise<string> {
+  return (
+    (await realpathOrMissing(path)) ?? join(await nearestRealpath(dirname(path)), basename(path))
+  );
+}
+
+// Writes every planned file and then runs afterWrite, or restores the written files when either fails.
+async function writeAll(
+  planned: Planned[],
+  root: string,
+  afterWrite: (() => Promise<void>) | undefined,
+): Promise<ApplyOutcome> {
   const attempted: Planned[] = [];
   for (const target of planned) {
     attempted.push(target);
     try {
       await writeFile(target.file, target.text);
     } catch (error) {
-      const unrestored = await restore(attempted, root);
-      const state =
-        unrestored.length === 0
-          ? "Restored every written file."
-          : `Could not restore: ${unrestored.join(", ")}.`;
-      return {
-        outcome: "failed",
-        reason: `Could not write ${relative(root, target.file)}: ${errorText(error)}. ${state}`,
-      };
+      return failed(
+        `Could not write ${relative(root, target.file)}: ${errorText(error)}.`,
+        attempted,
+        root,
+      );
     }
+  }
+  try {
+    await afterWrite?.();
+  } catch (error) {
+    return failed(`${errorText(error)}.`, attempted, root);
   }
   return {
     outcome: "written",
     changed: planned.map(({ file, edits }) => ({ file, edits: edits.length })),
   };
+}
+
+async function failed(reason: string, attempted: Planned[], root: string): Promise<ApplyOutcome> {
+  const unrestored = await restore(attempted, root);
+  const state =
+    unrestored.length === 0
+      ? "Restored every written file."
+      : `Could not restore: ${unrestored.join(", ")}.`;
+  return { outcome: "failed", reason: `${reason} ${state}` };
 }
 
 // Rewrites the original text of each attempted file, newest first; returns the names still changed.

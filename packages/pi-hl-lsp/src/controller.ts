@@ -25,7 +25,7 @@ import {
   formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
-import { applyTextEdits, applyWorkspaceEdit } from "./rename.js";
+import { applyTextEdits, applyWorkspaceEdit, moveFile, planMove, type FileMove } from "./rename.js";
 import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import {
@@ -905,6 +905,86 @@ export class LspController {
     return {
       outcome: "formatted",
       edits: applied.changed.reduce((sum, { edits }) => sum + edits, 0),
+    };
+  }
+
+  // The server computes the import edits; the edits and the move are one all-or-nothing step, and a null edit names none.
+  async renameFile(oldPath: string, newPath: string, signal?: AbortSignal) {
+    const refusal = this.gate();
+    if (refusal) return refusal;
+    const deadline = AbortSignal.any([
+      this.lifetime.signal,
+      AbortSignal.timeout(this.settings.timeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
+    deadline.throwIfAborted();
+    const route = await resolveRoute(oldPath, this.cwd);
+    if (route.outcome !== "completed") return route;
+    const config = this.settings.servers[route.server];
+    if (!config) return unconfigured(route);
+    const root = await realpath(this.cwd);
+    const plan = await planMove(route.file, newPath, root);
+    if (plan.outcome === "refused")
+      return { ...route, outcome: "refused" as const, reason: plan.reason };
+    const instance = await this.instance(route, config, deadline);
+    const { capabilities } = await ready(instance, deadline);
+    deadline.throwIfAborted();
+    if (!capabilities.workspace?.fileOperations?.willRename)
+      return {
+        ...route,
+        outcome: "unsupported" as const,
+        reason: "Server did not advertise workspace.fileOperations.willRename",
+      };
+    return this.applyFileRename(instance, route, plan.move, capabilities, root, deadline);
+  }
+
+  // The move runs after the import edits are written; if it fails, the edits are restored.
+  private async applyFileRename(
+    instance: Instance,
+    route: SelectedRoute,
+    move: FileMove,
+    capabilities: Initialization["capabilities"],
+    root: string,
+    deadline: AbortSignal,
+  ) {
+    const document =
+      instance.state.document?.file === route.file
+        ? await synchronize(
+            instance,
+            route,
+            await snapshot(route.file, deadline),
+            deadline,
+            supportsChange(capabilities),
+          )
+        : undefined;
+    const files = [
+      {
+        oldUri: pathToFileURL(move.from).href,
+        newUri: pathToFileURL(move.to).href,
+      },
+    ];
+    const edit = await instance.client.request("workspace/willRenameFiles", { files }, deadline);
+    const applied = await applyWorkspaceEdit(edit === null ? {} : edit, root, document, () =>
+      moveFile(move),
+    );
+    if (applied.outcome !== "written") return { ...route, ...applied };
+    if (capabilities.workspace?.fileOperations?.didRename)
+      await instance.client.notify("workspace/didRenameFiles", { files }, deadline);
+    if (document)
+      await synchronize(
+        instance,
+        { ...route, file: move.to },
+        await snapshot(move.to, deadline),
+        deadline,
+        false,
+      );
+    return {
+      ...route,
+      outcome: "completed" as const,
+      move,
+      changed: applied.changed.map((change) =>
+        change.file === move.from ? { ...change, file: move.to } : change,
+      ),
     };
   }
 

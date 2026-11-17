@@ -806,6 +806,110 @@ it("returns call hierarchy items as the location tools do", async () => {
   });
 });
 
+// lib.ts defines value; index.ts imports it from "./lib".
+async function renameFileSession(mode: string) {
+  const state = await session(true, mode);
+  await writeFile(join(state.cwd, "lib.ts"), "export const value = 1;\n");
+  await writeFile(join(state.cwd, "index.ts"), 'import { value } from "./lib";\n');
+  return state;
+}
+
+function renameFile(state: Awaited<ReturnType<typeof session>>, oldPath: string, newPath: string) {
+  return tool(state, "hl_lsp_rename_file", {
+    old_path: oldPath,
+    new_path: newPath,
+  });
+}
+
+it("moves the file and updates the imports that name it", async () => {
+  const state = await renameFileSession("rename-file");
+  expect(await renameFile(state, "lib.ts", "util.ts")).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp rename_file lib.ts -> util.ts: completed\nindex.ts: 1 edits\nmoved lib.ts -> util.ts\ntotal: 1 edits in 1 files",
+      },
+    ],
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe(
+    'import { value } from "./util";\n',
+  );
+  expect(await readFile(join(state.cwd, "util.ts"), "utf8")).toBe("export const value = 1;\n");
+  await expect(readFile(join(state.cwd, "lib.ts"), "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it("moves the file without edits when willRenameFiles answers null", async () => {
+  const state = await renameFileSession("rename-file-null");
+  expect(await renameFile(state, "lib.ts", "util.ts")).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp rename_file lib.ts -> util.ts: completed\nmoved lib.ts -> util.ts\ntotal: 0 edits in 0 files",
+      },
+    ],
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe(
+    'import { value } from "./lib";\n',
+  );
+  expect(await readFile(join(state.cwd, "util.ts"), "utf8")).toBe("export const value = 1;\n");
+});
+
+it("refuses a file move when the server does not advertise willRename", async () => {
+  const state = await renameFileSession("normal");
+  const result = await renameFile(state, "lib.ts", "util.ts");
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "unsupported" },
+  });
+  expect(JSON.stringify(result)).toContain("workspace.fileOperations.willRename");
+  expect(await readFile(join(state.cwd, "lib.ts"), "utf8")).toBe("export const value = 1;\n");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe(
+    'import { value } from "./lib";\n',
+  );
+});
+
+it.each([
+  ["missing.ts", "util.ts", "unavailable", "File does not exist"],
+  ["lib.ts", "index.ts", "refused", "already exists"],
+  ["lib.ts", "../outside.ts", "refused", "outside the project"],
+])(
+  "refuses a file move without moving or editing (%s to %s)",
+  async (oldPath, newPath, outcome, reason) => {
+    const state = await renameFileSession("rename-file");
+    const result = await renameFile(state, oldPath, newPath);
+    expect(result).toMatchObject({
+      isError: true,
+      details: { outcome },
+    });
+    expect(JSON.stringify(result)).toContain(reason);
+    expect(await readFile(join(state.cwd, "lib.ts"), "utf8")).toBe("export const value = 1;\n");
+    expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe(
+      'import { value } from "./lib";\n',
+    );
+  },
+);
+
+it("restores the edits when the file cannot be moved", async () => {
+  const state = await renameFileSession("rename-file");
+  await writeFile(join(state.cwd, "blocked"), "not a directory\n");
+  const result = await renameFile(state, "lib.ts", "blocked/util.ts");
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "failed" },
+  });
+  expect(JSON.stringify(result)).toContain("Restored every written file");
+  expect(await readFile(join(state.cwd, "lib.ts"), "utf8")).toBe("export const value = 1;\n");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe(
+    'import { value } from "./lib";\n',
+  );
+});
+
 it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {
   const { runtime } = await session(true);
   for (const name of [

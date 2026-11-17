@@ -37,6 +37,11 @@ const initializedSchema = Type.Object({
       Type.Union([Type.Boolean(), Type.Object({ prepareProvider: Type.Optional(Type.Boolean()) })]),
     ),
     callHierarchyProvider: provider,
+    workspace: Type.Optional(
+      Type.Object({
+        fileOperations: Type.Optional(Type.Object({ willRename: provider, didRename: provider })),
+      }),
+    ),
   }),
 });
 export type Initialization = Static<typeof initializedSchema>;
@@ -321,6 +326,7 @@ export class LanguageServer {
             hover: { contentFormat: ["markdown", "plaintext"] },
             callHierarchy: {},
           },
+          workspace: { fileOperations: { willRename: true, didRename: true } },
           window: { workDoneProgress: true },
           experimental: { serverStatusNotification: true },
         },
