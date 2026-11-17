@@ -65,11 +65,11 @@ Session overrides cannot approve executables or bypass project trust. All writes
 - Escaped file symlinks are rejected during routing. This does not provide atomic protection against concurrent filesystem changes.
 - Competing Python environments and nested Cargo manifests are not guessed. Explicit unsupported or ambiguous outcomes preserve uncertainty.
 - Virtual documents and unmarked files are unsupported.
-- Each file snapshot is limited to 1 MiB. Each session tracks at most eight server/root pairs.
+- Each file snapshot is limited to 1 MiB. Each session keeps at most eight server/root pairs running. A ninth pair stops the least recently used one first; a request still running on the stopped server fails with "LSP instance is closed".
 - Incoming server data that is not yet handled is limited to 8 MiB per instance. Bytes are released when the connection takes their message off its queue. Total traffic over a session is not limited.
 - Explicit output includes at most 20 diagnostics, with bounded messages and omission counts. Only numeric diagnostic codes are retained.
 - Navigation text is limited to 8 KiB and reports truncation. It remains untrusted server data.
-- Transport requests and notification writes have cancellation deadlines.
+- Transport requests and notification writes have cancellation deadlines. A request timeout, a cancel or an LSP error response leaves the server running. Server start has its own 60-second budget; a request that arrives while the server is still starting fails with "LSP server is still starting; retry the request", and the start continues.
 - On POSIX, each server runs in its own process group. Disposal first sends `shutdown` and then `exit` to a healthy initialized server. It then sends SIGTERM to the group, and SIGKILL if a member remains two seconds after disposal started. If SIGKILL is refused, disposal fails with "LSP process group did not stop". A descendant that leaves the group, for example by starting a new session, is not stopped. On Windows, only the server process is stopped, and process cleanup is not certified.
 - Executable identity binding, CPU limits, and resident-memory limits are not certified.
 

@@ -16,7 +16,12 @@ const fixture = fileURLToPath(new URL("./protocol-server.ts", import.meta.url));
 const events = async (spawnLog: string) =>
   (await readFile(spawnLog, "utf8")).trim().split("\n").slice(1);
 
-async function controller(mode = "normal", consent = true, trusted = true) {
+async function controller(
+  mode = "normal",
+  consent = true,
+  trusted = true,
+  overrides: Partial<LspSettings> = {},
+) {
   const cwd = await directory();
   await writeFile(join(cwd, "tsconfig.json"), "{}");
   const file = join(cwd, "index.ts");
@@ -33,6 +38,7 @@ async function controller(mode = "normal", consent = true, trusted = true) {
         args: [fixture, mode, spawnLog],
       },
     },
+    ...overrides,
   };
   const instance = new LspController(cwd, settings, trusted);
   onTestFinished(() => instance.dispose());
@@ -125,16 +131,78 @@ it("does not count failed instances toward the eight-instance limit", async () =
   expect((await readFile(spawnLog, "utf8")).trim().split("\n")).toHaveLength(9);
 });
 
-it("refuses a ninth active instance", async () => {
-  const { instance, file } = await controller();
-  for (const path of await packages(join(file, ".."), 8))
+it("evicts the oldest instance to start a ninth", async () => {
+  const { instance, file, spawnLog } = await controller();
+  const paths = await packages(join(file, ".."), 8);
+  for (const path of paths)
     expect(await instance.query("hover", path, { line: 0, character: 6 })).toMatchObject({
       outcome: "completed",
     });
+  const first = Number((await readFile(spawnLog, "utf8")).split("\n")[0]);
   expect(await instance.query("hover", file, { line: 0, character: 6 })).toMatchObject({
-    outcome: "unavailable",
-    reason: "Eight-instance session limit reached",
+    outcome: "completed",
   });
+  const roots = instance.status().instances.map((listed) => listed.root);
+  expect(roots).toHaveLength(8);
+  expect(roots).not.toContain(join(paths[0] ?? "", ".."));
+  expect(() => process.kill(first, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+});
+
+it("evicts the least recently used instance, not the first started", async () => {
+  const { instance, file } = await controller();
+  const paths = await packages(join(file, ".."), 8);
+  for (const path of [...paths, paths[0] ?? ""])
+    await instance.query("hover", path, { line: 0, character: 6 });
+  await instance.query("hover", file, { line: 0, character: 6 });
+  const roots = instance.status().instances.map((listed) => listed.root);
+  expect(roots).toContain(join(paths[0] ?? "", ".."));
+  expect(roots).not.toContain(join(paths[1] ?? "", ".."));
+});
+
+const launches = async (spawnLog: string) =>
+  (await readFile(spawnLog, "utf8")).split("\n").filter((line) => /^\d+$/u.test(line)).length;
+const position = { line: 0, character: 6 };
+
+it("warm: keeps the server after a request timeout", async () => {
+  const { instance, file, spawnLog } = await controller("ignore", true, true, { timeoutMs: 1000 });
+  await instance.query("diagnostics", file);
+  await expect(instance.query("hover", file, position)).rejects.toThrow("aborted due to timeout");
+  await expect(instance.query("hover", file, position)).rejects.toThrow("aborted due to timeout");
+  expect(await launches(spawnLog)).toBe(1);
+  expect(await events(spawnLog)).toContain("cancel");
+});
+
+it("warm: keeps the server after the caller cancels", async () => {
+  const { instance, file, spawnLog } = await controller("ignore");
+  await instance.query("diagnostics", file);
+  for (let attempt = 0; attempt < 2; attempt++)
+    await expect(instance.query("hover", file, position, AbortSignal.timeout(50))).rejects.toThrow(
+      "aborted due to timeout",
+    );
+  expect(await launches(spawnLog)).toBe(1);
+  expect(await events(spawnLog)).toContain("cancel");
+});
+
+it("warm: keeps the server after an LSP error response", async () => {
+  const { instance, file, spawnLog } = await controller("error-hover");
+  for (let attempt = 0; attempt < 2; attempt++)
+    await expect(instance.query("hover", file, position)).rejects.toThrow("content modified");
+  expect(await launches(spawnLog)).toBe(1);
+});
+
+it("warm: lets a slow server finish starting after the request deadline", async () => {
+  const { instance, file, spawnLog } = await controller("slow-init", true, true, {
+    timeoutMs: 300,
+  });
+  await expect(instance.query("hover", file, position)).rejects.toThrow("still starting");
+  await vi.waitFor(
+    async () =>
+      expect(await instance.query("hover", file, position)).toMatchObject({
+        outcome: "completed",
+      }),
+    { timeout: 3000, interval: 100 },
+  );
+  expect(await launches(spawnLog)).toBe(1);
 });
 
 it.skipIf(process.platform === "win32")("rejects dispose when SIGKILL is refused", async () => {

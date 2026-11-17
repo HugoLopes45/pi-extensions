@@ -34,6 +34,8 @@ export type Initialization = Static<typeof initializedSchema>;
 // The last 100 ms of the two-second disposal budget, kept after SIGKILL: macOS answers EPERM for a
 // group whose only member is an unreaped zombie, so the group is probed again before failing.
 const REAP_RESERVE_MS = 100;
+// Real servers index the project before answering initialize; requests keep the shorter budget.
+export const STARTUP_TIMEOUT_MS = 60_000;
 
 class FrameSizes {
   readonly sizes: number[] = [];
@@ -176,6 +178,15 @@ export class LanguageServer {
   }
 
   async initialize(signal?: AbortSignal): Promise<Initialization> {
+    try {
+      return await this.handshake(signal);
+    } catch (error) {
+      await this.dispose();
+      throw error;
+    }
+  }
+
+  private async handshake(signal?: AbortSignal): Promise<Initialization> {
     const result = await this.request(
       "initialize",
       {
@@ -187,6 +198,7 @@ export class LanguageServer {
         },
       },
       signal,
+      STARTUP_TIMEOUT_MS,
     );
     if (!Value.Check(initializedSchema, result))
       throw new Error("Invalid LSP initialization response");
@@ -196,41 +208,55 @@ export class LanguageServer {
     ) {
       throw new Error("Unsupported LSP position encoding");
     }
-    await this.notify("initialized", {}, signal);
+    await this.notify("initialized", {}, signal, STARTUP_TIMEOUT_MS);
     this.initialized = true;
     return result;
   }
 
-  async request(method: string, params: object, signal?: AbortSignal): Promise<unknown> {
+  // An abort or an LSP error response leaves the server running; only a broken transport stops it.
+  async request(
+    method: string,
+    params: object,
+    signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
+  ): Promise<unknown> {
     if (this.failure) throw this.failure;
     if (this.stopped) throw new Error("LSP instance is closed");
-    const deadline = AbortSignal.timeout(this.timeoutMs);
+    const deadline = AbortSignal.timeout(timeoutMs);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const cancellation = new rpc.CancellationTokenSource();
+    const aborted = Promise.withResolvers<never>();
     const abort = () => {
       // During stop() only exit may follow shutdown, and stop() closes the connection itself.
-      if (this.stopped) return;
-      cancellation.cancel();
-      this.connection.dispose();
+      if (!this.stopped) cancellation.cancel();
+      aborted.reject(combined.reason);
     };
     combined.addEventListener("abort", abort, { once: true });
     try {
       combined.throwIfAborted();
-      return await this.connection.sendRequest<unknown>(method, params, cancellation.token);
+      const reply = this.connection.sendRequest<unknown>(method, params, cancellation.token);
+      // A reply that lands after the caller gave up has no listener left.
+      reply.catch(() => {});
+      return await Promise.race([reply, aborted.promise]);
     } catch (error) {
       combined.throwIfAborted();
       throw this.failure ?? error;
     } finally {
       combined.removeEventListener("abort", abort);
       cancellation.dispose();
-      if (combined.aborted || this.failure) await this.dispose();
+      if (this.failure) await this.dispose();
     }
   }
 
-  async notify(method: string, params: object, signal?: AbortSignal): Promise<void> {
+  async notify(
+    method: string,
+    params: object,
+    signal?: AbortSignal,
+    timeoutMs = this.timeoutMs,
+  ): Promise<void> {
     if (this.failure) throw this.failure;
     if (this.stopped) throw new Error("LSP instance is closed");
-    const deadline = AbortSignal.timeout(this.timeoutMs);
+    const deadline = AbortSignal.timeout(timeoutMs);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const aborted = Promise.withResolvers<never>();
     const abort = () => {

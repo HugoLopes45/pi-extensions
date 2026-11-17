@@ -192,6 +192,18 @@ function missingCapability(
   return undefined;
 }
 
+async function ready(instance: Instance, deadline: AbortSignal): Promise<Initialization> {
+  const aborted = Promise.withResolvers<never>();
+  const abort = () => aborted.reject(new Error("LSP server is still starting; retry the request"));
+  deadline.addEventListener("abort", abort, { once: true });
+  try {
+    deadline.throwIfAborted();
+    return await Promise.race([instance.ready, aborted.promise]);
+  } finally {
+    deadline.removeEventListener("abort", abort);
+  }
+}
+
 // Every cleanup must finish before the caller continues, even when another one fails first.
 async function disposeAll(instances: Instance[]): Promise<void> {
   const results = await Promise.allSettled(instances.map((instance) => instance.client.dispose()));
@@ -238,10 +250,15 @@ export class LspController {
     route: SelectedRoute,
     config: ServerConfig,
     signal: AbortSignal,
-  ): Promise<Instance | undefined> {
+  ): Promise<Instance> {
     const key = `${route.server}:${route.root}`;
     const previous = this.instances.get(key);
-    if (previous?.client.active) return previous;
+    if (previous?.client.active) {
+      // Map order is recency order: the first key is the least recently used.
+      this.instances.delete(key);
+      this.instances.set(key, previous);
+      return previous;
+    }
     const failed = [...this.instances].filter(([, existing]) => !existing.client.active);
     // Evicted instances stay visible to dispose() until their process group is stopped.
     try {
@@ -250,7 +267,7 @@ export class LspController {
       for (const [other, existing] of failed)
         if (this.instances.get(other) === existing) this.instances.delete(other);
     }
-    if (this.instances.size >= 8) return undefined;
+    await this.evictOldest();
     signal.throwIfAborted();
     const state: Instance["state"] = { document: undefined };
     const client = new LanguageServer(
@@ -269,14 +286,25 @@ export class LspController {
     );
     const instance = {
       client,
-      ready: client.initialize(signal),
+      // Start outlives the query deadline, so a slow server becomes usable on a later call.
+      ready: client.initialize(this.lifetime.signal),
       root: route.root,
       server: route.server,
       generation: ++this.generation,
       state,
     };
+    instance.ready.catch(() => {});
     this.instances.set(key, instance);
     return instance;
+  }
+
+  private async evictOldest(): Promise<void> {
+    if (this.instances.size < 8) return;
+    const [key, oldest] = this.instances.entries().next().value ?? [];
+    if (key === undefined || oldest === undefined) return;
+    // A group that did not stop stays listed, so session cleanup still reports it.
+    await oldest.client.dispose();
+    if (this.instances.get(key) === oldest) this.instances.delete(key);
   }
 
   private gate(): { outcome: "unavailable" | "blocked"; reason: string } | undefined {
@@ -298,7 +326,7 @@ export class LspController {
     text: string,
     deadline: AbortSignal,
   ) {
-    const { capabilities } = await instance.ready;
+    const { capabilities } = await ready(instance, deadline);
     deadline.throwIfAborted();
     const reason = missingCapability(operation, capabilities);
     if (reason) return { ...route, outcome: "unsupported", reason };
@@ -347,18 +375,7 @@ export class LspController {
     const text = await snapshot(route.file, deadline);
     if (operation !== "diagnostics" && operation !== "symbols") validatePosition(text, position);
     const instance = await this.instance(route, config, deadline);
-    if (!instance)
-      return {
-        ...route,
-        outcome: "unavailable",
-        reason: "Eight-instance session limit reached",
-      };
-    try {
-      return await this.exchange(route, instance, operation, position, text, deadline);
-    } catch (error) {
-      await instance.client.dispose();
-      throw error;
-    }
+    return this.exchange(route, instance, operation, position, text, deadline);
   }
 
   private async snapshotMatches(document: Document): Promise<boolean> {

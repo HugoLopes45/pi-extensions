@@ -232,6 +232,14 @@ it("propagates cancellation without leaving a live request", async () => {
   const result = client.request("textDocument/hover", {}, abort.signal);
   abort.abort(new Error("Caller cancelled"));
   await expect(result).rejects.toThrow("Caller cancelled");
+  expect(client.active).toBe(true);
+});
+
+it("gives initialization its own budget, longer than the request timeout", async () => {
+  const client = await server("slow-init", 300);
+  await expect(client.initialize()).resolves.toMatchObject({
+    capabilities: { hoverProvider: true },
+  });
 });
 
 it("bounds notification writes when the server stops reading", async () => {

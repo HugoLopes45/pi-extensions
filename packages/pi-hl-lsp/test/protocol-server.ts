@@ -101,6 +101,7 @@ const replies = new Map<
   ],
 ]);
 connection.onRequest("initialize", async () => {
+  if (mode === "slow-init") await delay(600);
   if (mode === "tab-length")
     process.stdout.write(
       'X-Pad: a\nb\r\nContent-Length:\t30\r\n\r\n{"jsonrpc":"2.0","method":"x"}',
@@ -125,7 +126,11 @@ connection.onRequest("initialize", async () => {
 connection.onRequest(
   "textDocument/hover",
   async (_params: unknown, token: rpc.CancellationToken): Promise<object> => {
-    if (mode === "ignore") return new Promise<never>(() => {});
+    if (mode === "ignore") {
+      token.onCancellationRequested(() => log("cancel"));
+      return new Promise<never>(() => {});
+    }
+    if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
     const raw = rawReplies.get(mode);
     if (raw) {
       process.stdout.write(raw());
