@@ -10,7 +10,7 @@ The extension provides ten read-only tools: `hl_lsp_hover`, `hl_lsp_definition`,
 
 Each session owns its server processes. Servers start only when a tool needs them. Pi runs the tools sequentially through its native execution mechanism.
 
-Diagnostics use push publications. Results carry one of three `evidence` values. Matching versions never certify the whole project.
+Diagnostics use push publications, or pull requests when the server offers them. A pull answer is provisional: for one quiet window of 1 second, a publication or a refresh request replaces it. Results carry one of three `evidence` values. Matching versions never certify the whole project.
 
 | `evidence`            | Meaning                                                                   | `outcome`   |
 | --------------------- | ------------------------------------------------------------------------- | ----------- |
@@ -65,7 +65,7 @@ Example global settings fragment:
 }
 ```
 
-Commands must be absolute paths. Supported server keys are `typescript`, `python`, and `rust`. No server is downloaded or selected automatically.
+Commands must be absolute paths. Built-in keys are `typescript`, `python`, `rust`, and `swift`. Other keys configure custom servers; see Servers. No server is downloaded or selected automatically.
 
 `set servers` replaces the whole `servers` map, so include every server in the same JSON value.
 
@@ -92,6 +92,67 @@ Commands default to session scope; `--global` and `--project` select persistent 
 Session overrides use versioned entries in native Pi history. Development `hlLsp` settings and unversioned history entries are not migrated. Start a new session for older development history.
 
 Session overrides cannot approve executables or bypass project trust. All writes are validated before persistence. Invalid settings disable LSP without interrupting Pi or other extensions.
+
+## Servers
+
+A server key must match `^[a-z][a-z0-9-]{0,39}$`. Up to 32 servers can be configured.
+
+A built-in key needs only `command` and `args`. A custom key also needs `fileTypes` and `rootMarkers`, because it has no built-in routing.
+
+Two servers that claim one file type are refused. The error names both servers and the file type.
+
+| Field                   | Required    | Meaning                                                                                                                  |
+| ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `command`               | yes         | Absolute path to the server executable. Wrappers use `args`, for example `/usr/bin/xcrun` with `sourcekit-lsp`.          |
+| `args`                  | yes         | Command-line arguments, at most 32.                                                                                      |
+| `fileTypes`             | custom only | Extensions with a leading dot, 1 to 32. Replaces the built-in list.                                                      |
+| `rootMarkers`           | custom only | File or directory names, 1 to 32. A leading `*` matches a suffix, for example `*.xcodeproj`. Replaces the built-in list. |
+| `languageId`            | no          | Map from extension to LSP language id. Default: the built-in table, else the server key.                                 |
+| `initializationOptions` | no          | JSON object sent in `initialize`.                                                                                        |
+| `settings`              | no          | JSON object answered to `workspace/configuration` by section, and sent in `workspace/didChangeConfiguration`.            |
+
+TypeScript, built-in:
+
+```json
+"typescript": { "command": "/absolute/path/to/typescript-language-server", "args": ["--stdio"] }
+```
+
+Python with basedpyright, built-in:
+
+```json
+"python": { "command": "/absolute/path/to/basedpyright-langserver", "args": ["--stdio"] }
+```
+
+Rust with rust-analyzer, built-in:
+
+```json
+"rust": { "command": "/absolute/path/to/rust-analyzer", "args": [] }
+```
+
+Swift with sourcekit-lsp through SwiftPM, built-in:
+
+```json
+"swift": { "command": "/usr/bin/xcrun", "args": ["sourcekit-lsp"] }
+```
+
+Swift with an iOS app project is not yet proven. The planned path is to generate `buildServer.json` with xcode-build-server, then use the Swift entry above. This path has not been run.
+
+clangd, custom:
+
+```json
+"clangd": { "command": "/usr/bin/clangd", "args": [], "fileTypes": [".c"], "rootMarkers": ["compile_commands.json"] }
+```
+
+The matrix lists the probes that ran. Each probe ran the built `dist` on the local machine, not the packed artifact.
+
+| Key          | Server and version                                   | Probe                 | Result                                                                                                                               |
+| ------------ | ---------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `typescript` | typescript-language-server 6.0.3                     | ts-smoke, 3 runs      | Hover, definition and diagnostics pass.                                                                                              |
+| `python`     | basedpyright 1.39.9                                  | py-pull, 3 runs       | Diagnostics pass. Two environments are refused, 3 runs.                                                                              |
+| `rust`       | rust-analyzer 1.99.1                                 | rust-pull, 3 runs     | Errors arrive after a delay. The first pull can return `no result`, an open issue.                                                   |
+| `swift`      | sourcekit-lsp, Swift 6.4.2, through `/usr/bin/xcrun` | swift-spm, 3 runs     | Diagnostics, definition, references, workspace symbols, call hierarchy and rename complete without error. The probe expects no text. |
+| clangd       | clangd 21.0.0 (custom)                               | clangd-custom, 3 runs | Diagnostics and definition pass.                                                                                                     |
+| iOS app      | sourcekit-lsp with xcode-build-server                | none                  | Not yet proven.                                                                                                                      |
 
 ## Boundaries
 
@@ -128,7 +189,7 @@ Real-server checks must run against the packed artifact. Spike results are not a
 
 ## Deferred product requirements
 
-Pull diagnostics, full TypeScript project-reference routing, Python interpreter binding, and virtual documents remain unimplemented.
+Full TypeScript project-reference routing, Python interpreter binding, and virtual documents remain unimplemented.
 
 Post-edit background analysis, guarded mutations, configuration migration, automatic server discovery, and whole-project diagnostic coverage remain unimplemented.
 
