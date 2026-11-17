@@ -4,13 +4,17 @@ import { fileURLToPath } from "node:url";
 import { expect, it, onTestFinished, vi } from "vitest";
 
 import { LanguageServer } from "../src/server.js";
+import type { ServerConfig } from "../src/settings.js";
 import { directory } from "./fixtures.js";
+
+type ServerOptions = Pick<ServerConfig, "initializationOptions" | "settings">;
 
 async function server(
   mode = "normal",
   timeout = 1000,
   publish: (value: unknown) => void = () => {},
   onClose: (error: Error) => void = () => {},
+  options: ServerOptions = {},
 ) {
   const root = await directory();
   const ready = Promise.withResolvers<void>();
@@ -19,6 +23,7 @@ async function server(
     {
       command: process.execPath,
       args: [fileURLToPath(new URL("./protocol-server.ts", import.meta.url)), mode, "--ready"],
+      ...options,
     },
     root,
     timeout,
@@ -142,6 +147,45 @@ it("answers each standard server request with its LSP 3.17 reply", async () => {
     ["replies", "workspace/workspaceFolders", 0, "name"],
     expect.stringMatching(/^hl-lsp-fixture-/u),
   );
+});
+
+it("sends initializationOptions in initialize and no settings after initialized", async () => {
+  const published = Promise.withResolvers<unknown>();
+  const client = await server("normal", 1000, published.resolve, undefined, {
+    initializationOptions: { checkOnSave: true },
+  });
+  await client.initialize();
+  await client.notify("test/wire", {});
+  expect(await published.promise).toEqual({
+    uri: "file:///wire",
+    diagnostics: [],
+    wire: {
+      initializationOptions: { checkOnSave: true },
+      received: [{ method: "initialized" }],
+      configuration: [null, null, null, null],
+    },
+  });
+});
+
+it("answers workspace/configuration by section path and sends settings after initialized", async () => {
+  const published = Promise.withResolvers<unknown>();
+  const settings = { python: { venv: ".venv" } };
+  const client = await server("normal", 1000, published.resolve, undefined, {
+    settings,
+  });
+  await client.initialize();
+  await client.notify("test/wire", {});
+  expect(await published.promise).toEqual({
+    uri: "file:///wire",
+    diagnostics: [],
+    wire: {
+      received: [
+        { method: "initialized" },
+        { method: "workspace/didChangeConfiguration", params: { settings } },
+      ],
+      configuration: [".venv", { venv: ".venv" }, null, null],
+    },
+  });
 });
 
 it("leaves no delay timer behind when a settled wait is aborted", async () => {

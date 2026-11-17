@@ -16,6 +16,7 @@ const extensionSchema = Type.String({
   maxLength: 32,
   pattern: "^\\.[a-z0-9_+-]{1,31}$",
 });
+const jsonObject = Type.Record(Type.String(), Type.Unknown());
 const serverSchema = Type.Object(
   {
     command: Type.Refine(
@@ -38,6 +39,8 @@ const serverSchema = Type.Object(
     languageId: Type.Optional(
       Type.Record(extensionSchema, Type.String({ minLength: 1, maxLength: 64 })),
     ),
+    initializationOptions: Type.Optional(jsonObject),
+    settings: Type.Optional(jsonObject),
   },
   { additionalProperties: false },
 );

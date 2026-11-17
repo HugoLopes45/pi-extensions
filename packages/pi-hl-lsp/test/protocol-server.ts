@@ -259,7 +259,14 @@ async function startStatus() {
     });
   }, 400);
 }
-connection.onRequest("initialize", async () => {
+const initializeRequest = Type.Object({
+  initializationOptions: Type.Optional(Type.Unknown()),
+});
+// What the client sent for the wire check; test/wire reports it back.
+let initializationOptions: unknown;
+const received: { method: string; params?: unknown }[] = [];
+connection.onRequest("initialize", async (params: unknown) => {
+  if (Value.Check(initializeRequest, params)) initializationOptions = params.initializationOptions;
   if (mode === "slow-init") await delay(600);
   if (mode === "tab-length")
     process.stdout.write(
@@ -687,12 +694,26 @@ connection.onNotification("test/server-requests", async () => {
     replies,
   });
 });
+connection.onNotification("workspace/didChangeConfiguration", (params: unknown) => {
+  received.push({ method: "workspace/didChangeConfiguration", params });
+});
+connection.onNotification("test/wire", async () => {
+  const configuration: unknown = await connection.sendRequest("workspace/configuration", {
+    items: [{ section: "python.venv" }, { section: "python" }, { section: "missing" }, {}],
+  });
+  await connection.sendNotification("textDocument/publishDiagnostics", {
+    uri: "file:///wire",
+    diagnostics: [],
+    wire: { initializationOptions, received, configuration },
+  });
+});
 connection.onNotification("test/unregister", async () => {
   await connection.sendRequest("client/unregisterCapability", {
     unregisterations: [pullRegistration],
   });
 });
 connection.onNotification("initialized", async () => {
+  received.push({ method: "initialized" });
   // Exits once the handshake ends, so the first request meets a dead server.
   if (mode === "exit-after-init") process.exit(3);
   if (mode === "pull-dynamic" || mode === "pull-unregistered")

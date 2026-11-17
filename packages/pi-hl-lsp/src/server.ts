@@ -69,7 +69,9 @@ const unregistrationParams = Type.Object({
 });
 const progressToken = Type.Union([Type.String(), Type.Integer()]);
 const progressCreateParams = Type.Object({ token: progressToken });
-const configurationParams = Type.Object({ items: Type.Array(Type.Unknown()) });
+const configurationParams = Type.Object({
+  items: Type.Array(Type.Object({ section: Type.Optional(Type.String()) })),
+});
 const progressParams = Type.Object({
   token: progressToken,
   value: Type.Object({
@@ -153,9 +155,31 @@ class FrameSizes {
   }
 }
 
-// Answers null per section so servers keep their defaults; replace this to serve settings.
-function configurationReplies(params: Static<typeof configurationParams>): null[] {
-  return params.items.map(() => null);
+type Settings = NonNullable<ServerConfig["settings"]>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+// Walks a dotted section path; a missing key anywhere in the path yields undefined.
+function sectionValue(settings: Settings, section: string): unknown {
+  let value: unknown = settings;
+  for (const key of section.split(".")) {
+    if (!isRecord(value) || !Object.hasOwn(value, key)) return undefined;
+    value = value[key];
+  }
+  return value;
+}
+
+// Unset settings and a missing section both answer null, so servers keep their defaults.
+function configurationReplies(
+  params: Static<typeof configurationParams>,
+  settings: Settings | undefined,
+): unknown[] {
+  return params.items.map(({ section }) => {
+    if (settings === undefined || section === undefined) return null;
+    return sectionValue(settings, section) ?? null;
+  });
 }
 
 export class LanguageServer {
@@ -178,7 +202,7 @@ export class LanguageServer {
   private stderr = "";
 
   constructor(
-    config: ServerConfig,
+    private readonly config: ServerConfig,
     private readonly root: string,
     private readonly timeoutMs: number,
     publish: (value: unknown) => void,
@@ -260,7 +284,7 @@ export class LanguageServer {
     this.connection.onRequest("workspace/configuration", (value: unknown) => {
       if (!Value.Check(configurationParams, value))
         return this.reject("Invalid workspace/configuration payload");
-      return configurationReplies(value);
+      return configurationReplies(value, this.config.settings);
     });
     this.connection.onRequest("workspace/workspaceFolders", () => [
       { uri: pathToFileURL(this.root).href, name: basename(this.root) },
@@ -388,6 +412,7 @@ export class LanguageServer {
           window: { workDoneProgress: true },
           experimental: { serverStatusNotification: true },
         },
+        initializationOptions: this.config.initializationOptions,
       },
       signal,
       STARTUP_TIMEOUT_MS,
@@ -402,6 +427,13 @@ export class LanguageServer {
     }
     this.diagnosticProvider = Boolean(result.capabilities.diagnosticProvider);
     await this.notify("initialized", {}, signal, STARTUP_TIMEOUT_MS);
+    if (this.config.settings !== undefined)
+      await this.notify(
+        "workspace/didChangeConfiguration",
+        { settings: this.config.settings },
+        signal,
+        STARTUP_TIMEOUT_MS,
+      );
     this.graceUntil = performance.now() + READY_GRACE_MS;
     this.initialized = true;
     return result;
