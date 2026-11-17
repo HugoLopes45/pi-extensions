@@ -142,11 +142,17 @@ async function snapshot(file: string, signal: AbortSignal): Promise<string> {
   const input: AsyncIterable<unknown> = createReadStream(file, { signal });
   const chunks: Buffer[] = [];
   let bytes = 0;
-  for await (const chunk of input) {
-    if (!Buffer.isBuffer(chunk)) throw new Error("Invalid file stream");
-    bytes += chunk.length;
-    if (bytes > 1024 * 1024) throw new Error("File exceeds the 1 MiB snapshot limit");
-    chunks.push(chunk);
+  try {
+    for await (const chunk of input) {
+      if (!Buffer.isBuffer(chunk)) throw new Error("Invalid file stream");
+      bytes += chunk.length;
+      if (bytes > 1024 * 1024) throw new Error("File exceeds the 1 MiB snapshot limit");
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    // A stream stopped by its signal reports a generic AbortError, so the signal's reason is thrown.
+    signal.throwIfAborted();
+    throw error;
   }
   return Buffer.concat(chunks).toString("utf8");
 }
@@ -212,6 +218,13 @@ function actionRange(text: string, target: NavigationTarget): Range {
   };
 }
 
+// A query deadline keeps its own message; any other abort reports the reason its caller gave.
+function abortReason(signal: AbortSignal, deadlineMessage: string): unknown {
+  return signal.reason instanceof DOMException && signal.reason.name === "TimeoutError"
+    ? new Error(deadlineMessage)
+    : signal.reason;
+}
+
 // Only settled observations reach document.observation.
 function settle(document: Document, observation: Observation): void {
   clearTimeout(document.timer);
@@ -236,7 +249,8 @@ async function diagnostics(document: Document, signal: AbortSignal): Promise<Obs
   // No publication has followed a clean edit yet, so silence means the diagnostics are still empty.
   if (document.silenceMeansClean && document.timer === undefined)
     document.timer = setTimeout(() => settle(document, unchangedObservation()), QUIET_MS);
-  const abort = () => waiting.reject(new Error("No settled diagnostics before the timeout"));
+  const abort = () =>
+    waiting.reject(abortReason(signal, "No settled diagnostics before the timeout"));
   signal.addEventListener("abort", abort, { once: true });
   try {
     if (signal.aborted) abort();
@@ -550,7 +564,8 @@ function instanceStatus({ client, root, state }: Instance): InstanceStatus {
 
 async function ready(instance: Instance, deadline: AbortSignal): Promise<Initialization> {
   const aborted = Promise.withResolvers<never>();
-  const abort = () => aborted.reject(new Error("LSP server is still starting; retry the request"));
+  const abort = () =>
+    aborted.reject(abortReason(deadline, "LSP server is still starting; retry the request"));
   deadline.addEventListener("abort", abort, { once: true });
   try {
     deadline.throwIfAborted();
@@ -1227,7 +1242,7 @@ export class LspController {
   }
 
   async dispose(): Promise<void> {
-    this.lifetime.abort();
+    this.lifetime.abort(new Error("Controller is closed"));
     const instances = [...this.instances.values()];
     this.instances.clear();
     this.selected = undefined;

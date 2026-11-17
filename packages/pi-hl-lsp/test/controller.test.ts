@@ -275,7 +275,16 @@ it("clears the quiet timer of a waiting query when the controller is disposed", 
   );
   await instance.dispose();
   expect(clearTimer).toHaveBeenCalledWith(setTimer.mock.results[index]?.value);
-  expect(await outcome).toBe("No settled diagnostics before the timeout");
+  // dispose aborts the query with its own reason, so the wait no longer reads as a settle timeout.
+  expect(await outcome).toBe("Controller is closed");
+});
+
+it("reports the caller's abort reason instead of a settle timeout", async () => {
+  const { instance, file } = await controller("silent");
+  const caller = new AbortController();
+  const query = instance.query("diagnostics", file, undefined, caller.signal);
+  caller.abort(new Error("caller cancelled"));
+  await expect(query).rejects.toThrow("caller cancelled");
 });
 
 it("matches a publication whose URI encodes @ as %40", async () => {
