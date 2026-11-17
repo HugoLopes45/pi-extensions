@@ -560,8 +560,16 @@ async function ready(instance: Instance, deadline: AbortSignal): Promise<Initial
   }
 }
 
+// A disposed instance keeps no settle timer, and a query still waiting on that timer fails.
+function releaseDocument(instance: Instance): void {
+  const document = instance.state.document;
+  clearTimeout(document?.timer);
+  document?.waiting?.reject(new Error("LSP instance is closed"));
+}
+
 // Every cleanup must finish before the caller continues, even when another one fails first.
 async function disposeAll(instances: Instance[]): Promise<void> {
+  for (const instance of instances) releaseDocument(instance);
   const results = await Promise.allSettled(instances.map((instance) => instance.client.dispose()));
   const failure = results.find((result) => result.status === "rejected");
   if (failure) throw failure.reason;
@@ -749,7 +757,7 @@ export class LspController {
     const [key, oldest] = this.instances.entries().next().value ?? [];
     if (key === undefined || oldest === undefined) return;
     // A group that did not stop stays listed, so session cleanup still reports it.
-    await oldest.client.dispose();
+    await disposeAll([oldest]);
     if (this.instances.get(key) === oldest) this.instances.delete(key);
   }
 

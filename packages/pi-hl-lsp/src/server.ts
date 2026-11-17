@@ -323,7 +323,8 @@ export class LanguageServer {
       await Promise.race([
         this.changed.promise,
         stopped.promise,
-        ...(wait === Infinity ? [] : [delay(wait)]),
+        // The signal clears the timer on abort; stopped settles first, so the race never sees its AbortError.
+        ...(wait === Infinity ? [] : [delay(wait, undefined, { signal: stop })]),
       ]);
     signal.throwIfAborted();
   }

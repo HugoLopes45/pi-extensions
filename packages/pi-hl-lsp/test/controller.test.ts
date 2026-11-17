@@ -253,6 +253,31 @@ it("returns unchanged_empty after a silent clean edit, then answers the same doc
   expect(performance.now() - again).toBeLessThan(100);
 });
 
+it("clears the quiet timer of a waiting query when the controller is disposed", async () => {
+  const { instance, file } = await controller("dedupe-empty");
+  await instance.query("diagnostics", file);
+  await writeFile(file, "const value = 2;\n");
+  const setTimer = vi.spyOn(globalThis, "setTimeout");
+  const clearTimer = vi.spyOn(globalThis, "clearTimeout");
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const started = setTimer.mock.calls.length;
+  const pending = instance.query("diagnostics", file);
+  const quietIndex = () =>
+    setTimer.mock.calls.findIndex(([, ms], index) => index >= started && ms === 1000);
+  await vi.waitFor(() => expect(quietIndex()).toBeGreaterThanOrEqual(0));
+  const index = quietIndex();
+  // Attached before dispose, so the rejection that dispose causes has a handler.
+  const outcome = pending.then(
+    () => "resolved",
+    (error: unknown) => (error instanceof Error ? error.message : "not an error"),
+  );
+  await instance.dispose();
+  expect(clearTimer).toHaveBeenCalledWith(setTimer.mock.results[index]?.value);
+  expect(await outcome).toBe("No settled diagnostics before the timeout");
+});
+
 it("matches a publication whose URI encodes @ as %40", async () => {
   const { instance, file } = await controller("encoded-uri");
   const scoped = join(file, "..", "@scope+x", "index.ts");

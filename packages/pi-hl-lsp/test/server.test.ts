@@ -144,6 +144,19 @@ it("answers each standard server request with its LSP 3.17 reply", async () => {
   );
 });
 
+it("leaves no delay timer behind when a settled wait is aborted", async () => {
+  const client = await server();
+  await client.initialize();
+  const pendingTimers = () =>
+    process.getActiveResourcesInfo().filter((resource) => resource === "Timeout").length;
+  const before = pendingTimers();
+  const caller = new AbortController();
+  const waiting = client.settled(caller.signal, 5000);
+  caller.abort(new Error("caller gave up"));
+  await expect(waiting).rejects.toThrow("caller gave up");
+  expect(pendingTimers()).toBe(before);
+});
+
 it("settles ignored requests at the total deadline", async () => {
   const client = await server("ignore", 1000);
   await client.initialize();
