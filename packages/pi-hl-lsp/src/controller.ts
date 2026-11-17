@@ -8,6 +8,17 @@ import { Value } from "typebox/value";
 import * as rpc from "vscode-jsonrpc/node";
 
 import {
+  codeActionItem,
+  codeActionList,
+  type CodeActionItem,
+  contextDiagnostics,
+  displayText,
+  editOf,
+  isResolvable,
+  listedAction,
+  type Range,
+} from "./code-actions.js";
+import {
   diagnosticResult,
   pullResult,
   settledObservation,
@@ -25,7 +36,14 @@ import {
   formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
-import { applyTextEdits, applyWorkspaceEdit, moveFile, planMove, type FileMove } from "./rename.js";
+import {
+  applyTextEdits,
+  applyWorkspaceEdit,
+  moveFile,
+  planMove,
+  type ChangedFile,
+  type FileMove,
+} from "./rename.js";
 import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import {
@@ -175,6 +193,23 @@ function resolvePosition(text: string, target: NavigationTarget | undefined): Po
   const line = text.split(lineBreak)[target.line - 1];
   if (line === undefined) throw new Error("Line is outside the file snapshot");
   return { line: target.line - 1, character: characterOf(line, target) };
+}
+
+// The range of a code action request: the whole line, or the anchored symbol or column on it.
+function actionRange(text: string, target: NavigationTarget): Range {
+  const line = text.split(lineBreak)[target.line - 1];
+  if (line === undefined) throw new Error("Line is outside the file snapshot");
+  const row = target.line - 1;
+  if (target.symbol === undefined && target.column === undefined)
+    return {
+      start: { line: row, character: 0 },
+      end: { line: row, character: line.length },
+    };
+  const start = characterOf(line, target);
+  return {
+    start: { line: row, character: start },
+    end: { line: row, character: start + (target.symbol?.length ?? 0) },
+  };
 }
 
 // Only settled observations reach document.observation.
@@ -549,6 +584,17 @@ function errorCounts(diagnostics: Diagnostic[]): Map<string, number> {
   return counts;
 }
 
+// Resolving fills in the edit of an action that the list answered without one.
+async function resolvedAction(
+  client: LanguageServer,
+  action: CodeActionItem,
+  deadline: AbortSignal,
+): Promise<CodeActionItem> {
+  const answer = await client.request("codeAction/resolve", action, deadline);
+  if (!Value.Check(codeActionItem, answer)) throw new Error("Invalid resolved code action");
+  return answer;
+}
+
 export class LspController {
   private readonly instances = new Map<string, Instance>();
   private readonly lifetime = new AbortController();
@@ -866,14 +912,7 @@ export class LspController {
     );
     const applied = await applyWorkspaceEdit(edit, await realpath(this.cwd), document);
     if (applied.outcome !== "written") return { ...route, ...applied };
-    if (applied.changed.some(({ file }) => file === route.file))
-      await synchronize(
-        instance,
-        route,
-        await snapshot(route.file, deadline),
-        deadline,
-        supportsChange(capabilities),
-      );
+    await this.resync(instance, route, applied.changed, supportsChange(capabilities), deadline);
     return {
       ...route,
       outcome: "completed" as const,
@@ -912,11 +951,7 @@ export class LspController {
   async renameFile(oldPath: string, newPath: string, signal?: AbortSignal) {
     const refusal = this.gate();
     if (refusal) return refusal;
-    const deadline = AbortSignal.any([
-      this.lifetime.signal,
-      AbortSignal.timeout(this.settings.timeoutMs),
-      ...(signal ? [signal] : []),
-    ]);
+    const deadline = this.deadlineFor(signal);
     deadline.throwIfAborted();
     const route = await resolveRoute(oldPath, this.cwd);
     if (route.outcome !== "completed") return route;
@@ -986,6 +1021,129 @@ export class LspController {
         change.file === move.from ? { ...change, file: move.to } : change,
       ),
     };
+  }
+
+  private deadlineFor(signal?: AbortSignal): AbortSignal {
+    return AbortSignal.any([
+      this.lifetime.signal,
+      AbortSignal.timeout(this.settings.timeoutMs),
+      ...(signal ? [signal] : []),
+    ]);
+  }
+
+  // Lists the code actions at a position, with the cached diagnostics that overlap its range as context.
+  private async listedActions(file: string, target: NavigationTarget, deadline: AbortSignal) {
+    const route = await resolveRoute(file, this.cwd);
+    if (route.outcome !== "completed") return route;
+    const config = this.settings.servers[route.server];
+    if (!config) return unconfigured(route);
+    const text = await snapshot(route.file, deadline);
+    const range = actionRange(text, target);
+    const instance = await this.instance(route, config, deadline);
+    const { capabilities } = await ready(instance, deadline);
+    deadline.throwIfAborted();
+    if (!capabilities.codeActionProvider)
+      return {
+        ...route,
+        outcome: "unsupported" as const,
+        reason: "Server did not advertise this capability",
+      };
+    const document = await synchronize(
+      instance,
+      route,
+      text,
+      deadline,
+      supportsChange(capabilities),
+    );
+    await instance.client.settled(deadline, this.settings.timeoutMs / 2);
+    const observation = await diagnosticsObservation(instance, document, deadline);
+    const response = await instance.client.request(
+      "textDocument/codeAction",
+      {
+        textDocument: { uri: document.uri },
+        range,
+        context: {
+          diagnostics: contextDiagnostics(observation.diagnostics, range),
+        },
+      },
+      deadline,
+    );
+    if (!Value.Check(codeActionList, response)) throw new Error("Invalid code action list");
+    return {
+      route,
+      instance,
+      document,
+      canChange: supportsChange(capabilities),
+      resolves:
+        typeof capabilities.codeActionProvider === "object" &&
+        capabilities.codeActionProvider.resolveProvider === true,
+      actions: response ?? [],
+    };
+  }
+
+  async codeActions(file: string, target: NavigationTarget, signal?: AbortSignal) {
+    const refusal = this.gate();
+    if (refusal) return refusal;
+    const listed = await this.listedActions(file, target, this.deadlineFor(signal));
+    if (!("actions" in listed)) return listed;
+    return {
+      ...listed.route,
+      outcome: "completed" as const,
+      actions: listed.actions.map((action) => listedAction(action, listed.resolves)),
+    };
+  }
+
+  // The edit is applied only when the listed title still matches, so a stale index is refused.
+  async applyCodeAction(
+    file: string,
+    target: NavigationTarget,
+    index: number,
+    title: string,
+    signal?: AbortSignal,
+  ) {
+    const refusal = this.gate();
+    if (refusal) return refusal;
+    const deadline = this.deadlineFor(signal);
+    const listed = await this.listedActions(file, target, deadline);
+    if (!("actions" in listed)) return listed;
+    const refuse = (reason: string) => ({
+      ...listed.route,
+      outcome: "refused" as const,
+      reason,
+    });
+    const chosen = listed.actions[index - 1];
+    if (chosen === undefined)
+      return refuse(`There is no code action ${index}; list the code actions again`);
+    const shown = displayText(chosen.title);
+    if (shown !== title)
+      return refuse(
+        `Code action ${index} is "${shown}", not "${title}"; list the code actions again`,
+      );
+    const action = isResolvable(chosen, listed.resolves)
+      ? await resolvedAction(listed.instance.client, chosen, deadline)
+      : chosen;
+    const edit = editOf(action);
+    if (edit === undefined) return refuse(`Code action ${index} has no edit; commands are not run`);
+    const applied = await applyWorkspaceEdit(edit, await realpath(this.cwd), listed.document);
+    if (applied.outcome !== "written") return { ...listed.route, ...applied };
+    await this.resync(listed.instance, listed.route, applied.changed, listed.canChange, deadline);
+    return {
+      ...listed.route,
+      outcome: "completed" as const,
+      changed: applied.changed,
+    };
+  }
+
+  // An applied edit to the open document is sent back to the server, so its diagnostics follow the new text.
+  private async resync(
+    instance: Instance,
+    route: SelectedRoute,
+    changed: ChangedFile[],
+    canChange: boolean,
+    deadline: AbortSignal,
+  ): Promise<void> {
+    if (!changed.some(({ file }) => file === route.file)) return;
+    await synchronize(instance, route, await snapshot(route.file, deadline), deadline, canChange);
   }
 
   private async snapshotMatches(document: Document, instance: Instance): Promise<boolean> {

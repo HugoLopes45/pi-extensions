@@ -42,8 +42,22 @@ const initializedSchema = Type.Object({
         fileOperations: Type.Optional(Type.Object({ willRename: provider, didRename: provider })),
       }),
     ),
+    codeActionProvider: Type.Optional(
+      Type.Union([Type.Boolean(), Type.Object({ resolveProvider: Type.Optional(Type.Boolean()) })]),
+    ),
   }),
 });
+// The kinds this client sends to servers; each is a standard LSP code action kind.
+const codeActionKinds = [
+  "quickfix",
+  "refactor",
+  "refactor.extract",
+  "refactor.inline",
+  "refactor.rewrite",
+  "source",
+  "source.organizeImports",
+  "source.fixAll",
+];
 export type Initialization = Static<typeof initializedSchema>;
 const registration = Type.Object({ id: Type.String(), method: Type.String() });
 const registrationParams = Type.Object({
@@ -325,6 +339,13 @@ export class LanguageServer {
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             hover: { contentFormat: ["markdown", "plaintext"] },
             callHierarchy: {},
+            codeAction: {
+              codeActionLiteralSupport: {
+                codeActionKind: { valueSet: codeActionKinds },
+              },
+              resolveSupport: { properties: ["edit"] },
+              dataSupport: true,
+            },
           },
           workspace: { fileOperations: { willRename: true, didRename: true } },
           window: { workDoneProgress: true },

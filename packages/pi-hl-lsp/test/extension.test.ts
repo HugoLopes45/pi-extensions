@@ -910,6 +910,104 @@ it("restores the edits when the file cannot be moved", async () => {
   );
 });
 
+function listCodeActions(state: Awaited<ReturnType<typeof session>>, line = 1) {
+  return tool(state, "hl_lsp_code_actions", { file: "index.ts", line });
+}
+
+function applyCodeAction(state: Awaited<ReturnType<typeof session>>, index: number, title: string) {
+  return tool(state, "hl_lsp_apply_code_action", {
+    file: "index.ts",
+    line: 1,
+    index,
+    title,
+  });
+}
+
+it("lists code actions with their kind, preferred marker and whether an edit is applied", async () => {
+  const state = await session(true, "code-actions");
+  expect(await listCodeActions(state)).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp code_actions index.ts: completed\n1. [quickfix] Fix 0 diagnostics (preferred)\n2. [source] Run tool (command-only, not applied)\n3. [refactor] Resolve me (resolvable)",
+      },
+    ],
+  });
+});
+
+it("sends the cached diagnostics that overlap the requested line", async () => {
+  const state = await session(true, "code-actions");
+  await writeFile(join(state.cwd, "index.ts"), "const value = ERROR;\n");
+  expect(await listCodeActions(state, 1)).toMatchObject({
+    content: [{ text: stringMatching(/1\. \[quickfix\] Fix 1 diagnostics/u) }],
+  });
+  expect(await listCodeActions(state, 2)).toMatchObject({
+    content: [{ text: stringMatching(/1\. \[quickfix\] Fix 0 diagnostics/u) }],
+  });
+});
+
+it("applies the edit of the listed action when its title matches", async () => {
+  const state = await session(true, "code-actions");
+  expect(await applyCodeAction(state, 1, "Fix 0 diagnostics")).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp apply_code_action index.ts: completed\nindex.ts: 1 edits\ntotal: 1 edits in 1 files",
+      },
+    ],
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("let value = 1;\n");
+});
+
+it("refuses a stale index whose listed title differs and writes no file", async () => {
+  const state = await session(true, "code-actions");
+  const result = await applyCodeAction(state, 1, "Fix 1 diagnostics");
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "refused" },
+  });
+  expect(JSON.stringify(result)).toContain("list the code actions again");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
+});
+
+it("refuses to apply a command-only action and writes no file", async () => {
+  const state = await session(true, "code-actions");
+  const result = await applyCodeAction(state, 2, "Run tool");
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "refused" },
+  });
+  expect(JSON.stringify(result)).toContain("has no edit");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
+});
+
+it("resolves an action without an edit before applying its edit", async () => {
+  const state = await session(true, "code-actions");
+  expect(await applyCodeAction(state, 3, "Resolve me")).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("var value = 1;\n");
+});
+
+it("refuses a code action edit that targets a file outside the project and writes no file", async () => {
+  const state = await session(true, "code-actions-outside");
+  const outside = join(dirname(state.cwd), `outside-${basename(state.cwd)}.ts`);
+  await writeFile(outside, "keep\n");
+  const result = await applyCodeAction(state, 1, "Fix 0 diagnostics");
+  expect(result).toMatchObject({
+    isError: true,
+    details: { outcome: "refused" },
+  });
+  expect(JSON.stringify(result)).toContain("outside the project");
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
+  expect(await readFile(outside, "utf8")).toBe("keep\n");
+});
+
 it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {
   const { runtime } = await session(true);
   for (const name of [
