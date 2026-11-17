@@ -445,6 +445,42 @@ it("returns compact definition text with source lines, a duplicate and an outsid
   });
 });
 
+it("returns type definition and implementation locations as definition does", async () => {
+  const state = await session(true, "type-navigation");
+  expect(
+    await tool(state, "hl_lsp_type_definition", {
+      file: "index.ts",
+      line: 1,
+      column: 7,
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp type_definition index.ts: completed\nindex.ts:1:7  const value = 1;",
+      },
+    ],
+    details: { outcome: "completed" },
+  });
+  expect(
+    await tool(state, "hl_lsp_implementation", {
+      file: "index.ts",
+      line: 1,
+      column: 7,
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp implementation index.ts: completed\nimpl.ts:3:1",
+      },
+    ],
+    details: { outcome: "completed" },
+  });
+});
+
 it("returns an error result for a malformed definition reply", async () => {
   const state = await session(true, "malformed-definition");
   expect(
@@ -572,6 +608,8 @@ it("lists each hl_lsp tool with a one-line snippet in the system prompt", async 
   for (const name of [
     "hover",
     "definition",
+    "type_definition",
+    "implementation",
     "references",
     "symbols",
     "workspace_symbols",
@@ -585,6 +623,8 @@ it("names each hl_lsp tool in its own prompt guideline", async () => {
   for (const name of [
     "hover",
     "definition",
+    "type_definition",
+    "implementation",
     "references",
     "symbols",
     "workspace_symbols",

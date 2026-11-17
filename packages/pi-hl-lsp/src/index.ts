@@ -28,6 +28,8 @@ const workspaceSymbols = Type.Object({
 const promptSnippet = {
   hover: "Returns hover type info and docs at a file position.",
   definition: "Returns definition locations for a file position.",
+  type_definition: "Returns type definition locations for a file position.",
+  implementation: "Returns implementation locations for a file position.",
   references: "Returns reference locations for a file position.",
   symbols: "Returns the symbol outline of a file.",
   workspace_symbols:
@@ -39,6 +41,10 @@ const promptGuidelines = {
     "Use hl_lsp_hover for type info; pass the 1-based line from read or grep and the symbol name.",
   definition:
     "Use hl_lsp_definition for definitions; pass the 1-based line from read or grep and the symbol name.",
+  type_definition:
+    "Use hl_lsp_type_definition for the declared type of a symbol; pass the 1-based line from read or grep and the symbol name.",
+  implementation:
+    "Use hl_lsp_implementation for implementations of an interface or abstract member; pass the 1-based line from read or grep and the symbol name.",
   references:
     "Use hl_lsp_references for references; pass the 1-based line from read or grep and the symbol name.",
   symbols: "Use hl_lsp_symbols for a file outline before reading the whole file.",
@@ -221,7 +227,13 @@ export default function hlLsp(pi: ExtensionAPI): void {
       return toolResult(operation, shown, details);
     }
   }
-  for (const operation of ["hover", "definition", "references"] as const) {
+  for (const operation of [
+    "hover",
+    "definition",
+    "type_definition",
+    "implementation",
+    "references",
+  ] as const) {
     pi.registerTool({
       name: `hl_lsp_${operation}`,
       label: `HL LSP ${operation}`,

@@ -403,6 +403,18 @@ it("does not issue requests for capabilities that the server did not advertise",
   });
 });
 
+it("queries type definition and implementation when the server advertises them", async () => {
+  const { instance, file } = await controller("type-navigation");
+  expect(await instance.query("type_definition", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "index.ts:1:7  const value = 1;",
+  });
+  expect(await instance.query("implementation", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "impl.ts:3:1",
+  });
+});
+
 it("finds a symbol by name in a project, opening the queried file first", async () => {
   const { instance, file } = await controller("workspace-symbols");
   expect(

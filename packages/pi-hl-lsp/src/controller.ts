@@ -29,6 +29,8 @@ import type { LspSettings, ServerConfig, ServerFamily } from "./settings.js";
 export type Operation =
   | "hover"
   | "definition"
+  | "type_definition"
+  | "implementation"
   | "references"
   | "symbols"
   | "workspace_symbols"
@@ -64,6 +66,8 @@ const publication = Type.Object({ uri: Type.String() });
 const capability = {
   hover: "hoverProvider",
   definition: "definitionProvider",
+  type_definition: "typeDefinitionProvider",
+  implementation: "implementationProvider",
   references: "referencesProvider",
   symbols: "documentSymbolProvider",
   workspace_symbols: "workspaceSymbolProvider",
@@ -71,6 +75,8 @@ const capability = {
 const method = {
   hover: "textDocument/hover",
   definition: "textDocument/definition",
+  type_definition: "textDocument/typeDefinition",
+  implementation: "textDocument/implementation",
   references: "textDocument/references",
   symbols: "textDocument/documentSymbol",
   workspace_symbols: "workspace/symbol",

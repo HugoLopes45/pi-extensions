@@ -136,6 +136,7 @@ const staticPullModes = new Set<string | undefined>([
   "pull-cancel-always",
 ]);
 const pullRegistration = { id: "pull", method: "textDocument/diagnostic" };
+const typeNavigationModes = new Set<string | undefined>(["type-navigation"]);
 const textDocumentUri = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
 });
@@ -180,6 +181,9 @@ connection.onRequest("initialize", async () => {
       hoverProvider: true,
       ...(navigationModes.has(mode) ? { definitionProvider: true } : {}),
       ...(staticPullModes.has(mode) ? { diagnosticProvider: true } : {}),
+      ...(typeNavigationModes.has(mode)
+        ? { typeDefinitionProvider: true, implementationProvider: true }
+        : {}),
       ...(mode === "workspace-symbols"
         ? { workspaceSymbolProvider: true }
         : {}),
@@ -239,6 +243,22 @@ connection.onRequest("workspace/symbol", (params: unknown): unknown[] => {
     throw new Error("Invalid workspace symbol fixture request");
   return workspaceSymbols(params.query);
 });
+connection.onRequest(
+  "textDocument/typeDefinition",
+  (params: unknown): object => {
+    if (!Value.Check(textDocumentUri, params))
+      throw new Error("Invalid type definition fixture request");
+    return location(params.textDocument.uri, 0, 6);
+  },
+);
+connection.onRequest(
+  "textDocument/implementation",
+  (params: unknown): object => {
+    if (!Value.Check(textDocumentUri, params))
+      throw new Error("Invalid implementation fixture request");
+    return location(new URL("./impl.ts", params.textDocument.uri).href, 2, 0);
+  },
+);
 connection.onRequest("textDocument/definition", (params: unknown): object => {
   if (mode === "malformed-definition") return { bogus: 1 };
   if (!Value.Check(textDocumentUri, params))

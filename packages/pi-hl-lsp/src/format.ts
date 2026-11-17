@@ -115,7 +115,7 @@ export async function formatLocations(
   response: unknown,
   cwd: string,
   lines: LineReader,
-  operation: "definition" | "references",
+  operation: "definition" | "type_definition" | "implementation" | "references",
 ): Promise<Formatted> {
   if (response === null) return emptyResult();
   const items = responseItems(response, operation);

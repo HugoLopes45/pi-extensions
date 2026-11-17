@@ -26,6 +26,8 @@ const initializedSchema = Type.Object({
     ),
     hoverProvider: provider,
     definitionProvider: provider,
+    typeDefinitionProvider: provider,
+    implementationProvider: provider,
     referencesProvider: provider,
     documentSymbolProvider: provider,
     diagnosticProvider: provider,
