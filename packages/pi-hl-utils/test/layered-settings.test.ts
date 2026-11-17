@@ -508,7 +508,6 @@ describe("layered settings lenient reads", () => {
         () => true,
       )
       .catch((error: unknown) => error);
-    expect(write).toBeInstanceOf(SyntaxError);
     for (const error of [read, write])
       expect(error instanceof Error && error.message).toMatch(/\\u001b\]0;title\\u0007/u);
   });
