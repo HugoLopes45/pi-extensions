@@ -83,4 +83,21 @@ describe("ClaudeProSettingsMenu", () => {
       patch: { warnAt: 100 },
     });
   });
+
+  it.each([
+    ["2.1", "2.1"],
+    ["2.10", "2.10"],
+    ['"2.1.400"', "2.1.400"],
+  ])("sets the typed version %s", async (typed, version) => {
+    const { menu, driver, apply } = setup();
+    driver.press(keys.down, keys.down, keys.down, keys.down, keys.enter);
+    driver.type(typed);
+    driver.press(keys.enter);
+    await menu.settled();
+    expect(apply).toHaveBeenLastCalledWith("session", {
+      action: "set",
+      key: "claudeCodeVersion",
+      patch: { claudeCodeVersion: version },
+    });
+  });
 });

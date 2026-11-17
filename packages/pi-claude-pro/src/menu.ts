@@ -87,10 +87,13 @@ function typedChange(
   const value = text.trim();
   if (value === "inherit") return { action: "inherit", key };
   if (value === "") throw new Error(`Enter a value for ${key}, or inherit`);
+  const parsed = typedValue(value);
+  // A version is text even when it reads as a number, such as 2.1.
+  const typed = key === "claudeCodeVersion" && typeof parsed === "number" ? value : parsed;
   return {
     action: "set",
     key,
-    patch: claudeProSettings.parseOptions({ [key]: typedValue(value) }, scope),
+    patch: claudeProSettings.parseOptions({ [key]: typed }, scope),
   };
 }
 
