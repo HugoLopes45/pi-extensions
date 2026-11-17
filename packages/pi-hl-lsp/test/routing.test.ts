@@ -96,6 +96,19 @@ it("routes a Python project marked only by requirements.txt", async () => {
   });
 });
 
+it("routes a Python file under a nested requirements.txt to the root pyproject.toml", async () => {
+  const root = await directory();
+  await writeFile(join(root, "pyproject.toml"), "");
+  const tests = join(root, "tests");
+  await mkdir(tests);
+  await writeFile(join(tests, "requirements.txt"), "");
+  await writeFile(join(tests, "test_x.py"), "");
+  expect(await resolveRoute(join(tests, "test_x.py"), root)).toMatchObject({
+    outcome: "completed",
+    root,
+  });
+});
+
 it("does not guess the root of nested Cargo manifests", async () => {
   const root = await directory();
   await writeFile(join(root, "Cargo.toml"), "");
@@ -190,6 +203,49 @@ it("does not read a directory named Cargo.toml as a manifest", async () => {
   expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
     outcome: "completed",
     root: crate,
+  });
+});
+
+it("refuses a symlinked parent Cargo.toml that targets a workspace outside the boundary", async () => {
+  const outer = await directory();
+  await writeFile(join(outer, "Cargo.toml"), "[workspace]\n");
+  const boundary = join(outer, "inner");
+  await mkdir(boundary);
+  await symlink(join(outer, "Cargo.toml"), join(boundary, "Cargo.toml"));
+  const crate = join(boundary, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), boundary)).toMatchObject({
+    outcome: "ambiguous",
+  });
+});
+
+it("routes a crate whose own Cargo.toml declares a workspace to itself", async () => {
+  const root = await directory();
+  const crate = join(root, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n[workspace]\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "completed",
+    root: crate,
+  });
+});
+
+it("routes a Cargo member past an intermediate package manifest to the workspace root", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), "[workspace]\n");
+  const middle = join(root, "middle");
+  await mkdir(middle);
+  await writeFile(join(middle, "Cargo.toml"), '[package]\nname = "middle"\n');
+  const crate = join(middle, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "completed",
+    root,
   });
 });
 

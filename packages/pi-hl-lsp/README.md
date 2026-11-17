@@ -64,9 +64,9 @@ Session overrides cannot approve executables or bypass project trust. All writes
 - Routing recognizes local project markers and exposes `local-marker` coverage.
 - Escaped file symlinks are rejected during routing. This does not provide atomic protection against concurrent filesystem changes.
 - One in-boundary `.venv` or `venv` routes; the server picks its interpreter. Two environments are ambiguous. An environment outside the boundary is blocked.
-- Python projects are marked by `pyproject.toml`, `pyrightconfig.json`, `setup.py`, `setup.cfg`, or `requirements.txt`.
-- A Cargo crate routes to the nearest in-boundary `Cargo.toml` that declares `[workspace]`. Manifests over 64 KiB, symlinks and directories are not read.
-- A parent `Cargo.toml` without `[workspace]` is ambiguous.
+- Python projects are marked by `pyproject.toml`, `pyrightconfig.json`, `setup.py`, or `setup.cfg`. `requirements.txt` marks a project only when none of these is found up to the boundary.
+- A Cargo crate routes to the nearest in-boundary `[workspace]` manifest at or above it, passing over package manifests. Manifests over 64 KiB, symlinks and directories are not read.
+- If no readable workspace manifest is found, the crate routes to itself when no parent `Cargo.toml` exists. A parent `Cargo.toml` makes the file `ambiguous`, including a symlink or one over 64 KiB.
 - Files under `node_modules` route to the project that contains `node_modules`.
 - Virtual documents and unmarked files are unsupported.
 - Each file snapshot is limited to 1 MiB. Each session keeps at most eight server/root pairs running. A ninth pair stops the least recently used one first; a request still running on the stopped server fails with "LSP instance is closed".

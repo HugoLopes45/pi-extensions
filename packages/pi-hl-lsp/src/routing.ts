@@ -59,8 +59,13 @@ async function realpathIfExists(path: string): Promise<string | undefined> {
 
 const projectMarkers: Record<ServerFamily, string[]> = {
   typescript: ["tsconfig.json", "jsconfig.json", "package.json"],
-  python: ["pyproject.toml", "pyrightconfig.json", "setup.py", "setup.cfg", "requirements.txt"],
+  python: ["pyproject.toml", "pyrightconfig.json", "setup.py", "setup.cfg"],
   rust: ["Cargo.toml", "rust-project.json"],
+};
+
+// Used only when no projectMarkers entry is found up to the boundary.
+const fallbackMarkers: Partial<Record<ServerFamily, string[]>> = {
+  python: ["requirements.txt"],
 };
 
 function insideDependencies(boundary: string, dir: string): boolean {
@@ -148,7 +153,10 @@ async function projectRoot(
   path: string,
   base: string,
 ): Promise<string | Refusal | undefined> {
-  const nearest = await nearestRoot(dirname(path), base, projectMarkers[family]);
+  const directory = dirname(path);
+  const nearest =
+    (await nearestRoot(directory, base, projectMarkers[family])) ??
+    (await nearestRoot(directory, base, fallbackMarkers[family] ?? []));
   if (!nearest || family !== "rust") return nearest;
   return cargoWorkspace(nearest, base);
 }
