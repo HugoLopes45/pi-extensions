@@ -86,6 +86,7 @@ describe("ClaudeProSettingsMenu", () => {
 
   it.each([
     ["2.1", "2.1"],
+    ["2.10", "2.10"],
     ['"2.1.400"', "2.1.400"],
   ])("sets the typed version %s", async (typed, version) => {
     const { menu, driver, apply } = setup();
