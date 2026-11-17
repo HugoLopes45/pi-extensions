@@ -569,8 +569,8 @@ it("accounts Reviews, consultations and compactions separately in status", async
   expect(evidence.seeds).toBe(1);
 });
 
-function deadlineOn(hung: number[]) {
-  const fixture = longSessionStream({}, [], ok);
+function deadlineOn(hung: number[], batches: Record<string, number> = {}) {
+  const fixture = longSessionStream(batches, [], { ...ok, isError: () => true });
   let reviews = 0;
   globalThis.onlookerObserverTest = {
     ...fixture,
@@ -607,6 +607,33 @@ it("leaves a Review past its deadline to the next turn without pausing", async (
   expect(observer.status.lastError).toBeNull();
   await session.prompt("Second");
   expect(reviews()).toBe(2);
+  expect(observer.status.lastError).toBeNull();
+  expect(observer.status.backlog).toBe(0);
+});
+
+it("reviews turns that finish during a late Review without waiting for another turn", async () => {
+  const reviews = deadlineOn([1], { "Two turns": 1 });
+  const { session, observer } = await observe(
+    { reviewTimeoutMs: 250, catchUpThreshold: 10 },
+    {},
+    [],
+    "interactive",
+  );
+  await session.prompt("Two turns");
+  await vi.waitFor(() => expect(observer.status.backlog).toBe(0));
+  expect(reviews()).toBe(2);
+});
+
+it("starts a fresh count of Review deadlines after /onlooker on", async () => {
+  const reviews = deadlineOn([1, 2, 3, 4]);
+  const { session, observer } = await observe({ reviewTimeoutMs: 20 });
+  for (const prompt of ["1", "2", "3"]) await session.prompt(prompt);
+  expect(observer.status.state).toBe("paused");
+  const { name, thinkingLevel, reviewEvery, correct } =
+    onlookerSettings.readSettings(session).settings;
+  observer.configure({ enabled: true, name, thinkingLevel, reviewEvery, correct });
+  await session.prompt("4");
+  expect(reviews()).toBe(4);
   expect(observer.status.lastError).toBeNull();
 });
 

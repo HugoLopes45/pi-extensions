@@ -154,6 +154,7 @@ interface OperationBase {
 }
 interface Review extends OperationBase {
   kind: "review";
+  through: number;
   findings?: OnlookerFinding[];
   /** `onlooker_report` calls rejected as invalid in this Review. */
   rejectedReports: number;
@@ -543,6 +544,7 @@ export class OnlookerObserver {
       calls: 0,
       started: Date.now(),
       rejectedReports: 0,
+      through: this.completed,
     };
     this.active = review;
     const operation = this.review(review)
@@ -550,7 +552,7 @@ export class OnlookerObserver {
       .catch((cause) => {
         if (review.epoch !== this.epoch || this.closed || !this.sameObservation(review)) return;
         if (review.timedOut && ++this.deadlinesInRow < maxDeadlinesInRow)
-          this.skippedThrough = this.dueThrough;
+          this.skippedThrough = review.through;
         else this.fail(errorText(cause));
       })
       .finally(() => {
@@ -874,7 +876,7 @@ export class OnlookerObserver {
   }
 
   private async performReview(review: Review): Promise<void> {
-    const through = this.completed;
+    const { through } = review;
     const snapshot = this.snapshot;
     if (!snapshot) return;
     const prepared = await this.prepareOperation(review, snapshot);
