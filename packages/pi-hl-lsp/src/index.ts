@@ -1,12 +1,19 @@
 import { relative, resolve } from "node:path";
 
-import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  isEditToolResult,
+  isWriteToolResult,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { errorText } from "pi-hl-utils/errors";
 import { layeredSettingsSession, type LayeredSettingScope } from "pi-hl-utils/layered-settings";
 import { registerSettingsCommand } from "pi-hl-utils/settings-command";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 
 import { LspController, type NavigationTarget, type Operation } from "./controller.js";
+import { formatNewErrors } from "./format.js";
 import type { LspChange } from "./menu.js";
 import { outside } from "./routing.js";
 import { commandSpec, lspSettings, readSettings } from "./settings.js";
@@ -21,6 +28,10 @@ const navigation = Type.Object({
   column: Type.Optional(oneBased),
 });
 const document = Type.Object({ file });
+// Edit and write inputs come from the model, so the path is checked before use.
+const editedFile = Type.Object({ path: file });
+// Bounds the wait for new errors after an edit; a server that is still starting keeps starting.
+const POST_EDIT_MS = 3000;
 const workspaceSymbols = Type.Object({
   file,
   query: Type.String({ minLength: 1, maxLength: 200 }),
@@ -51,7 +62,7 @@ const promptGuidelines = {
   workspace_symbols:
     "Use hl_lsp_workspace_symbols to find where a named symbol is defined; pass any file of the project and the name as query.",
   diagnostics:
-    "Use hl_lsp_diagnostics for observed diagnostics of a file; they do not certify the project.",
+    "Use hl_lsp_diagnostics for observed diagnostics of a file; they do not certify the project. After edit or write, hl-lsp appends errors the edit introduced; no block means none were found or the check did not finish.",
 } as const;
 
 // Headers name a file relative to the session cwd when it is inside it.
@@ -147,6 +158,29 @@ export default function hlLsp(pi: ExtensionAPI): void {
           content: JSON.stringify(summary),
           display: false,
           timestamp: Date.now(),
+        },
+      ],
+    };
+  });
+
+  // A failed or unchecked edit keeps its result; the edit itself has already succeeded.
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.isError || !(isEditToolResult(event) || isWriteToolResult(event))) return;
+    const current = controller;
+    if (!current || !Value.Check(editedFile, event.input)) return;
+    const deadline = AbortSignal.any([
+      ...(ctx.signal ? [ctx.signal] : []),
+      AbortSignal.timeout(POST_EDIT_MS),
+    ]);
+    const errors = await current.newErrors(event.input.path, deadline).catch(() => undefined);
+    if (!errors || errors.length === 0) return;
+    const header = `hl-lsp: ${errors.length} new errors in ${displayPath(ctx.cwd, event.input.path)}`;
+    return {
+      content: [
+        ...event.content,
+        {
+          type: "text" as const,
+          text: `${header}\n${formatNewErrors(errors).text}`,
         },
       ],
     };

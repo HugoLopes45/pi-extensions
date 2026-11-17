@@ -105,13 +105,16 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
         noPromptTemplates: true,
         noThemes: true,
         noContextFiles: true,
-        additionalExtensionPaths: [fileURLToPath(new URL("../dist/index.js", import.meta.url))],
+        additionalExtensionPaths: [
+          fileURLToPath(new URL("../dist/index.js", import.meta.url)),
+          fileURLToPath(new URL("./edit-tool.ts", import.meta.url)),
+        ],
         // Undefined keeps Pi's default prompt, which lists tools that have a promptSnippet.
         systemPromptOverride: () => undefined,
       });
       await resourceLoader.reload();
       expect(resourceLoader.getExtensions().errors).toEqual([]);
-      expect(resourceLoader.getExtensions().extensions).toHaveLength(1);
+      expect(resourceLoader.getExtensions().extensions).toHaveLength(2);
       const result = await createAgentSession({
         cwd,
         agentDir,
@@ -868,6 +871,107 @@ it("keeps a valid session enable blocked without global project-execution consen
   });
   await expect(readFile(spawnLog, "utf8")).rejects.toMatchObject({
     code: "ENOENT",
+  });
+});
+
+it("appends an error that an edit introduces", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
+    isError: false,
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
+  });
+});
+
+it("appends nothing for a later edit that keeps the same error", async () => {
+  const state = await session(true, "error-lines");
+  await tool(state, "edit", { path: "index.ts", text: "ERROR\n" });
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\nkeep\n" })).toMatchObject({
+    content: [{ type: "text", text: "Wrote index.ts" }],
+  });
+});
+
+it("appends one error when an edit adds a second identical error", async () => {
+  const state = await session(true, "error-lines");
+  await tool(state, "edit", { path: "index.ts", text: "ERROR\n" });
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\nERROR\n" })).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
+  });
+});
+
+it("leaves a clean edit's result unchanged", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "edit", { path: "index.ts", text: "const value = 2;\n" })).toMatchObject(
+    {
+      content: [{ type: "text", text: "Wrote index.ts" }],
+    },
+  );
+});
+
+it("appends nothing for a warning-only edit", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "edit", { path: "index.ts", text: "WARN\n" })).toMatchObject({
+    content: [{ type: "text", text: "Wrote index.ts" }],
+  });
+});
+
+it("ignores a failed edit", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "edit", { path: "index.ts", text: "fail" })).toMatchObject({
+    isError: true,
+    content: [{ type: "text", text: "Could not find the text" }],
+  });
+});
+
+it("ignores an edit to a file type without a configured server", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "edit", { path: "notes.md", text: "ERROR\n" })).toMatchObject({
+    content: [{ type: "text", text: "Wrote notes.md" }],
+  });
+});
+
+it("leaves an edit's result unchanged while project execution is blocked", async () => {
+  const state = await session(true, "error-lines", {
+    allowProjectExecution: false,
+  });
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
+    content: [{ type: "text", text: "Wrote index.ts" }],
+  });
+  await expect(readFile(state.spawnLog, "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it("returns an edit unchanged when the server never answers, within the post-edit deadline", async () => {
+  const state = await session(true, "silent");
+  const started = performance.now();
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
+    content: [{ type: "text", text: "Wrote index.ts" }],
+  });
+  expect(performance.now() - started).toBeLessThan(3500);
+});
+
+it("appends new errors after a write too", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "write", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
   });
 });
 

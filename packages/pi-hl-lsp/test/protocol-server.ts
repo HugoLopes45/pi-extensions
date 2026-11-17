@@ -264,9 +264,34 @@ function finding(code: number | string) {
     },
   };
 }
+const changedText = Type.Object({
+  contentChanges: Type.Tuple([Type.Object({ text: Type.String() })]),
+});
+const openedText = Type.Object({
+  textDocument: Type.Object({ text: Type.String() }),
+});
+// Each line with ERROR is an error and each line with WARN a warning, so a test sets diagnostics through the text.
+function errorLines(value: unknown): object[] {
+  const text = Value.Check(openedText, value)
+    ? value.textDocument.text
+    : Value.Check(changedText, value)
+      ? value.contentChanges[0].text
+      : "";
+  return text.split("\n").flatMap((line) => {
+    if (line.includes("ERROR")) return [finding(2322)];
+    if (line.includes("WARN")) return [{ ...finding(2322), severity: 2 }];
+    return [];
+  });
+}
+function reportedFindings(value: unknown): object[] {
+  if (mode === "error-lines") return errorLines(value);
+  const code = reportedCodes.get(mode);
+  return code === undefined ? [] : [finding(code)];
+}
 // Modes whose publication carries the document version, and the code each mode reports.
 const versionedModes = new Set<string | undefined>([
   "versioned",
+  "error-lines",
   "string-code",
   "pull-and-push",
   "pull-duplicate",
@@ -309,11 +334,10 @@ async function publishDiagnostics(value: unknown, changed: boolean) {
     });
     return;
   }
-  const code = reportedCodes.get(mode);
   await connection.sendNotification("textDocument/publishDiagnostics", {
     uri: mode === "encoded-uri" ? uri.replaceAll("@", "%40") : uri,
     ...(versionedModes.has(mode) || syncLog ? { version } : {}),
-    diagnostics: code === undefined ? [] : [finding(code)],
+    diagnostics: reportedFindings(value),
   });
 }
 connection.onNotification("textDocument/didOpen", async (value: unknown) => {

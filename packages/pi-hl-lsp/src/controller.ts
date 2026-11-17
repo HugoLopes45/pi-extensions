@@ -377,9 +377,28 @@ async function disposeAll(instances: Instance[]): Promise<void> {
   if (failure) throw failure.reason;
 }
 
+type Diagnostic = Observation["diagnostics"][number];
+
+// Errors are compared by code and message, so an error that moved still matches its earlier copy.
+function errorKey(item: Diagnostic): string {
+  return `${item.code ?? ""}\u0000${item.message}`;
+}
+
+function errorCounts(diagnostics: Diagnostic[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of diagnostics) {
+    if (item.severity !== 1) continue;
+    const key = errorKey(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export class LspController {
   private readonly instances = new Map<string, Instance>();
   private readonly lifetime = new AbortController();
+  // Error counts of the last settled diagnostics observation of each file.
+  private readonly baseline = new Map<string, Map<string, number>>();
   private generation = 0;
   private selected: { instance: Instance; document: Document } | undefined;
 
@@ -572,7 +591,34 @@ export class LspController {
         ? undefined
         : resolvePosition(text, target);
     const instance = await this.instance(route, config, deadline);
-    return this.exchange(route, instance, operation, position, search, text, deadline);
+    const result = await this.exchange(
+      route,
+      instance,
+      operation,
+      position,
+      search,
+      text,
+      deadline,
+    );
+    if ("diagnostics" in result) this.baseline.set(route.file, errorCounts(result.diagnostics));
+    return result;
+  }
+
+  // Errors of the file that the previous settled observation did not have; undefined when no check finished.
+  async newErrors(file: string, signal: AbortSignal): Promise<Diagnostic[] | undefined> {
+    const route = await resolveRoute(file, this.cwd);
+    if (route.outcome !== "completed") return undefined;
+    const before = this.baseline.get(route.file) ?? new Map<string, number>();
+    const result = await this.query("diagnostics", file, undefined, signal);
+    if (!("diagnostics" in result)) return undefined;
+    const seen = new Map<string, number>();
+    return result.diagnostics.filter((item) => {
+      if (item.severity !== 1) return false;
+      const key = errorKey(item);
+      const count = (seen.get(key) ?? 0) + 1;
+      seen.set(key, count);
+      return count > (before.get(key) ?? 0);
+    });
   }
 
   private async snapshotMatches(document: Document, instance: Instance): Promise<boolean> {

@@ -15,6 +15,7 @@ const bodyLimits = { maxBytes: 16384, maxLines: 250 };
 const diagnosticMessageLimits = { maxBytes: 512, maxLines: 1 };
 const sourceLimits = { maxBytes: 200, maxLines: 1 };
 const locationLimit = 50;
+const newErrorLimit = 10;
 const symbolLimit = 200;
 const maxSymbolDepth = 8;
 
@@ -169,6 +170,16 @@ export function formatDiagnostics(observation: Observation): Formatted {
   return renderBody(
     rendered.map((line) => line.text),
     observation.omitted,
+    rendered.some((line) => line.truncated),
+  );
+}
+
+export function formatNewErrors(errors: Observation["diagnostics"]): Formatted {
+  const shown = errors.slice(0, newErrorLimit);
+  const rendered = shown.map(diagnosticLine);
+  return renderBody(
+    rendered.map((line) => line.text),
+    errors.length - shown.length,
     rendered.some((line) => line.truncated),
   );
 }

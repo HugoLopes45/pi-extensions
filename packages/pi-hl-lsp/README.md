@@ -20,7 +20,7 @@ If no result settles before the request deadline, the tool fails with `No settle
 
 Natural model requests can receive one transient summary of the latest settled observation. The summary includes its `evidence`. The extension rereads the file first. Automatic summaries exclude diagnostic prose.
 
-Files synchronize on explicit semantic requests. Edits do not trigger background analysis. The extension does not apply server edits or execute server-requested commands.
+Files synchronize on explicit semantic requests. After a successful edit or write, the extension checks the edited file once, for at most 3 seconds, and appends the errors that the change introduced to the tool result. Errors are compared with the last settled observation of the same file. Edits trigger no other analysis. The extension does not apply server edits or execute server-requested commands.
 
 ## Output
 
