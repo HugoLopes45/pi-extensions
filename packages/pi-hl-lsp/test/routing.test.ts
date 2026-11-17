@@ -50,6 +50,36 @@ it("routes a custom server by its declared file type and root marker", async () 
   });
 });
 
+it("routes a Swift file to the swift server by Package.swift or an Xcode project", async () => {
+  const swiftPackage = await directory();
+  await writeFile(join(swiftPackage, "Package.swift"), "");
+  await mkdir(join(swiftPackage, "Sources"));
+  const packageFile = join(swiftPackage, "Sources", "main.swift");
+  await writeFile(packageFile, "");
+  const app = await directory();
+  await mkdir(join(app, "App.xcodeproj"));
+  await mkdir(join(app, "App"));
+  const appFile = join(app, "App", "ContentView.swift");
+  await writeFile(appFile, "");
+  const definitions = serverDefinitions({});
+  expect(await resolveRoute(packageFile, swiftPackage, definitions)).toEqual({
+    outcome: "completed",
+    file: packageFile,
+    root: swiftPackage,
+    language: "swift",
+    server: "swift",
+    coverage: "local-marker",
+  });
+  expect(await resolveRoute(appFile, app, definitions)).toEqual({
+    outcome: "completed",
+    file: appFile,
+    root: app,
+    language: "swift",
+    server: "swift",
+    coverage: "local-marker",
+  });
+});
+
 it("replaces the built-in file types of a configured built-in server", async () => {
   const root = await directory();
   await writeFile(join(root, "tsconfig.json"), "{}");

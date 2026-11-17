@@ -107,6 +107,17 @@ export const presets: Readonly<Record<string, Preset>> = {
     languageIds: {},
     rootHook: cargoRoot,
   },
+  swift: {
+    fileTypes: [".swift"],
+    rootMarkers: [
+      "Package.swift",
+      "buildServer.json",
+      "*.xcodeproj",
+      "*.xcworkspace",
+      "compile_commands.json",
+    ],
+    languageIds: {},
+  },
 };
 
 export function presetFor(name: string): Preset | undefined {

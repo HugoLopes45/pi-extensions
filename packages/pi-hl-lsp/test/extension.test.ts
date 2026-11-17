@@ -617,7 +617,7 @@ it("reports server state and supported tools, and starts no server for it", asyn
     content: [
       {
         type: "text",
-        text: "hl-lsp status: completed\ntypescript: not started\npython: not configured\nrust: not configured",
+        text: "hl-lsp status: completed\ntypescript: not started\npython: not configured\nrust: not configured\nswift: not configured",
       },
     ],
   });
@@ -632,7 +632,7 @@ it("reports server state and supported tools, and starts no server for it", asyn
       {
         type: "text",
         text: stringMatching(
-          /^hl-lsp status: completed\ntypescript: running root=.+ open=1 tools=hover diagnostics\npython: not configured\nrust: not configured$/u,
+          /^hl-lsp status: completed\ntypescript: running root=.+ open=1 tools=hover diagnostics\npython: not configured\nrust: not configured\nswift: not configured$/u,
         ),
       },
     ],
@@ -695,7 +695,7 @@ it("reports a server that exited as failed, with its reason, in status", async (
       {
         type: "text",
         text: stringMatching(
-          /^hl-lsp status: completed\ntypescript: failed \((?:LSP connection closed|LSP process exited \(3\)[^\n]*)\) root=.+ open=1 tools=hover diagnostics\npython: not configured\nrust: not configured$/u,
+          /^hl-lsp status: completed\ntypescript: failed \((?:LSP connection closed|LSP process exited \(3\)[^\n]*)\) root=.+ open=1 tools=hover diagnostics\npython: not configured\nrust: not configured\nswift: not configured$/u,
         ),
       },
     ],
