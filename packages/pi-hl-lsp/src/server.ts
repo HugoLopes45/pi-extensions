@@ -204,6 +204,8 @@ export class LanguageServer {
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const cancellation = new rpc.CancellationTokenSource();
     const abort = () => {
+      // During stop() only exit may follow shutdown, and stop() closes the connection itself.
+      if (this.stopped) return;
       cancellation.cancel();
       this.connection.dispose();
     };

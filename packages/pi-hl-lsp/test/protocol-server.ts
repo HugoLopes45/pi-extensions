@@ -2,14 +2,15 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { appendFileSync } from "node:fs";
 import { Writable } from "node:stream";
-import { setImmediate as tick } from "node:timers/promises";
+import { setTimeout as delay, setImmediate as tick } from "node:timers/promises";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import rpc from "vscode-jsonrpc/node";
 const mode = process.argv[2];
 // These servers outlive SIGTERM and a closed stdin, like a hung real server.
-const stubborn = mode === "stubborn-server" || mode === "stubborn-garbage";
+const stubborn =
+  mode === "stubborn-server" || mode === "stubborn-garbage" || mode === "stubborn-mute";
 if (stubborn) {
   process.on("SIGTERM", () => {});
   setInterval(() => {}, 1000);
@@ -40,6 +41,7 @@ function frames(count: number): string {
 }
 const rawReplies = new Map<string | undefined, () => string>([
   ["invalid-frame", () => "Content-Length: 2\r\n\r\n{x"],
+  ["stubborn-garbage", () => "Content-Length: 2\r\n\r\n{x"],
   ["endless-header", () => `X-Pad: ${"a".repeat(9 * 1024 * 1024)}`],
   ["burst", () => frames(400_000)],
   [
@@ -55,16 +57,22 @@ const rawReplies = new Map<string | undefined, () => string>([
       `Content-Length: 1000\r\nContent-Length: 30x\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
   ],
 ]);
-const replies = new Map<string | undefined, () => object | Promise<object>>([
-  ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
-  ["stubborn-server", () => ({ pid: process.pid })],
+const log = (event: string) => {
+  if (spawnLog !== undefined) appendFileSync(spawnLog, `${event}\n`);
+};
+const replies = new Map<
+  string | undefined,
+  (token: rpc.CancellationToken) => object | Promise<object>
+>([
   [
-    "stubborn-garbage",
-    () => {
-      setTimeout(() => process.stdout.write("Content-Length: 2\r\n\r\n{x"), 100);
-      return {};
+    "slow-shutdown",
+    (token) => {
+      token.onCancellationRequested(() => log("cancel"));
+      return new Promise<never>(() => {});
     },
   ],
+  ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
+  ["stubborn-server", () => ({ pid: process.pid })],
   [
     "grandchild",
     () => {
@@ -103,27 +111,30 @@ connection.onRequest("initialize", async () => {
     },
   };
 });
-connection.onRequest("textDocument/hover", async (): Promise<object> => {
-  if (mode === "ignore") return new Promise<never>(() => {});
-  const raw = rawReplies.get(mode);
-  if (raw) {
-    process.stdout.write(raw());
-    return new Promise<never>(() => {});
-  }
-  const reply = replies.get(mode);
-  if (reply) return reply();
-  if (mode === "effects") {
-    try {
-      await connection.sendRequest("workspace/applyEdit", {
-        edit: { changes: {} },
-      });
-    } catch (error) {
-      if (error instanceof rpc.ResponseError) return { rejected: error.code };
-      throw error;
+connection.onRequest(
+  "textDocument/hover",
+  async (_params: unknown, token: rpc.CancellationToken): Promise<object> => {
+    if (mode === "ignore") return new Promise<never>(() => {});
+    const raw = rawReplies.get(mode);
+    if (raw) {
+      process.stdout.write(raw());
+      return new Promise<never>(() => {});
     }
-  }
-  return { contents: { kind: "plaintext", value: "const value: number" } };
-});
+    const reply = replies.get(mode);
+    if (reply) return reply(token);
+    if (mode === "effects") {
+      try {
+        await connection.sendRequest("workspace/applyEdit", {
+          edit: { changes: {} },
+        });
+      } catch (error) {
+        if (error instanceof rpc.ResponseError) return { rejected: error.code };
+        throw error;
+      }
+    }
+    return { contents: { kind: "plaintext", value: "const value: number" } };
+  },
+);
 const opened = Type.Object({
   textDocument: Type.Object({ uri: Type.String(), version: Type.Integer() }),
 });
@@ -153,13 +164,22 @@ connection.onNotification("textDocument/didChange", publishDiagnostics);
 connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
 });
-if (mode === "handshake" || mode === "mute-shutdown") {
-  connection.onRequest("shutdown", () => {
-    if (spawnLog !== undefined) appendFileSync(spawnLog, "shutdown\n");
-    return mode === "handshake" ? null : new Promise<never>(() => {});
+const handshake = new Set([
+  "handshake",
+  "mute-shutdown",
+  "slow-shutdown",
+  "stubborn-mute",
+  "wrong-encoding",
+]);
+if (mode !== undefined && handshake.has(mode)) {
+  connection.onRequest("shutdown", async () => {
+    log("shutdown");
+    if (mode === "mute-shutdown" || mode === "stubborn-mute") return new Promise<never>(() => {});
+    if (mode === "slow-shutdown") await delay(500);
+    return null;
   });
   connection.onNotification("exit", () => {
-    if (spawnLog !== undefined) appendFileSync(spawnLog, "exit\n");
+    log("exit");
     process.exit(0);
   });
 }

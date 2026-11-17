@@ -7,8 +7,14 @@ import { fileURLToPath } from "node:url";
 import { expect, it, onTestFinished, vi } from "vitest";
 
 import { LspController } from "../src/controller.js";
+import { LanguageServer } from "../src/server.js";
 import type { LspSettings } from "../src/settings.js";
 import { directory } from "./fixtures.js";
+
+const fixture = fileURLToPath(new URL("./protocol-server.ts", import.meta.url));
+// Protocol events the fixture logged after its launch line.
+const events = async (spawnLog: string) =>
+  (await readFile(spawnLog, "utf8")).trim().split("\n").slice(1);
 
 async function controller(mode = "normal", consent = true, trusted = true) {
   const cwd = await directory();
@@ -24,7 +30,7 @@ async function controller(mode = "normal", consent = true, trusted = true) {
     servers: {
       typescript: {
         command: process.execPath,
-        args: [fileURLToPath(new URL("./protocol-server.ts", import.meta.url)), mode, spawnLog],
+        args: [fixture, mode, spawnLog],
       },
     },
   };
@@ -139,21 +145,31 @@ it.skipIf(process.platform === "win32")("rejects dispose when SIGKILL is refused
 });
 
 it.skipIf(process.platform === "win32")(
-  "waits for an evicted failed instance before dispose resolves",
+  "keeps an evicted failed instance visible until its group is killed",
   async () => {
     const { instance, file, spawnLog } = await controller("stubborn-garbage");
-    await instance.query("hover", file, { line: 0, character: 6 });
-    await delay(300);
-    const group = -Number((await readFile(spawnLog, "utf8")).trim());
+    await packages(join(file, ".."), 1);
+    const root = join(file, "..", "package-0");
+    const failed = join(root, "index.ts");
+    await instance.query("diagnostics", failed);
+    const group = -(await lastPid(spawnLog));
+    const failing = instance
+      .query("hover", failed, { line: 0, character: 6 })
+      .catch(() => undefined);
+    await vi.waitFor(() => expect(instance.status().instances[0]?.active).toBe(false));
     const kill = vi.spyOn(process, "kill");
     onTestFinished(() => {
       vi.restoreAllMocks();
     });
-    const next = instance.query("hover", file, { line: 0, character: 6 }).catch(() => undefined);
-    await delay(300);
-    await instance.dispose();
-    expect(kill.mock.calls).toContainEqual([group, "SIGKILL"]);
-    await next;
+    const evicting = instance.query("diagnostics", file);
+    // controller.dispose() only reaches instances still in the map, so the evicted one must
+    // stay listed until its escalation ends.
+    while (!kill.mock.calls.some(([target, signal]) => target === group && signal === "SIGKILL")) {
+      expect(instance.status().instances.map((listed) => listed.root)).toContain(root);
+      await delay(10);
+    }
+    await evicting;
+    await failing;
   },
 );
 
@@ -196,15 +212,20 @@ it.skipIf(process.platform === "win32")(
   async () => {
     const { instance, file, spawnLog } = await controller("stubborn-garbage");
     const kill = refuseFirstGroup(spawnLog);
-    for (const path of await packages(join(file, ".."), 2))
-      await instance.query("hover", path, { line: 0, character: 6 });
+    const paths = await packages(join(file, ".."), 2);
+    for (const path of paths) await instance.query("diagnostics", path);
     const group = -(await lastPid(spawnLog));
-    await delay(300);
-    await expect(instance.query("hover", file, { line: 0, character: 6 })).rejects.toThrow(
+    const failing = paths.map((path) =>
+      instance.query("hover", path, { line: 0, character: 6 }).catch(() => undefined),
+    );
+    await vi.waitFor(() =>
+      expect(instance.status().instances.map((listed) => listed.active)).toEqual([false, false]),
+    );
+    await expect(instance.query("diagnostics", file)).rejects.toThrow(
       "LSP process group did not stop",
     );
-    await instance.dispose();
     expect(kill.mock.calls).toContainEqual([group, "SIGKILL"]);
+    await Promise.all(failing);
   },
 );
 
@@ -212,10 +233,7 @@ it("shuts a healthy initialized server down with shutdown, then exit", async () 
   const { instance, file, spawnLog } = await controller("handshake");
   await instance.query("hover", file, { line: 0, character: 6 });
   await instance.dispose();
-  expect((await readFile(spawnLog, "utf8")).trim().split("\n").slice(1)).toEqual([
-    "shutdown",
-    "exit",
-  ]);
+  expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
 
 it("falls back to signals within the budget when shutdown gets no answer", async () => {
@@ -224,7 +242,50 @@ it("falls back to signals within the budget when shutdown gets no answer", async
   const started = performance.now();
   await instance.dispose();
   expect(performance.now() - started).toBeLessThan(2500);
-  expect((await readFile(spawnLog, "utf8")).trim().split("\n").slice(1)).toEqual(["shutdown"]);
+  expect(await events(spawnLog)).toEqual(["shutdown"]);
+});
+
+it.skipIf(process.platform === "win32")(
+  "keeps one two-second budget for a server that ignores shutdown and SIGTERM",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-mute");
+    await instance.query("hover", file, { line: 0, character: 6 });
+    const started = performance.now();
+    await instance.dispose();
+    expect(performance.now() - started).toBeLessThan(2500);
+    expect(await events(spawnLog)).toEqual(["shutdown"]);
+  },
+);
+
+it("does not send shutdown to a server that never finished initializing", async () => {
+  const { instance, file, spawnLog } = await controller("wrong-encoding");
+  await expect(instance.query("hover", file, { line: 0, character: 6 })).rejects.toThrow(
+    "Unsupported LSP position encoding",
+  );
+  await instance.dispose();
+  expect(await events(spawnLog)).toEqual([]);
+});
+
+it("sends nothing but exit after shutdown when a pending request is aborted", async () => {
+  const cwd = await directory();
+  const spawnLog = join(cwd, "spawns.log");
+  const client = new LanguageServer(
+    { command: process.execPath, args: [fixture, "slow-shutdown", spawnLog] },
+    cwd,
+    5000,
+    () => {},
+  );
+  onTestFinished(() => client.dispose());
+  await client.initialize();
+  const abort = new AbortController();
+  const pending = client.request("textDocument/hover", {}, abort.signal).catch(() => undefined);
+  const disposing = client.dispose();
+  // The fixture answers shutdown after 500 ms; the abort lands inside that window.
+  await vi.waitFor(async () => expect(await events(spawnLog)).toContain("shutdown"));
+  abort.abort();
+  await disposing;
+  await pending;
+  expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
 
 it("prevents use after disposal", async () => {
