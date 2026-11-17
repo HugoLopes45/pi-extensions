@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { errorText } from "pi-hl-utils/errors";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import * as rpc from "vscode-jsonrpc/node";
@@ -24,7 +25,13 @@ import {
 } from "./format.js";
 import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
-import type { LspSettings, ServerConfig, ServerFamily } from "./settings.js";
+import {
+  serverFamilies,
+  type LspSettings,
+  type ServerConfig,
+  type ServerFamily,
+} from "./settings.js";
+import { bounded } from "./text.js";
 
 export type Operation =
   | "hover"
@@ -60,7 +67,22 @@ type Instance = {
   root: string;
   server: ServerFamily;
   generation: number;
-  state: { document: Document | undefined };
+  state: {
+    document: Document | undefined;
+    initialization: Initialization | undefined;
+    failure: string | undefined;
+  };
+};
+export type InstanceStatus = {
+  root: string;
+  state: "starting" | "running" | "failed";
+  reason?: string | undefined;
+  openDocuments: number;
+  tools: Operation[] | undefined;
+};
+export type ServerStatus = {
+  server: ServerFamily;
+  instances: InstanceStatus[];
 };
 const publication = Type.Object({ uri: Type.String() });
 const capability = {
@@ -382,6 +404,38 @@ function missingCapability(
   return undefined;
 }
 
+const operations: readonly Operation[] = [
+  "hover",
+  "definition",
+  "type_definition",
+  "implementation",
+  "references",
+  "symbols",
+  "workspace_symbols",
+  "diagnostics",
+];
+
+// Lists the operations that a query would not refuse as unsupported.
+function supportedOperations(capabilities: Initialization["capabilities"]): Operation[] {
+  return operations.filter((operation) => missingCapability(operation, capabilities) === undefined);
+}
+
+function instanceStatus({ client, root, state }: Instance): InstanceStatus {
+  const failed = !client.active;
+  return {
+    root,
+    state: failed ? "failed" : state.initialization ? "running" : "starting",
+    reason: failed
+      ? bounded(state.failure ?? "LSP instance is closed", {
+          maxBytes: 512,
+          maxLines: 1,
+        }).content
+      : undefined,
+    openDocuments: state.document ? 1 : 0,
+    tools: state.initialization && supportedOperations(state.initialization.capabilities),
+  };
+}
+
 async function ready(instance: Instance, deadline: AbortSignal): Promise<Initialization> {
   const aborted = Promise.withResolvers<never>();
   const abort = () => aborted.reject(new Error("LSP server is still starting; retry the request"));
@@ -431,6 +485,41 @@ export class LspController {
     private readonly settings: LspSettings,
     private readonly trusted: boolean,
   ) {}
+
+  private configured(): ServerFamily[] {
+    return serverFamilies.filter((server) => this.settings.servers[server] !== undefined);
+  }
+
+  serverStatus() {
+    const refusal = this.gate();
+    if (refusal) return refusal;
+    const instances = [...this.instances.values()];
+    return {
+      outcome: "completed" as const,
+      servers: this.configured().map((server): ServerStatus => ({
+        server,
+        instances: instances.filter((instance) => instance.server === server).map(instanceStatus),
+      })),
+    };
+  }
+
+  // Stops the running instances of one configured server; the next query starts a fresh one.
+  async reload(server: string) {
+    const refusal = this.gate();
+    if (refusal) return refusal;
+    const configured = this.configured();
+    const family = configured.find((candidate) => candidate === server);
+    if (family === undefined)
+      return {
+        outcome: "unavailable" as const,
+        reason: `Unknown server "${server}"; configured servers: ${configured.join(", ") || "none"}`,
+      };
+    const stopped = [...this.instances].filter(([, instance]) => instance.server === family);
+    await disposeAll(stopped.map(([, instance]) => instance));
+    for (const [key, instance] of stopped)
+      if (this.instances.get(key) === instance) this.instances.delete(key);
+    return { outcome: "completed" as const, stopped: stopped.length };
+  }
 
   status() {
     return {
@@ -484,7 +573,11 @@ export class LspController {
     }
     await this.evictOldest();
     signal.throwIfAborted();
-    const state: Instance["state"] = { document: undefined };
+    const state: Instance["state"] = {
+      document: undefined,
+      initialization: undefined,
+      failure: undefined,
+    };
     const client = new LanguageServer(
       config,
       route.root,
@@ -502,7 +595,10 @@ export class LspController {
         }
         document.timer = setTimeout(() => settle(document, settledObservation(report)), SETTLE_MS);
       },
-      (error) => state.document?.waiting?.reject(error),
+      (error) => {
+        state.failure = errorText(error);
+        state.document?.waiting?.reject(error);
+      },
     );
     const instance = {
       client,
@@ -513,7 +609,14 @@ export class LspController {
       generation: ++this.generation,
       state,
     };
-    instance.ready.catch(() => {});
+    instance.ready.then(
+      (initialization) => {
+        state.initialization = initialization;
+      },
+      (error: unknown) => {
+        state.failure = errorText(error);
+      },
+    );
     this.instances.set(key, instance);
     return instance;
   }

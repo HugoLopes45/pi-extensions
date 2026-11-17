@@ -12,7 +12,13 @@ import { registerSettingsCommand } from "pi-hl-utils/settings-command";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
-import { LspController, type NavigationTarget, type Operation } from "./controller.js";
+import {
+  LspController,
+  type InstanceStatus,
+  type NavigationTarget,
+  type Operation,
+  type ServerStatus,
+} from "./controller.js";
 import { formatNewErrors } from "./format.js";
 import type { LspChange } from "./menu.js";
 import { outside } from "./routing.js";
@@ -46,6 +52,9 @@ const promptSnippet = {
   workspace_symbols:
     "Returns project symbols whose name matches a query; any file of the project selects it.",
   diagnostics: "Returns diagnostics observed for a file, not project-wide.",
+  status: "Returns each configured LSP server's state, root, open documents and supported tools.",
+  reload:
+    "Stops the running instances of one configured LSP server; its next request starts a fresh one.",
 } as const;
 const promptGuidelines = {
   hover:
@@ -63,6 +72,9 @@ const promptGuidelines = {
     "Use hl_lsp_workspace_symbols to find where a named symbol is defined; pass any file of the project and the name as query.",
   diagnostics:
     "Use hl_lsp_diagnostics for observed diagnostics of a file; they do not certify the project. After edit or write, hl-lsp appends errors the edit introduced; no block means none were found or the check did not finish.",
+  status: "Use hl_lsp_status to check which LSP servers run before diagnosing a server problem.",
+  reload:
+    "Use hl_lsp_reload with a configured server key after a server stops responding; it edits no files.",
 } as const;
 
 // Headers name a file relative to the session cwd when it is inside it.
@@ -72,22 +84,54 @@ function displayPath(cwd: string, file: string): string {
 }
 
 // Only completed and partial results carry text; every other outcome is a refusal or failure.
-function toolResult(
-  operation: Operation,
-  path: string,
-  details: { outcome: string; reason?: string; text?: string },
-) {
+function toolResult(header: string, details: { outcome: string; reason?: string; text?: string }) {
   const served = details.outcome === "completed" || details.outcome === "partial";
   return {
     content: [
       {
         type: "text" as const,
-        text: `hl-lsp ${operation} ${path}: ${details.outcome}\n${details.text ?? details.reason}`,
+        text: `hl-lsp ${header}: ${details.outcome}\n${details.text ?? details.reason}`,
       },
     ],
     details,
     isError: !served,
   };
+}
+
+function failureDetails(error: unknown, aborted: boolean) {
+  const reason = bounded(error instanceof Error ? error.message : "LSP request failed", {
+    maxBytes: 2048,
+    maxLines: 8,
+  });
+  return {
+    outcome: aborted ? "cancelled" : "failed",
+    source: "untrusted_lsp_or_filesystem",
+    reason: reason.content,
+    truncated: reason.truncated,
+  };
+}
+
+function unavailable(issue: string | undefined) {
+  return {
+    outcome: "unavailable",
+    reason: issue ?? "LSP session has not started",
+  };
+}
+
+// One line per configured server; several instances of one server share that line.
+function serverLines(servers: ServerStatus[]): string {
+  return servers
+    .map(
+      ({ server, instances }) =>
+        `${server}: ${instances.length === 0 ? "not started" : instances.map(instanceLine).join("; ")}`,
+    )
+    .join("\n");
+}
+
+function instanceLine({ state, reason, root, openDocuments, tools }: InstanceStatus): string {
+  const label = reason === undefined ? state : `${state} (${reason})`;
+  const supported = tools === undefined ? "unknown" : tools.join(" ") || "none";
+  return `${label} root=${root} open=${openDocuments} tools=${supported}`;
 }
 
 export default function hlLsp(pi: ExtensionAPI): void {
@@ -239,26 +283,14 @@ export default function hlLsp(pi: ExtensionAPI): void {
     search?: string,
   ) {
     const shown = displayPath(cwd, path);
+    const header = `${operation} ${shown}`;
     try {
       const details = controller
         ? await controller.query(operation, path, target, signal, search)
-        : {
-            outcome: "unavailable",
-            reason: issue ?? "LSP session has not started",
-          };
-      return toolResult(operation, shown, details);
+        : unavailable(issue);
+      return toolResult(header, details);
     } catch (error) {
-      const reason = bounded(error instanceof Error ? error.message : "LSP request failed", {
-        maxBytes: 2048,
-        maxLines: 8,
-      });
-      const details = {
-        outcome: signal?.aborted ? "cancelled" : "failed",
-        source: "untrusted_lsp_or_filesystem",
-        reason: reason.content,
-        truncated: reason.truncated,
-      };
-      return toolResult(operation, shown, details);
+      return toolResult(header, failureDetails(error, signal?.aborted === true));
     }
   }
   for (const operation of [
@@ -286,6 +318,52 @@ export default function hlLsp(pi: ExtensionAPI): void {
         ),
     });
   }
+  pi.registerTool({
+    name: "hl_lsp_status",
+    label: "HL LSP status",
+    description:
+      "Show each configured server's state, root, open documents and supported tools. Starts no server.",
+    promptSnippet: promptSnippet.status,
+    promptGuidelines: [promptGuidelines.status],
+    parameters: Type.Object({}),
+    executionMode: "sequential",
+    execute: async () => {
+      if (!controller) return toolResult("status", unavailable(issue));
+      const result = controller.serverStatus();
+      if (result.outcome !== "completed") return toolResult("status", result);
+      return toolResult("status", {
+        ...result,
+        text: serverLines(result.servers),
+      });
+    },
+  });
+  pi.registerTool({
+    name: "hl_lsp_reload",
+    label: "HL LSP reload",
+    description:
+      "Stop the running instances of one configured server key; its next request starts a fresh one.",
+    promptSnippet: promptSnippet.reload,
+    promptGuidelines: [promptGuidelines.reload],
+    parameters: Type.Object({
+      server: Type.String({ minLength: 1, maxLength: 64 }),
+    }),
+    executionMode: "sequential",
+    execute: async (_id, params) => {
+      const header = `reload ${params.server}`;
+      if (!controller) return toolResult(header, unavailable(issue));
+      try {
+        const result = await controller.reload(params.server);
+        if (result.outcome !== "completed") return toolResult(header, result);
+        const instances = result.stopped === 1 ? "instance" : "instances";
+        return toolResult(header, {
+          ...result,
+          text: `stopped ${result.stopped} server ${instances}`,
+        });
+      } catch (error) {
+        return toolResult(header, failureDetails(error, false));
+      }
+    },
+  });
   pi.registerTool({
     name: "hl_lsp_workspace_symbols",
     label: "HL LSP workspace_symbols",

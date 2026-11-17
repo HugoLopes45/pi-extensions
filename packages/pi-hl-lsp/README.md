@@ -6,6 +6,8 @@ Private, disabled-by-default read-only LSP extension for Pi. Requires Pi 1.5.2 o
 
 The extension provides eight read-only tools: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_type_definition`, `hl_lsp_implementation`, `hl_lsp_references`, `hl_lsp_symbols`, `hl_lsp_workspace_symbols`, and `hl_lsp_diagnostics`. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column. `hl_lsp_workspace_symbols` takes a query and finds matching symbols across the project of any file you pass.
 
+`hl_lsp_status` lists each configured server key with its state, root, open document count and supported tools. It starts no server. `hl_lsp_reload` takes one configured server key and stops its running instances; the next request starts a fresh one. Both tools obey the same enablement, trust and consent gate as the others.
+
 Each session owns its server processes. Servers start only when a tool needs them. Pi runs the tools sequentially through its native execution mechanism.
 
 Diagnostics use push publications. Results carry one of three `evidence` values. Matching versions never certify the whole project.
@@ -27,6 +29,8 @@ Files synchronize on explicit semantic requests. After a successful edit or writ
 Each result starts with a header: `hl-lsp <operation> <file>: <outcome>`. The file is relative to the session cwd when it is inside that directory, otherwise absolute.
 
 Locations print as `path:line:col`, 1-based, followed by two spaces and the trimmed source line. Source lines appear only for readable files inside the session cwd.
+
+`hl_lsp_status` prints one line per configured server key, for example `typescript: running root=/project open=1 tools=hover definition diagnostics`. A key without a running instance reads `not started`. A failed instance shows its reason. Tools read `unknown` until the server initializes.
 
 Outcomes other than `completed` and `partial` set `isError: true`.
 

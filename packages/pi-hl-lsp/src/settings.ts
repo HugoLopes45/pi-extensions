@@ -52,6 +52,8 @@ const schema = Type.Object(
 
 export type ServerConfig = Static<typeof serverSchema>;
 export type ServerFamily = keyof Static<typeof serversSchema>;
+// Every server key, in the order status lists them.
+export const serverFamilies: readonly ServerFamily[] = ["typescript", "python", "rust"];
 export type LspSettings = Required<Static<typeof schema>>;
 export type LspOptions = Static<typeof schema>;
 

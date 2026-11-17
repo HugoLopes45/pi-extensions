@@ -453,6 +453,8 @@ connection.onNotification("test/unregister", async () => {
   });
 });
 connection.onNotification("initialized", async () => {
+  // Exits once the handshake ends, so the first request meets a dead server.
+  if (mode === "exit-after-init") process.exit(3);
   if (mode === "pull-dynamic" || mode === "pull-unregistered")
     await connection.sendRequest("client/registerCapability", {
       registrations: [pullRegistration],

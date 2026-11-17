@@ -606,6 +606,99 @@ it("rejects an empty workspace symbol query before any server launch", async () 
   });
 });
 
+it("reports server state and supported tools, and starts no server for it", async () => {
+  const state = await session(true);
+  expect(await tool(state, "hl_lsp_status", {})).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp status: completed\ntypescript: not started",
+      },
+    ],
+  });
+  await expect(readFile(state.spawnLog, "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+  expect(await hover(state)).toMatchObject({
+    details: { outcome: "completed" },
+  });
+  expect(await tool(state, "hl_lsp_status", {})).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: stringMatching(
+          /^hl-lsp status: completed\ntypescript: running root=.+ open=1 tools=hover diagnostics$/u,
+        ),
+      },
+    ],
+  });
+});
+
+it("restarts one server key on reload so the next call starts a fresh process", async () => {
+  const state = await session(true);
+  expect(await hover(state)).toMatchObject({
+    details: { outcome: "completed" },
+  });
+  const pid = Number((await readFile(state.spawnLog, "utf8")).trim());
+  expect(await tool(state, "hl_lsp_reload", { server: "typescript" })).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp reload typescript: completed\nstopped 1 server instance",
+      },
+    ],
+  });
+  expect(() => process.kill(pid, 0)).toThrow("kill ESRCH");
+  expect(await hover(state)).toMatchObject({
+    details: { outcome: "completed" },
+  });
+  expect((await readFile(state.spawnLog, "utf8")).trim().split("\n")).toHaveLength(2);
+});
+
+it("refuses an unknown server key on reload and lists the configured keys", async () => {
+  const state = await session(true);
+  expect(await tool(state, "hl_lsp_reload", { server: "rust" })).toMatchObject({
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: 'hl-lsp reload rust: unavailable\nUnknown server "rust"; configured servers: typescript',
+      },
+    ],
+  });
+});
+
+it("refuses status and reload through the gate while LSP is off", async () => {
+  const state = await session(false);
+  expect(await tool(state, "hl_lsp_status", {})).toMatchObject({
+    isError: true,
+    details: { outcome: "blocked" },
+  });
+  expect(await tool(state, "hl_lsp_reload", { server: "typescript" })).toMatchObject({
+    isError: true,
+    details: { outcome: "blocked" },
+  });
+});
+
+it("reports a server that exited as failed, with its reason, in status", async () => {
+  const state = await session(true, "exit-after-init");
+  expect(await hover(state)).toMatchObject({ details: { outcome: "failed" } });
+  expect(await tool(state, "hl_lsp_status", {})).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: stringMatching(
+          /^hl-lsp status: completed\ntypescript: failed \((?:LSP connection closed|LSP process exited \(3\)[^\n]*)\) root=.+ open=1 tools=hover diagnostics$/u,
+        ),
+      },
+    ],
+  });
+});
+
 it("lists each hl_lsp tool with a one-line snippet in the system prompt", async () => {
   const { runtime } = await session(true);
   for (const name of [
@@ -617,6 +710,8 @@ it("lists each hl_lsp tool with a one-line snippet in the system prompt", async 
     "symbols",
     "workspace_symbols",
     "diagnostics",
+    "status",
+    "reload",
   ])
     expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- hl_lsp_${name}: .+$`, "mu"));
 });
@@ -632,6 +727,8 @@ it("names each hl_lsp tool in its own prompt guideline", async () => {
     "symbols",
     "workspace_symbols",
     "diagnostics",
+    "status",
+    "reload",
   ])
     expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- Use hl_lsp_${name} `, "mu"));
 });
