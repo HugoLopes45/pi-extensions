@@ -167,6 +167,21 @@ describe("layered settings resolution", () => {
     );
   });
 
+  it("escapes control characters from authored keys in errors", () => {
+    const key = "x\u001b]0;title\u0007";
+    const { manager } = storageHarness(
+      JSON.stringify({ demo: { [key]: true } }),
+      JSON.stringify({ demo: { tools: { [key]: 1 } } }),
+    );
+    const layers = define().readLayers(manager);
+    expect(errorMessage(layers.global)).toBe(
+      "Invalid global Demo settings: unknown option x\\u001b]0;title\\u0007",
+    );
+    expect(errorMessage(layers.project)).toContain(
+      "Invalid project Demo settings/tools/x\\u001b]0;title\\u0007:",
+    );
+  });
+
   it("rejects an option key the schema does not declare", () => {
     const settings = define();
     expect(settings.optionKey("limit")).toBe("limit");
@@ -475,6 +490,27 @@ describe("layered settings lenient reads", () => {
     });
     expect(resolved.settings).toEqual(defaults);
     expect(resolved.invalid.map((error) => error.message)).toEqual([expect.stringMatching(/JSON/)]);
+  });
+
+  it("escapes control characters quoted from a malformed document", async () => {
+    const document = "\u001b]0;title\u0007";
+    const { manager } = storageHarness(document);
+    const settings = define();
+    const [read] = settings.readSettingsLeniently({
+      settingsManager: manager,
+      sessionManager: branch(),
+    }).invalid;
+    const write = await settings
+      .writeSettings(
+        manager,
+        "global",
+        { action: "set", key: "limit", patch: { limit: 2 } },
+        () => true,
+      )
+      .catch((error: unknown) => error);
+    expect(write).toBeInstanceOf(SyntaxError);
+    for (const error of [read, write])
+      expect(error instanceof Error && error.message).toMatch(/\\u001b\]0;title\\u0007/u);
   });
 });
 

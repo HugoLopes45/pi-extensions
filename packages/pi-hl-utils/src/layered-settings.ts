@@ -89,6 +89,14 @@ export function resolveLayeredOptions<Config extends object>(
   return { settings, sources };
 }
 
+// Settings text reaches terminal notifications; raw control characters would run escape sequences.
+function escapeControls(text: string): string {
+  return text.replace(
+    /\p{Cc}/gu,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 /** Why {@link rewriteNamespaceDocument} refused a stored settings document. */
 export type InvalidSettingsDocument = "malformed" | "root" | "namespace";
 
@@ -343,10 +351,10 @@ export function defineLayeredSettings<
       const issue = Value.Errors(schema, value)[0];
       if (issue?.schemaPath === "#/additionalProperties")
         throw new Error(
-          `Invalid ${source} ${label} settings: unknown option ${issue.instancePath.slice(1)}`,
+          `Invalid ${source} ${label} settings: unknown option ${escapeControls(issue.instancePath.slice(1))}`,
         );
       throw new Error(
-        `Invalid ${source} ${label} settings${issue?.instancePath ?? ""}: ${issue?.message ?? "invalid options"}`,
+        `Invalid ${source} ${label} settings${escapeControls(issue?.instancePath ?? "")}: ${issue?.message ?? "invalid options"}`,
       );
     }
     checkScope(value, source);
@@ -433,7 +441,7 @@ export function defineLayeredSettings<
         keepEmpty: keepEmptyNamespace === true,
         invalid: (reason, cause) =>
           reason === "malformed" && cause
-            ? cause
+            ? new SyntaxError(escapeControls(cause.message), { cause })
             : new Error(`Invalid ${scope} settings document; refusing to overwrite it`),
         update: (stored) => {
           const next = { ...stored };
@@ -463,7 +471,12 @@ export function defineLayeredSettings<
     session: LayeredSettingsSession,
   ): LenientLayeredSettings<Options, Config> {
     // Pi reads an unloadable file as empty, so only its recorded error shows the problem.
-    const invalid: Error[] = session.settingsManager.drainErrors().map((entry) => entry.error);
+    const invalid: Error[] = session.settingsManager.drainErrors().map(
+      (entry) =>
+        new Error(escapeControls(entry.error.message), {
+          cause: entry.error,
+        }),
+    );
     const layers = readLayers(session.settingsManager);
     const usable = (layer: Options | Error): Options => {
       if (!(layer instanceof Error)) return layer;
