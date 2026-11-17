@@ -497,7 +497,7 @@ it("pauses after three Review deadlines in a row without cancelling the observed
       ...onlookerSettings.readSettings(session).settings,
       enabled: true,
       catchUpThreshold: 1,
-      reviewTimeoutMs: 20,
+      reviewTimeoutMs: 250,
     },
     "headless-root",
   );
