@@ -453,6 +453,16 @@ connection.onNotification("initialized", async () => {
     await connection
       .sendRequest("client/registerCapability", { registrations: "bad" })
       .catch(() => log("rejected"));
+  // Like basedpyright, the fixture exits when its refresh request is refused.
+  if (mode === "diagnostic-refresh")
+    await connection.sendRequest("workspace/diagnostic/refresh").then(
+      () =>
+        connection.sendNotification("textDocument/publishDiagnostics", {
+          uri: "file:///refresh-answered",
+          diagnostics: [],
+        }),
+      () => process.exit(1),
+    );
 });
 const handshake = new Set([
   "handshake",

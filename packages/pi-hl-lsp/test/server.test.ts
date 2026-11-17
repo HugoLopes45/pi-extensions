@@ -300,6 +300,20 @@ it("drops pull support after the server unregisters the method", async () => {
   await vi.waitFor(() => expect(client.pullDiagnostics).toBe(false));
 });
 
+it("answers a server refresh request and keeps the instance up", async () => {
+  const closed = Promise.withResolvers<Error>();
+  const answered = Promise.withResolvers<void>();
+  const client = await server("diagnostic-refresh", 1000, () => answered.resolve(), closed.resolve);
+  await client.initialize();
+  expect(
+    await Promise.race([
+      answered.promise.then(() => "answered"),
+      closed.promise.then((error) => error.message),
+      delay(1000, "no answer"),
+    ]),
+  ).toBe("answered");
+});
+
 it("fails the instance on an invalid capability registration", async () => {
   const closed = Promise.withResolvers<Error>();
   const client = await server("bad-registration", 1000, () => {}, closed.resolve);

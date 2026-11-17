@@ -220,6 +220,8 @@ export class LanguageServer {
       this.quiescent = value.quiescent;
       this.wake();
     });
+    // Pull results are requested per call, so a refresh has no cached result to drop.
+    this.connection.onRequest("workspace/diagnostic/refresh", () => null);
     this.connection.onNotification("textDocument/publishDiagnostics", (value: unknown) => {
       if (this.stopped) return;
       try {
