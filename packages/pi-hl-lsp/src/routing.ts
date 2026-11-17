@@ -104,8 +104,7 @@ async function pythonEnvironment(
   if (candidates.length > 1)
     return {
       outcome: "ambiguous",
-      reason:
-        "Two Python environments (.venv and venv); remove one or open the project with only one",
+      reason: "Two Python environments (.venv and venv); ask the user which to keep",
     };
   return undefined;
 }

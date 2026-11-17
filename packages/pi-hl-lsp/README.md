@@ -21,7 +21,7 @@ The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `al
 LSP runs only when all three conditions hold. A refusal names each failed condition and its fix.
 
 - LSP is on: run `/hl-lsp on`.
-- The project is trusted: run `/trust`.
+- The project is trusted: run `/trust`, then restart Pi.
 - Project execution is allowed: run `/hl-lsp set allowProjectExecution true --global`.
 
 Example global settings fragment:

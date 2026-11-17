@@ -68,13 +68,21 @@ export const lspSettings = defineLayeredSettings({
   globalOnlyKeys: ["servers", "allowProjectExecution", "timeoutMs"],
 });
 
+// Parse errors quote settings text; raw control characters would run terminal escape sequences.
+function escapeControls(text: string): string {
+  return text.replace(
+    /\p{Cc}/gu,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 export function readSettings(session: LayeredSettingsSession) {
   const errors = session.settingsManager.drainErrors();
   const [first] = errors;
   if (first) {
     const prefix = "Pi settings could not be read: ";
     const suffix = errors.length > 1 ? ` (+${errors.length - 1} more)` : "";
-    const detail = `${first.path ?? first.scope}: ${first.error.message}`;
+    const detail = escapeControls(`${first.path ?? first.scope}: ${first.error.message}`);
     const budget = 512 - Buffer.byteLength(prefix + suffix);
     const shown = bounded(detail, { maxBytes: budget, maxLines: 1 });
     throw new Error(`${prefix}${shown.content}${suffix}`);

@@ -51,6 +51,15 @@ it("names the unreadable settings file and its parse error", async () => {
   expect(message).not.toContain("more)");
 });
 
+it("shows control characters in a settings parse error escaped", async () => {
+  const agentDir = await directory();
+  const cwd = await directory();
+  await writeFile(join(agentDir, "settings.json"), "\u001b");
+  const message = thrownMessage(() => readFromDisk(cwd, agentDir));
+  expect(message).toContain("\\u001b");
+  expect(message).not.toContain("\u001b");
+});
+
 it("counts the unreadable settings files after the first", async () => {
   const agentDir = await directory();
   const cwd = await directory();

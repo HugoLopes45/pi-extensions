@@ -79,7 +79,7 @@ it("names the trust and consent fixes, not the enable fix, when both fail", asyn
   const result = await instance.query("hover", file, { line: 0, character: 6 });
   expect(result).toMatchObject({ outcome: "blocked" });
   const reason = "reason" in result ? result.reason : undefined;
-  expect(reason).toContain("/trust");
+  expect(reason).toContain("run /trust, then restart Pi");
   expect(reason).toContain("allowProjectExecution");
   expect(reason).not.toContain("/hl-lsp on");
 });

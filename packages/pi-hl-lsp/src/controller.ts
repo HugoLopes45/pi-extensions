@@ -313,7 +313,7 @@ export class LspController {
       return { outcome: "unavailable", reason: "Controller is closed" };
     const failures: string[] = [];
     if (!this.settings.enabled) failures.push("LSP is off; run /hl-lsp on");
-    if (!this.trusted) failures.push("project is not trusted; run /trust");
+    if (!this.trusted) failures.push("project is not trusted; run /trust, then restart Pi");
     if (!this.settings.allowProjectExecution)
       failures.push(
         "project execution is not allowed; run /hl-lsp set allowProjectExecution true --global",

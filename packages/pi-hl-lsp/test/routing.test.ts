@@ -66,8 +66,7 @@ it("names both Python environments and the fix in the refusal", async () => {
   );
   expect(await resolveRoute(join(root, "main.py"), root)).toMatchObject({
     outcome: "ambiguous",
-    reason:
-      "Two Python environments (.venv and venv); remove one or open the project with only one",
+    reason: "Two Python environments (.venv and venv); ask the user which to keep",
   });
 });
 
