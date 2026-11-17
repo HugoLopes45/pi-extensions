@@ -35,15 +35,20 @@ const connection = rpc.createMessageConnection(
   reader,
   new rpc.StreamMessageWriter(mode === "fragmented" ? fragmented : process.stdout),
 );
-function frames(count: number): string {
-  const body = JSON.stringify({ jsonrpc: "2.0", method: "noise", params: {} });
+function frames(count: number, padding = 0): string {
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    method: "noise",
+    params: { text: "x".repeat(padding) },
+  });
   return `Content-Length: ${body.length}\r\n\r\n${body}`.repeat(count);
 }
 const rawReplies = new Map<string | undefined, () => string>([
   ["invalid-frame", () => "Content-Length: 2\r\n\r\n{x"],
   ["stubborn-garbage", () => "Content-Length: 2\r\n\r\n{x"],
   ["endless-header", () => `X-Pad: ${"a".repeat(9 * 1024 * 1024)}`],
-  ["burst", () => frames(400_000)],
+  // Per-frame reader work dominates a burst of tiny frames, so each frame carries about 1 KiB.
+  ["burst", () => frames(16_000, 1024)],
   [
     "mixed-case-length",
     () =>
