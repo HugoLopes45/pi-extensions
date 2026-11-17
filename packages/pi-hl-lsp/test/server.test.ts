@@ -104,6 +104,14 @@ it("fails a pending request on an invalid frame instead of waiting for the deadl
   expect(await hoverWithin("invalid-frame")).toMatch(/JSON/u);
 });
 
+it("rejects a frame whose Content-Length the reader would read differently", async () => {
+  expect(await hoverWithin("double-length")).toMatch(/Content-Length/u);
+});
+
+it("accepts a frame header the reader accepts", async () => {
+  expect(await hoverWithin("tab-length")).toBe("completed");
+});
+
 it("keeps a server whose total output exceeds 8 MiB across many messages", async () => {
   const client = await server("chatty", 5000);
   await client.initialize();

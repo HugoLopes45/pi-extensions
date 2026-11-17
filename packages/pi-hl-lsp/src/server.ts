@@ -49,16 +49,19 @@ class FrameSizes {
       this.header = data;
       return Buffer.alloc(0);
     }
-    const lengths = [
-      ...data
-        .subarray(0, end)
-        .toString("ascii")
-        .matchAll(/^content-length: *(\d+) *$/gimu),
-    ];
-    if (lengths.length !== 1) throw new Error("LSP frame needs exactly one numeric Content-Length");
+    // Split like the vscode-jsonrpc reader so both agree on every frame's length.
+    const [length, ...others] = data
+      .subarray(0, end)
+      .toString("ascii")
+      .split("\r\n")
+      .map((line) => line.split(":"))
+      .filter(([key]) => key?.toLowerCase() === "content-length")
+      .map(([, ...value]) => value.join(":").trim());
+    if (length === undefined || others.length > 0 || !/^\d+$/u.test(length))
+      throw new Error("LSP frame needs exactly one numeric Content-Length");
     const rest = data.subarray(end + 4);
     this.size = end + 4;
-    this.body = Number(lengths[0]?.[1]);
+    this.body = Number(length);
     this.header = Buffer.alloc(0);
     return rest;
   }

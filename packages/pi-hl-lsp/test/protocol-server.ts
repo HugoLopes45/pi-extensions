@@ -35,6 +35,11 @@ const rawReplies = new Map<string | undefined, () => string>([
   ["invalid-frame", () => "Content-Length: 2\r\n\r\n{x"],
   ["endless-header", () => `X-Pad: ${"a".repeat(9 * 1024 * 1024)}`],
   ["burst", () => frames(400_000)],
+  [
+    "double-length",
+    () =>
+      `Content-Length: 1000\r\nContent-Length: 30x\r\n\r\n{"jsonrpc":"2.0","method":"x"}${frames(10)}`,
+  ],
 ]);
 connection.onRequest("initialize", async () => {
   if (mode === "backpressure")
@@ -61,6 +66,10 @@ connection.onRequest("textDocument/hover", async (): Promise<object> => {
     process.stdout.write(raw());
     return new Promise<never>(() => {});
   }
+  if (mode === "tab-length")
+    process.stdout.write(
+      'X-Pad: a\nb\r\nContent-Length:\t30\r\n\r\n{"jsonrpc":"2.0","method":"x"}',
+    );
   if (mode === "chatty") return { contents: "x".repeat(1024 * 1024) };
   if (mode === "grandchild") return { pid: spawn("sleep", ["60"]).pid };
   if (mode === "stubborn-grandchild")
