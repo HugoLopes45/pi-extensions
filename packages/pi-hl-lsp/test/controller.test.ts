@@ -74,9 +74,7 @@ it("names only the disabled condition and its fix", async () => {
 });
 
 it("names the trust and consent fixes, not the enable fix, when both fail", async () => {
-  const { instance, file } = await controller("normal", false, false, {
-    enabled: true,
-  });
+  const { instance, file } = await controller("normal", false, false);
   const result = await instance.query("hover", file, { line: 1, column: 7 });
   expect(result).toMatchObject({ outcome: "blocked" });
   const reason = "reason" in result ? result.reason : undefined;
@@ -94,11 +92,11 @@ it("names the server key and its fix when no server is configured for the langua
     line: 1,
     column: 1,
   });
-  expect(result).toMatchObject({ outcome: "unavailable" });
-  const reason = "reason" in result ? result.reason : undefined;
-  expect(reason).toBe(
-    'No server configured for "python"; add servers.python with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)',
-  );
+  expect(result).toMatchObject({
+    outcome: "unavailable",
+    reason:
+      'No server configured for "python"; add servers.python with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)',
+  });
 });
 
 it("reports the timeout and the configured server commands in status", async () => {
