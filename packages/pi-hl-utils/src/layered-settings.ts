@@ -90,7 +90,7 @@ export function resolveLayeredOptions<Config extends object>(
 }
 
 // Settings text reaches terminal notifications; raw control characters would run escape sequences.
-function escapeControls(text: string): string {
+export function escapeControls(text: string): string {
   return text.replace(
     /\p{Cc}/gu,
     (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,

@@ -1,6 +1,10 @@
 import { isAbsolute } from "node:path";
 
-import { defineLayeredSettings, type LayeredSettingsSession } from "pi-hl-utils/layered-settings";
+import {
+  defineLayeredSettings,
+  escapeControls,
+  type LayeredSettingsSession,
+} from "pi-hl-utils/layered-settings";
 import type { SettingsCommandSpec } from "pi-hl-utils/settings-command";
 import { Type, type Static } from "typebox";
 
@@ -67,14 +71,6 @@ export const lspSettings = defineLayeredSettings({
   sessionEntryType: "hl-lsp-settings",
   globalOnlyKeys: ["servers", "allowProjectExecution", "timeoutMs"],
 });
-
-// Parse errors quote settings text; raw control characters would run terminal escape sequences.
-function escapeControls(text: string): string {
-  return text.replace(
-    /\p{Cc}/gu,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
-  );
-}
 
 export function readSettings(session: LayeredSettingsSession) {
   const errors = session.settingsManager.drainErrors();

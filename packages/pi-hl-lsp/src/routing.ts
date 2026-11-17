@@ -63,11 +63,6 @@ const projectMarkers: Record<ServerFamily, string[]> = {
   rust: ["Cargo.toml", "rust-project.json"],
 };
 
-// Used only when no projectMarkers entry is found up to the boundary.
-const fallbackMarkers: Partial<Record<ServerFamily, string[]>> = {
-  python: ["requirements.txt"],
-};
-
 function insideDependencies(boundary: string, dir: string): boolean {
   return relative(boundary, dir).split(sep).includes("node_modules");
 }
@@ -84,10 +79,9 @@ async function nearestRoot(
   return root === boundary ? undefined : nearestRoot(dirname(root), boundary, markers);
 }
 
-async function pythonEnvironment(
-  root: string,
-  boundary: string,
-): Promise<{ outcome: "blocked" | "ambiguous"; reason: string } | undefined> {
+type Refusal = { outcome: "blocked" | "ambiguous"; reason: string };
+
+async function pythonEnvironment(root: string, boundary: string): Promise<Refusal | undefined> {
   const environments = await Promise.all(
     [".venv", "venv"].map(async (name) => {
       return (await isFile(join(root, name, "pyvenv.cfg")))
@@ -128,8 +122,6 @@ function serverLanguage(path: string): { family: ServerFamily; language: string 
   };
 }
 
-type Refusal = { outcome: "blocked" | "ambiguous"; reason: string };
-
 const workspaceHeader = /^\s*\[workspace\]\s*$/mu;
 
 async function cargoWorkspace(root: string, base: string): Promise<string | Refusal> {
@@ -155,9 +147,10 @@ async function projectRoot(
   base: string,
 ): Promise<string | Refusal | undefined> {
   const directory = dirname(path);
+  // requirements.txt marks a Python root only when no projectMarkers entry is found.
   const nearest =
     (await nearestRoot(directory, base, projectMarkers[family])) ??
-    (await nearestRoot(directory, base, fallbackMarkers[family] ?? []));
+    (family === "python" ? await nearestRoot(directory, base, ["requirements.txt"]) : undefined);
   if (!nearest || family !== "rust") return nearest;
   return cargoWorkspace(nearest, base);
 }
