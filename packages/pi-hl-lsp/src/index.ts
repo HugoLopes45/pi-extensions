@@ -123,6 +123,7 @@ function displayPath(cwd: string, file: string): string {
 
 type Details = {
   outcome: string;
+  evidence?: string;
   reason?: string;
   text?: string;
   diagnostics?: unknown[];
@@ -137,9 +138,20 @@ function isClean(details: Details): boolean {
   return details.outcome === "completed" && !details.diagnostics?.length;
 }
 
-// A partial result with no diagnostics is not settled, so it is not reported as clean.
+// The server published an empty list without a version; the version cannot be checked.
+function isUnversionedClean(details: Details): boolean {
+  return (
+    details.outcome === "partial" &&
+    details.evidence === "settled_unversioned" &&
+    !details.diagnostics?.length
+  );
+}
+
+// A partial result with no diagnostics and no publication is not settled, so it is not reported as clean.
 function isUnsettled(details: Details): boolean {
-  return details.outcome === "partial" && !details.diagnostics?.length;
+  return (
+    details.outcome === "partial" && !details.diagnostics?.length && !isUnversionedClean(details)
+  );
 }
 
 function pathsWhere(checks: Check[], predicate: (details: Details) => boolean): string[] {
@@ -163,17 +175,21 @@ function toolResult(header: string, details: Details) {
 function batchResult(checks: Check[]) {
   const served = checks.filter((check) => isServed(check.details)).length;
   const clean = pathsWhere(checks, isClean);
+  const unversionedClean = pathsWhere(checks, isUnversionedClean);
   const unsettled = pathsWhere(checks, isUnsettled);
   const lines = checks.flatMap(({ path, details }) => {
-    if (isClean(details) || isUnsettled(details)) return [];
+    if (isClean(details) || isUnversionedClean(details) || isUnsettled(details)) return [];
     if (!isServed(details))
       return [`${path}: ${details.outcome}: ${(details.reason ?? "").replace(/[\r\n]+/gu, " ")}`];
     return [blockText(`diagnostics ${path}`, details)];
   });
   if (clean.length > 0) lines.push(`clean: ${clean.join(", ")}`);
+  if (unversionedClean.length > 0)
+    lines.push(`clean (server gave no version): ${unversionedClean.join(", ")}`);
   if (unsettled.length > 0) lines.push(`no errors seen (not settled): ${unsettled.join(", ")}`);
-  const withDiagnostics = served - clean.length - unsettled.length;
-  const header = `hl-lsp diagnostics: ${checks.length} files, ${withDiagnostics} with diagnostics, ${clean.length} clean, ${unsettled.length} not settled, ${checks.length - served} not checked`;
+  const cleanCount = clean.length + unversionedClean.length;
+  const withDiagnostics = served - cleanCount - unsettled.length;
+  const header = `hl-lsp diagnostics: ${checks.length} files, ${withDiagnostics} with diagnostics, ${cleanCount} clean, ${unsettled.length} not settled, ${checks.length - served} not checked`;
   const body = bounded([header, ...lines].join("\n"), {
     maxBytes: 65536,
     maxLines: 1000,

@@ -215,7 +215,13 @@ export async function formatWorkspaceSymbols(
 }
 
 export function formatDiagnostics(observation: Observation): Formatted {
-  if (observation.diagnostics.length === 0) return emptyResult();
+  if (observation.diagnostics.length === 0)
+    return observation.evidence === "settled_unversioned"
+      ? {
+          text: "no diagnostics (server published an empty list without a version)",
+          truncated: false,
+        }
+      : emptyResult();
   const rendered = observation.diagnostics.map(diagnosticLine);
   return renderBody(
     rendered.map((line) => line.text),

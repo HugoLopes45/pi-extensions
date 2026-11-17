@@ -298,6 +298,28 @@ it("keeps a multi-line diagnostic message on one line", () => {
   });
 });
 
+it("formats an empty list the server published without a version as published", () => {
+  const observation: Observation = {
+    ...observe({ diagnostics: [] }),
+    evidence: "settled_unversioned",
+  };
+  expect(formatDiagnostics(observation)).toEqual({
+    text: "no diagnostics (server published an empty list without a version)",
+    truncated: false,
+  });
+});
+
+it("keeps an empty list with no publication as no result", () => {
+  const observation: Observation = {
+    ...observe({ diagnostics: [] }),
+    evidence: "unchanged_empty",
+  };
+  expect(formatDiagnostics(observation)).toEqual({
+    text: "no result",
+    truncated: false,
+  });
+});
+
 it("rejects a malformed definition response without raw fallback", async () => {
   await expect(formatLocations({ bogus: 1 }, cwd, readSource, "definition")).rejects.toThrow(
     "Unexpected LSP definition response shape",
