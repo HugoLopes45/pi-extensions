@@ -108,6 +108,91 @@ it("does not guess the root of nested Cargo manifests", async () => {
   });
 });
 
+it("routes a Cargo workspace member to the workspace root", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), '[workspace]\nmembers = ["crate"]\n');
+  const crate = join(root, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toEqual({
+    outcome: "completed",
+    file: join(crate, "lib.rs"),
+    root,
+    language: "rust",
+    server: "rust",
+    coverage: "local-marker",
+  });
+});
+
+it("routes a Cargo member to the nearest of two nested workspace manifests", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), "[workspace]\n");
+  const middle = join(root, "middle");
+  await mkdir(middle);
+  await writeFile(join(middle, "Cargo.toml"), "[workspace]\n");
+  const crate = join(middle, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "completed",
+    root: middle,
+  });
+});
+
+it("does not use a workspace manifest outside the boundary", async () => {
+  const outer = await directory();
+  await writeFile(join(outer, "Cargo.toml"), "[workspace]\n");
+  const boundary = join(outer, "inner");
+  await mkdir(boundary);
+  const crate = join(boundary, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), boundary)).toMatchObject({
+    outcome: "completed",
+    root: crate,
+  });
+});
+
+it("does not count a commented workspace header as a workspace", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), "# [workspace]\n");
+  const crate = join(root, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "ambiguous",
+  });
+});
+
+it("does not read a Cargo.toml over 64 KiB as a workspace", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), "[workspace]\n".padEnd(64 * 1024 + 1));
+  const crate = join(root, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "ambiguous",
+  });
+});
+
+it("does not read a directory named Cargo.toml as a manifest", async () => {
+  const root = await directory();
+  await mkdir(join(root, "Cargo.toml"));
+  const crate = join(root, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "completed",
+    root: crate,
+  });
+});
+
 it("distinguishes virtual, missing and unmarked files", async () => {
   const root = await directory();
   expect(await resolveRoute("untitled:draft.ts", root)).toMatchObject({

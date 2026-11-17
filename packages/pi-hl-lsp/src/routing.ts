@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { getLanguageFromPath } from "@earendil-works/pi-coding-agent";
@@ -31,6 +31,19 @@ async function isFile(path: string): Promise<boolean> {
     return (await stat(path)).isFile();
   } catch (error) {
     if (isMissingFileError(error)) return false;
+    throw error;
+  }
+}
+
+const maxManifestBytes = 64 * 1024;
+
+async function readManifest(path: string): Promise<string | undefined> {
+  try {
+    const info = await lstat(path);
+    if (!info.isFile() || info.size > maxManifestBytes) return undefined;
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) return undefined;
     throw error;
   }
 }
@@ -104,21 +117,42 @@ function serverLanguage(path: string): { family: ServerFamily; language: string 
   };
 }
 
+type Refusal = { outcome: "blocked" | "ambiguous"; reason: string };
+
+const workspaceHeader = /^\s*\[workspace\]\s*$/mu;
+
+async function cargoWorkspace(root: string, base: string): Promise<string | Refusal> {
+  let parentManifest = false;
+  for (let dir = root; ; dir = dirname(dir)) {
+    const text = await readManifest(join(dir, "Cargo.toml"));
+    if (text !== undefined && workspaceHeader.test(text)) return dir;
+    if (dir !== root && (await isFile(join(dir, "Cargo.toml")))) parentManifest = true;
+    if (dir === base) break;
+  }
+  return parentManifest
+    ? {
+        outcome: "ambiguous",
+        reason: "Nested Cargo manifests require workspace resolution",
+      }
+    : root;
+}
+
+async function projectRoot(
+  family: ServerFamily,
+  path: string,
+  base: string,
+): Promise<string | Refusal | undefined> {
+  const nearest = await nearestRoot(dirname(path), base, projectMarkers[family]);
+  if (!nearest || family !== "rust") return nearest;
+  return cargoWorkspace(nearest, base);
+}
+
 async function environmentProblem(
   family: ServerFamily,
   root: string,
   base: string,
-): Promise<{ outcome: "blocked" | "ambiguous"; reason: string } | undefined> {
+): Promise<Refusal | undefined> {
   if (family === "python") return pythonEnvironment(root, base);
-  if (
-    family === "rust" &&
-    root !== base &&
-    (await nearestRoot(dirname(root), base, ["Cargo.toml"]))
-  )
-    return {
-      outcome: "ambiguous",
-      reason: "Nested Cargo manifests require workspace resolution",
-    };
   return undefined;
 }
 
@@ -151,13 +185,14 @@ export async function resolveRoute(file: string, boundary: string): Promise<Rout
       file: path,
       reason: "No supported language server family",
     };
-  const root = await nearestRoot(dirname(path), base, projectMarkers[language.family]);
-  if (!root)
+  const root = await projectRoot(language.family, path, base);
+  if (root === undefined)
     return {
       outcome: "unsupported",
       file: path,
       reason: "No recognized project marker",
     };
+  if (typeof root !== "string") return { ...root, file: path };
   const problem = await environmentProblem(language.family, root, base);
   if (problem) return { ...problem, file: path };
   return {
