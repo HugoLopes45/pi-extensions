@@ -1,14 +1,21 @@
 import { createReadStream } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 import { diagnosticResult, type Observation } from "./diagnostics.js";
-import { resolveRoute, type Route } from "./routing.js";
+import {
+  formatDiagnostics,
+  formatHover,
+  formatLocations,
+  formatSymbols,
+  type LineReader,
+} from "./format.js";
+import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import type { LspSettings, ServerConfig, ServerFamily } from "./settings.js";
-import { bounded } from "./text.js";
 
 export type Operation = "hover" | "definition" | "references" | "symbols" | "diagnostics";
 type Position = { line: number; character: number };
@@ -91,14 +98,43 @@ async function diagnostics(document: Document, signal: AbortSignal): Promise<Obs
   }
 }
 
+// Location reads stay inside the real cwd, and the queried file reuses the snapshot already taken.
+function sourceLines(document: Document, cwd: string, signal: AbortSignal): LineReader {
+  return async (file) => {
+    try {
+      const real = await realpath(file);
+      if (outside(cwd, real) || !(await stat(real)).isFile()) return undefined;
+      const text = real === document.file ? document.text : await snapshot(real, signal);
+      return text.split(/\r?\n/u);
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+async function formatResponse(
+  operation: Exclude<Operation, "diagnostics">,
+  response: unknown,
+  cwd: string,
+  lines: LineReader,
+) {
+  if (operation === "hover") return formatHover(response);
+  if (operation === "symbols") return formatSymbols(response);
+  return formatLocations(response, cwd, lines, operation);
+}
+
 async function readResponse(
   operation: Operation,
   instance: Instance,
   document: Document,
   position: Position | undefined,
   signal: AbortSignal,
+  cwd: string,
 ) {
-  if (operation === "diagnostics") return diagnostics(document, signal);
+  if (operation === "diagnostics") {
+    const observation = await diagnostics(document, signal);
+    return { ...observation, ...formatDiagnostics(observation) };
+  }
   const response = await instance.client.request(
     method[operation],
     {
@@ -108,16 +144,13 @@ async function readResponse(
     },
     signal,
   );
-  const serialized = JSON.stringify(response);
-  if (serialized === undefined) throw new Error("Invalid LSP response");
-  const output = bounded(serialized, { maxBytes: 8192, maxLines: 100 });
-  return {
-    outcome: "completed",
-    source: "untrusted_lsp",
-    format: "lsp-json",
-    response: output.content,
-    truncated: output.truncated,
-  };
+  const formatted = await formatResponse(
+    operation,
+    response,
+    cwd,
+    sourceLines(document, cwd, signal),
+  );
+  return { outcome: "completed", source: "untrusted_lsp", ...formatted };
 }
 
 async function synchronize(
@@ -341,7 +374,14 @@ export class LspController {
       supportsChange(capabilities),
     );
     this.selected = { instance, document };
-    const result = await readResponse(operation, instance, document, position, deadline);
+    const result = await readResponse(
+      operation,
+      instance,
+      document,
+      position,
+      deadline,
+      await realpath(this.cwd),
+    );
     if (!this.current(instance, document) || (await snapshot(route.file, deadline)) !== text)
       return {
         ...route,

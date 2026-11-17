@@ -194,7 +194,11 @@ export class LanguageServer {
         rootUri: pathToFileURL(this.root).href,
         capabilities: {
           general: { positionEncodings: ["utf-16"] },
-          textDocument: { publishDiagnostics: { versionSupport: true } },
+          textDocument: {
+            publishDiagnostics: { versionSupport: true },
+            documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+            hover: { contentFormat: ["markdown", "plaintext"] },
+          },
         },
       },
       signal,
@@ -318,7 +322,9 @@ export class LanguageServer {
     if (this.child.exitCode !== null || this.child.signalCode !== null)
       return this.signal(0) === "gone";
     const exit = once(this.child, "exit").then(() => true);
-    const late = delay(Math.max(0, deadline - performance.now()), false, { ref: false });
+    const late = delay(Math.max(0, deadline - performance.now()), false, {
+      ref: false,
+    });
     return (await Promise.race([exit, late])) && this.signal(0) === "gone";
   }
 

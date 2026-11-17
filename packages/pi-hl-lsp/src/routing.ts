@@ -21,7 +21,7 @@ export type Route =
       reason: string;
     };
 
-function outside(base: string, path: string): boolean {
+export function outside(base: string, path: string): boolean {
   const rel = relative(base, path);
   return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
 }

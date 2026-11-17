@@ -21,6 +21,25 @@ const navigation = Type.Object({
 });
 const document = Type.Object({ file });
 
+// Only completed and partial results carry text; every other outcome is a refusal or failure.
+function toolResult(
+  operation: Operation,
+  path: string,
+  details: { outcome: string; reason?: string; text?: string },
+) {
+  const served = details.outcome === "completed" || details.outcome === "partial";
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `hl-lsp ${operation} ${path}: ${details.outcome}\n${details.text ?? details.reason}`,
+      },
+    ],
+    details,
+    isError: !served,
+  };
+}
+
 export default function hlLsp(pi: ExtensionAPI): void {
   let controller: LspController | undefined;
   let name = "HL LSP";
@@ -151,10 +170,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
             outcome: "unavailable",
             reason: issue ?? "LSP session has not started",
           };
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(details) }],
-        details,
-      };
+      return toolResult(operation, path, details);
     } catch (error) {
       const reason = bounded(error instanceof Error ? error.message : "LSP request failed", {
         maxBytes: 2048,
@@ -166,10 +182,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
         reason: reason.content,
         truncated: reason.truncated,
       };
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(details) }],
-        details,
-      };
+      return toolResult(operation, path, details);
     }
   }
   for (const operation of ["hover", "definition", "references"] as const) {

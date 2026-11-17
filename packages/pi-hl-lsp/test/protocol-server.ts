@@ -72,8 +72,9 @@ async function lingering(ms: number) {
     `process.on('SIGTERM', () => {}); process.stdin.on('end', () => setTimeout(() => process.exit(0), ${ms})); process.stdin.resume(); console.log('ready');`,
   ]);
   await once(child.stdout, "data");
-  return {};
+  return { contents: "" };
 }
+// Replies that tests read carry extra fields next to the empty hover contents, so the hover still validates.
 const replies = new Map<
   string | undefined,
   (token: rpc.CancellationToken) => object | Promise<object>
@@ -86,7 +87,7 @@ const replies = new Map<
     },
   ],
   ["chatty", () => ({ contents: "x".repeat(1024 * 1024) })],
-  ["stubborn-server", () => ({ pid: process.pid })],
+  ["stubborn-server", () => ({ contents: "", pid: process.pid })],
   ["lingering-child", () => lingering(5)],
   ["slow-lingering-child", () => lingering(30)],
   [
@@ -101,10 +102,27 @@ const replies = new Map<
     async () => {
       const child = spawn("sh", ["-c", "trap '' TERM; echo ready; exec sleep 60"]);
       await once(child.stdout, "data");
-      return { group: process.pid };
+      return { contents: "", group: process.pid };
     },
   ],
 ]);
+const navigationModes = new Set<string | undefined>([
+  "navigation",
+  "special-targets",
+  "malformed-definition",
+]);
+const textDocumentUri = Type.Object({
+  textDocument: Type.Object({ uri: Type.String() }),
+});
+function span(line: number, character: number) {
+  return {
+    start: { line, character },
+    end: { line, character: character + 1 },
+  };
+}
+function location(uri: string, line: number, character: number) {
+  return { uri, range: span(line, character) };
+}
 connection.onRequest("initialize", async () => {
   if (mode === "slow-init") await delay(600);
   if (mode === "tab-length")
@@ -124,6 +142,7 @@ connection.onRequest("initialize", async () => {
     capabilities: {
       textDocumentSync: mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
       hoverProvider: true,
+      ...(navigationModes.has(mode) ? { definitionProvider: true } : {}),
       positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
     },
   };
@@ -157,6 +176,22 @@ connection.onRequest(
     return { contents: { kind: "plaintext", value: "const value: number" } };
   },
 );
+connection.onRequest("textDocument/definition", (params: unknown): object => {
+  if (mode === "malformed-definition") return { bogus: 1 };
+  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid definition fixture request");
+  const { uri } = params.textDocument;
+  if (mode === "special-targets")
+    return [
+      location(new URL("./link.ts", uri).href, 0, 0),
+      location(new URL("./pipe.ts", uri).href, 0, 0),
+    ];
+  const link = {
+    targetUri: uri,
+    targetRange: span(0, 6),
+    targetSelectionRange: span(0, 6),
+  };
+  return [link, link, location("file:///outside/elsewhere.ts", 2, 0)];
+});
 // Synchronization modes log each document notification with the version it carries.
 const syncLog = mode === "sync-log" || mode === "sync-open-close";
 const opened = Type.Object({

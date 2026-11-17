@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -111,7 +112,7 @@ it("reports the timeout and the configured server commands in status", async () 
 it("routes, synchronizes, and returns bounded read-only hover output", async () => {
   const { instance, file } = await controller();
   const result = await instance.query("hover", file, { line: 0, character: 6 });
-  expect(result).toHaveProperty("response", expect.stringContaining("const value"));
+  expect(result).toHaveProperty("text", "const value: number");
   expect(result).toMatchObject({
     outcome: "completed",
     server: "typescript",
@@ -123,9 +124,9 @@ it("keeps a bounded leading part of an oversized single-line response", async ()
   const { instance, file } = await controller("chatty");
   const result = await instance.query("hover", file, { line: 0, character: 6 });
   expect(result).toMatchObject({ outcome: "completed", truncated: true });
-  const response = "response" in result ? result.response : undefined;
-  expect(response).toMatch(/^\{"contents":"x{500}/u);
-  expect(Buffer.byteLength(String(response))).toBeLessThanOrEqual(8192);
+  const text = "text" in result ? result.text : undefined;
+  expect(text).toMatch(/^x{500}/u);
+  expect(Buffer.byteLength(String(text))).toBeLessThanOrEqual(8192);
 });
 
 it("reports unversioned empty diagnostics as partial and omits automatic certification", async () => {
@@ -539,6 +540,40 @@ it("sends nothing but exit after shutdown when a pending request is aborted", as
   expect(await outcome).toHaveProperty("message", "Caller cancelled");
   expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
+
+it.skipIf(process.platform === "win32")(
+  "prints no source text for an in-cwd symlink that points outside the cwd",
+  async () => {
+    const { instance, file } = await controller("special-targets");
+    const root = join(file, "..");
+    const outside = join(await directory(), "secret.ts");
+    await writeFile(outside, "const secret = 1;\n");
+    await symlink(outside, join(root, "link.ts"));
+    await writeFile(join(root, "pipe.ts"), "const pipe = 1;\n");
+    expect(await instance.query("definition", file, position)).toMatchObject({
+      outcome: "completed",
+      text: "link.ts:1:1\npipe.ts:1:1  const pipe = 1;",
+    });
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "does not read a FIFO target, so the definition completes before its deadline",
+  async () => {
+    const { instance, file } = await controller("special-targets", true, true, {
+      timeoutMs: 2000,
+    });
+    const root = join(file, "..");
+    await writeFile(join(root, "link.ts"), "const link = 1;\n");
+    execFileSync("mkfifo", [join(root, "pipe.ts")]);
+    const started = performance.now();
+    expect(await instance.query("definition", file, position)).toMatchObject({
+      outcome: "completed",
+      text: "link.ts:1:1  const link = 1;\npipe.ts:1:1",
+    });
+    expect(performance.now() - started).toBeLessThan(1500);
+  },
+);
 
 it("prevents use after disposal", async () => {
   const { instance, file } = await controller();

@@ -167,12 +167,13 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
   return { runtime, faux, requests, spawnLog, agentDir, cwd, dispose };
 }
 
-async function hover(state: Awaited<ReturnType<typeof session>>) {
+async function tool(
+  state: Awaited<ReturnType<typeof session>>,
+  name: string,
+  args: Parameters<typeof fauxToolCall>[1],
+) {
   state.faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" }),
     fauxAssistantMessage("done"),
   ]);
   await state.runtime.session.sendCustomMessage(
@@ -180,8 +181,16 @@ async function hover(state: Awaited<ReturnType<typeof session>>) {
     { triggerTurn: true },
   );
   return state.runtime.session.messages.findLast(
-    (message) => message.role === "toolResult" && message.toolName === "hl_lsp_hover",
+    (message) => message.role === "toolResult" && message.toolName === name,
   );
+}
+
+async function hover(state: Awaited<ReturnType<typeof session>>) {
+  return tool(state, "hl_lsp_hover", {
+    file: "index.ts",
+    line: 0,
+    character: 6,
+  });
 }
 
 it.each(["reload", "newSession", "dispose"] as const)(
@@ -416,6 +425,45 @@ it("loads the real extension through Pi and executes its registered tool offline
   expect(faux.state.callCount).toBe(2);
 });
 
+it("returns compact definition text with source lines, a duplicate and an outside location", async () => {
+  const state = await session(true, "navigation");
+  expect(
+    await tool(state, "hl_lsp_definition", {
+      file: "index.ts",
+      line: 0,
+      character: 6,
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp definition index.ts: completed\nindex.ts:1:7  const value = 1;\n/outside/elsewhere.ts:3:1",
+      },
+    ],
+    details: { outcome: "completed" },
+  });
+});
+
+it("returns an error result for a malformed definition reply", async () => {
+  const state = await session(true, "malformed-definition");
+  expect(
+    await tool(state, "hl_lsp_definition", {
+      file: "index.ts",
+      line: 0,
+      character: 6,
+    }),
+  ).toMatchObject({
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp definition index.ts: failed\nUnexpected LSP definition response shape",
+      },
+    ],
+  });
+});
+
 it("keeps a bounded leading part of an oversized single-line error reason", async () => {
   const { runtime, faux } = await session(true, "long-error");
   faux.setResponses([
@@ -482,6 +530,12 @@ it("adds one bounded transient summary per natural request without raw diagnosti
     (message) => message.role === "toolResult" && message.toolName === "hl_lsp_diagnostics",
   );
   expect(result).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp diagnostics index.ts: completed\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
     details: { diagnostics: [{ message: "Untrusted diagnostic prose" }] },
   });
   faux.setResponses([fauxAssistantMessage("next")]);
@@ -529,7 +583,16 @@ it("keeps the real SDK tool blocked when the extension is disabled", async () =>
   const result = runtime.session.messages.find(
     (message) => message.role === "toolResult" && message.toolName === "hl_lsp_hover",
   );
-  expect(result).toMatchObject({ details: { outcome: "blocked" } });
+  expect(result).toMatchObject({
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp hover index.ts: blocked\nLSP is off; run /hl-lsp on",
+      },
+    ],
+    details: { outcome: "blocked" },
+  });
 });
 
 it("reports an invalid session LSP override as the unavailable reason, and launches nothing", async () => {
