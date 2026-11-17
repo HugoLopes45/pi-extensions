@@ -48,14 +48,14 @@ async function controller(
 
 it("requires separate global project-execution consent before launch", async () => {
   const { instance, file } = await controller("normal", false);
-  expect(await instance.query("hover", file, { line: 0, character: 6 })).toMatchObject({
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
     outcome: "blocked",
   });
 });
 
 it("requires project trust before launch, even with global consent", async () => {
   const { instance, file, spawnLog } = await controller("normal", true, false);
-  expect(await instance.query("hover", file, { line: 0, character: 6 })).toMatchObject({
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
     outcome: "blocked",
   });
   await expect(readFile(spawnLog, "utf8")).rejects.toMatchObject({
@@ -67,7 +67,7 @@ it("names only the disabled condition and its fix", async () => {
   const { instance, file } = await controller("normal", true, true, {
     enabled: false,
   });
-  expect(await instance.query("hover", file, { line: 0, character: 6 })).toEqual({
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toEqual({
     outcome: "blocked",
     reason: "LSP is off; run /hl-lsp on",
   });
@@ -77,7 +77,7 @@ it("names the trust and consent fixes, not the enable fix, when both fail", asyn
   const { instance, file } = await controller("normal", false, false, {
     enabled: true,
   });
-  const result = await instance.query("hover", file, { line: 0, character: 6 });
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
   expect(result).toMatchObject({ outcome: "blocked" });
   const reason = "reason" in result ? result.reason : undefined;
   expect(reason).toContain("run /trust, then restart Pi");
@@ -91,8 +91,8 @@ it("names the server key and its fix when no server is configured for the langua
   await writeFile(join(root, "pyproject.toml"), "");
   await writeFile(join(root, "main.py"), "");
   const result = await instance.query("hover", join(root, "main.py"), {
-    line: 0,
-    character: 0,
+    line: 1,
+    column: 1,
   });
   expect(result).toMatchObject({ outcome: "unavailable" });
   const reason = "reason" in result ? result.reason : undefined;
@@ -111,7 +111,7 @@ it("reports the timeout and the configured server commands in status", async () 
 
 it("routes, synchronizes, and returns bounded read-only hover output", async () => {
   const { instance, file } = await controller();
-  const result = await instance.query("hover", file, { line: 0, character: 6 });
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
   expect(result).toHaveProperty("text", "const value: number");
   expect(result).toMatchObject({
     outcome: "completed",
@@ -120,9 +120,91 @@ it("routes, synchronizes, and returns bounded read-only hover output", async () 
   });
 });
 
+it("resolves a symbol to the 0-based character of its first match on the line", async () => {
+  const { instance, file } = await controller("echo-position");
+  expect(await instance.query("hover", file, { line: 1, symbol: "value" })).toMatchObject({
+    text: "0:6",
+  });
+});
+
+it("resolves a column of 1 to character 0", async () => {
+  const { instance, file } = await controller("echo-position");
+  expect(await instance.query("hover", file, { line: 1, column: 1 })).toMatchObject({
+    text: "0:0",
+  });
+});
+
+it("names the line text when the symbol is missing", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 1, symbol: "absent" })).rejects.toThrow(
+    'Symbol "absent" is not on the line: const value = 1;',
+  );
+});
+
+it("lists the 1-based columns when the symbol occurs twice", async () => {
+  const { instance, file } = await controller("echo-position");
+  await writeFile(file, "value + value;\n");
+  await expect(instance.query("hover", file, { line: 1, symbol: "value" })).rejects.toThrow(
+    "occurs at columns 1, 9; give column instead",
+  );
+});
+
+it("does not match a symbol inside a longer identifier", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 1, symbol: "val" })).rejects.toThrow(
+    'Symbol "val" is not on the line: const value = 1;',
+  );
+});
+
+it("resolves a line in a CR-only file", async () => {
+  const { instance, file } = await controller("echo-position");
+  await writeFile(file, "a\rconst value = 1;");
+  expect(await instance.query("hover", file, { line: 2, symbol: "value" })).toMatchObject({
+    text: "1:6",
+  });
+});
+
+it("rejects line 0 and a line past the end", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 0, column: 1 })).rejects.toThrow(
+    "Line is outside the file snapshot",
+  );
+  await expect(instance.query("hover", file, { line: 3, column: 1 })).rejects.toThrow(
+    "Line is outside the file snapshot",
+  );
+});
+
+it("counts a non-ASCII prefix in UTF-16 code units", async () => {
+  const { instance, file } = await controller("echo-position");
+  await writeFile(file, "const é = value;\n");
+  expect(await instance.query("hover", file, { line: 1, symbol: "value" })).toMatchObject({
+    text: "0:10",
+  });
+});
+
+it("requires exactly one of symbol or column", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 1 })).rejects.toThrow(
+    "Give exactly one of symbol or column",
+  );
+  await expect(
+    instance.query("hover", file, { line: 1, symbol: "value", column: 1 }),
+  ).rejects.toThrow("Give exactly one of symbol or column");
+});
+
+it("allows the column just past the line end and rejects one further", async () => {
+  const { instance, file } = await controller("echo-position");
+  expect(await instance.query("hover", file, { line: 1, column: 17 })).toMatchObject({
+    text: "0:16",
+  });
+  await expect(instance.query("hover", file, { line: 1, column: 18 })).rejects.toThrow(
+    "Column is beyond the line end",
+  );
+});
+
 it("keeps a bounded leading part of an oversized single-line response", async () => {
   const { instance, file } = await controller("chatty");
-  const result = await instance.query("hover", file, { line: 0, character: 6 });
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
   expect(result).toMatchObject({ outcome: "completed", truncated: true });
   const text = "text" in result ? result.text : undefined;
   expect(text).toMatch(/^x{500}/u);
@@ -165,7 +247,7 @@ it("drops the automatic summary when the file's route changes", async () => {
 
 it("does not issue requests for capabilities that the server did not advertise", async () => {
   const { instance, file } = await controller();
-  expect(await instance.query("definition", file, { line: 0, character: 6 })).toMatchObject({
+  expect(await instance.query("definition", file, { line: 1, column: 7 })).toMatchObject({
     outcome: "unsupported",
   });
 });
@@ -185,7 +267,7 @@ async function packages(cwd: string, count: number) {
 it("does not count failed instances toward the eight-instance limit", async () => {
   const { instance, file, spawnLog } = await controller("wrong-encoding");
   for (const path of await packages(join(file, ".."), 9))
-    await expect(instance.query("hover", path, { line: 0, character: 6 })).rejects.toThrow(
+    await expect(instance.query("hover", path, { line: 1, column: 7 })).rejects.toThrow(
       "Unsupported LSP position encoding",
     );
   expect((await readFile(spawnLog, "utf8")).trim().split("\n")).toHaveLength(9);
@@ -195,11 +277,11 @@ it("evicts the oldest instance to start a ninth", async () => {
   const { instance, file, spawnLog } = await controller();
   const paths = await packages(join(file, ".."), 8);
   for (const path of paths)
-    expect(await instance.query("hover", path, { line: 0, character: 6 })).toMatchObject({
+    expect(await instance.query("hover", path, { line: 1, column: 7 })).toMatchObject({
       outcome: "completed",
     });
   const first = Number((await readFile(spawnLog, "utf8")).split("\n")[0]);
-  expect(await instance.query("hover", file, { line: 0, character: 6 })).toMatchObject({
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
     outcome: "completed",
   });
   const roots = instance.status().instances.map((listed) => listed.root);
@@ -212,8 +294,8 @@ it("evicts the least recently used instance, not the first started", async () =>
   const { instance, file } = await controller();
   const paths = await packages(join(file, ".."), 8);
   for (const path of [...paths, paths[0] ?? ""])
-    await instance.query("hover", path, { line: 0, character: 6 });
-  await instance.query("hover", file, { line: 0, character: 6 });
+    await instance.query("hover", path, { line: 1, column: 7 });
+  await instance.query("hover", file, { line: 1, column: 7 });
   const roots = instance.status().instances.map((listed) => listed.root);
   expect(roots).toContain(join(paths[0] ?? "", ".."));
   expect(roots).not.toContain(join(paths[1] ?? "", ".."));
@@ -221,7 +303,7 @@ it("evicts the least recently used instance, not the first started", async () =>
 
 const launches = async (spawnLog: string) =>
   (await readFile(spawnLog, "utf8")).split("\n").filter((line) => /^\d+$/u.test(line)).length;
-const position = { line: 0, character: 6 };
+const position = { line: 1, column: 7 };
 
 it("warm: keeps the server after a request timeout", async () => {
   const { instance, file, spawnLog } = await controller("ignore", true, true, {
@@ -269,7 +351,7 @@ it("warm: lets a slow server finish starting after the request deadline", async 
 
 it.skipIf(process.platform === "win32")("rejects dispose when SIGKILL is refused", async () => {
   const { instance, file, spawnLog } = await controller("stubborn-server");
-  await instance.query("hover", file, { line: 0, character: 6 });
+  await instance.query("hover", file, { line: 1, column: 7 });
   const pid = Number((await readFile(spawnLog, "utf8")).trim());
   const kill = process.kill.bind(process);
   vi.spyOn(process, "kill").mockImplementation((target, signal) => {
@@ -292,9 +374,7 @@ it.skipIf(process.platform === "win32")(
     const failed = join(root, "index.ts");
     await instance.query("diagnostics", failed);
     const group = -(await lastPid(spawnLog));
-    const failing = instance
-      .query("hover", failed, { line: 0, character: 6 })
-      .catch(() => undefined);
+    const failing = instance.query("hover", failed, { line: 1, column: 7 }).catch(() => undefined);
     await vi.waitFor(() => expect(instance.status().instances[0]?.active).toBe(false));
     const kill = vi.spyOn(process, "kill");
     onTestFinished(() => {
@@ -338,7 +418,7 @@ it.skipIf(process.platform === "win32")(
   async () => {
     const { instance, file, spawnLog } = await controller("stubborn-server");
     for (const path of await packages(join(file, ".."), 2))
-      await instance.query("hover", path, { line: 0, character: 6 });
+      await instance.query("hover", path, { line: 1, column: 7 });
     const group = -(await lastPid(spawnLog));
     const kill = refuseFirstGroup(spawnLog);
     await expect(instance.dispose()).rejects.toThrow("LSP process group did not stop");
@@ -355,7 +435,7 @@ it.skipIf(process.platform === "win32")(
     for (const path of paths) await instance.query("diagnostics", path);
     const group = -(await lastPid(spawnLog));
     const failing = paths.map((path) =>
-      instance.query("hover", path, { line: 0, character: 6 }).catch(() => undefined),
+      instance.query("hover", path, { line: 1, column: 7 }).catch(() => undefined),
     );
     await vi.waitFor(() =>
       expect(instance.status().instances.map((listed) => listed.active)).toEqual([false, false]),
@@ -370,14 +450,14 @@ it.skipIf(process.platform === "win32")(
 
 it("shuts a healthy initialized server down with shutdown, then exit", async () => {
   const { instance, file, spawnLog } = await controller("handshake");
-  await instance.query("hover", file, { line: 0, character: 6 });
+  await instance.query("hover", file, { line: 1, column: 7 });
   await instance.dispose();
   expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
 
 it("returns soon after a healthy server exits", async () => {
   const { instance, file } = await controller("handshake");
-  await instance.query("hover", file, { line: 0, character: 6 });
+  await instance.query("hover", file, { line: 1, column: 7 });
   const started = performance.now();
   await instance.dispose();
   expect(performance.now() - started).toBeLessThan(40);
@@ -387,7 +467,7 @@ it.skipIf(process.platform === "win32")(
   "returns soon after the last group member exits",
   async () => {
     const { instance, file } = await controller("lingering-child");
-    await instance.query("hover", file, { line: 0, character: 6 });
+    await instance.query("hover", file, { line: 1, column: 7 });
     const started = performance.now();
     await instance.dispose();
     expect(performance.now() - started).toBeLessThan(40);
@@ -400,7 +480,7 @@ it.skipIf(process.platform === "win32")(
     // Counts real probes before a real 30 ms exit, so the result depends on the scheduler; the
     // exact rule is pinned by dispose-probe.test.ts, and this keeps a check on real processes.
     const { instance, file, spawnLog } = await controller("slow-lingering-child");
-    await instance.query("hover", file, { line: 0, character: 6 });
+    await instance.query("hover", file, { line: 1, column: 7 });
     const group = -(await lastPid(spawnLog));
     const kill = vi.spyOn(process, "kill");
     vi.spyOn(performance, "now").mockReturnValue(performance.now());
@@ -434,7 +514,7 @@ it.each([
 
 it("falls back to signals within the budget when shutdown gets no answer", async () => {
   const { instance, file, spawnLog } = await controller("mute-shutdown");
-  await instance.query("hover", file, { line: 0, character: 6 });
+  await instance.query("hover", file, { line: 1, column: 7 });
   const started = performance.now();
   await instance.dispose();
   expect(performance.now() - started).toBeLessThan(2500);
@@ -445,7 +525,7 @@ it.skipIf(process.platform === "win32")(
   "accepts a SIGKILL refused by a group whose server is exiting",
   async () => {
     const { instance, file, spawnLog } = await controller("mute-shutdown");
-    await instance.query("hover", file, { line: 0, character: 6 });
+    await instance.query("hover", file, { line: 1, column: 7 });
     const group = -(await lastPid(spawnLog));
     const kill = process.kill.bind(process);
     // macOS answers EPERM while the dying server is a zombie that Node has not reaped yet.
@@ -466,7 +546,7 @@ it.skipIf(process.platform === "win32").each([
   ["rejects while the group still refuses", "EPERM", "LSP process group did not stop"],
 ])("after the server exits and SIGKILL is refused, %s", async (_case, refusal, expected) => {
   const { instance, file, spawnLog } = await controller("stubborn-grandchild");
-  await instance.query("hover", file, { line: 0, character: 6 });
+  await instance.query("hover", file, { line: 1, column: 7 });
   const group = -(await lastPid(spawnLog));
   const kill = process.kill.bind(process);
   let killed = false;
@@ -499,7 +579,7 @@ it.skipIf(process.platform === "win32")(
   "keeps one two-second budget for a server that ignores shutdown and SIGTERM",
   async () => {
     const { instance, file, spawnLog } = await controller("stubborn-mute");
-    await instance.query("hover", file, { line: 0, character: 6 });
+    await instance.query("hover", file, { line: 1, column: 7 });
     const started = performance.now();
     await instance.dispose();
     expect(performance.now() - started).toBeLessThan(2500);
@@ -509,7 +589,7 @@ it.skipIf(process.platform === "win32")(
 
 it("does not send shutdown to a server that never finished initializing", async () => {
   const { instance, file, spawnLog } = await controller("wrong-encoding");
-  await expect(instance.query("hover", file, { line: 0, character: 6 })).rejects.toThrow(
+  await expect(instance.query("hover", file, { line: 1, column: 7 })).rejects.toThrow(
     "Unsupported LSP position encoding",
   );
   await instance.dispose();
@@ -578,7 +658,7 @@ it.skipIf(process.platform === "win32")(
 it("prevents use after disposal", async () => {
   const { instance, file } = await controller();
   await instance.dispose();
-  const result = await instance.query("hover", file, { line: 0, character: 6 });
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
   expect(result).toMatchObject({ outcome: "unavailable" });
   expect(result).toHaveProperty("reason", expect.stringContaining("closed"));
 });

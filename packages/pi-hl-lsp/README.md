@@ -4,7 +4,7 @@ Private, disabled-by-default read-only LSP extension for Pi. Requires Pi 1.5.2 o
 
 ## Scope
 
-The extension provides five read-only tools: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_references`, `hl_lsp_symbols`, and `hl_lsp_diagnostics`. Positions are zero-based UTF-16 coordinates.
+The extension provides five read-only tools: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_references`, `hl_lsp_symbols`, and `hl_lsp_diagnostics`. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column.
 
 Each session owns its server processes. Servers start only when a tool needs them. Pi runs the tools sequentially through its native execution mechanism.
 

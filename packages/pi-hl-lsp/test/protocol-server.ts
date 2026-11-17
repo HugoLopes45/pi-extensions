@@ -114,6 +114,15 @@ const navigationModes = new Set<string | undefined>([
 const textDocumentUri = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
 });
+const textDocumentPosition = Type.Object({
+  textDocument: Type.Object({ uri: Type.String() }),
+  position: Type.Object({ line: Type.Integer(), character: Type.Integer() }),
+});
+// Reports the 0-based position the controller sent, so tests can check the resolved target.
+function echoPosition(params: unknown): object {
+  if (!Value.Check(textDocumentPosition, params)) throw new Error("Invalid hover fixture request");
+  return { contents: `${params.position.line}:${params.position.character}` };
+}
 function span(line: number, character: number) {
   return {
     start: { line, character },
@@ -149,13 +158,14 @@ connection.onRequest("initialize", async () => {
 });
 connection.onRequest(
   "textDocument/hover",
-  async (_params: unknown, token: rpc.CancellationToken): Promise<object> => {
+  async (params: unknown, token: rpc.CancellationToken): Promise<object> => {
     if (mode === "ignore") {
       token.onCancellationRequested(() => log("cancel"));
       return new Promise<never>(() => {});
     }
     if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
     if (mode === "long-error") throw new rpc.ResponseError(-32603, "z".repeat(5000));
+    if (mode === "echo-position") return echoPosition(params);
     const raw = rawReplies.get(mode);
     if (raw) {
       process.stdout.write(raw());

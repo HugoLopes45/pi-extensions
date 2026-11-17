@@ -189,8 +189,8 @@ async function tool(
 async function hover(state: Awaited<ReturnType<typeof session>>) {
   return tool(state, "hl_lsp_hover", {
     file: "index.ts",
-    line: 0,
-    character: 6,
+    line: 1,
+    column: 7,
   });
 }
 
@@ -403,10 +403,9 @@ it("keeps Pi usable after malformed global settings are reloaded", async () => {
 it("loads the real extension through Pi and executes its registered tool offline", async () => {
   const { runtime, faux } = await session(true);
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(
@@ -431,8 +430,8 @@ it("returns compact definition text with source lines, a duplicate and an outsid
   expect(
     await tool(state, "hl_lsp_definition", {
       file: "index.ts",
-      line: 0,
-      character: 6,
+      line: 1,
+      column: 7,
     }),
   ).toMatchObject({
     isError: false,
@@ -451,8 +450,8 @@ it("returns an error result for a malformed definition reply", async () => {
   expect(
     await tool(state, "hl_lsp_definition", {
       file: "index.ts",
-      line: 0,
-      character: 6,
+      line: 1,
+      column: 7,
     }),
   ).toMatchObject({
     isError: true,
@@ -468,10 +467,9 @@ it("returns an error result for a malformed definition reply", async () => {
 it("keeps a bounded leading part of an oversized single-line error reason", async () => {
   const { runtime, faux } = await session(true, "long-error");
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(
@@ -495,8 +493,8 @@ it("shows the header path relative to the session cwd when the file is inside it
   expect(
     await tool(state, "hl_lsp_hover", {
       file: join(state.cwd, "index.ts"),
-      line: 0,
-      character: 6,
+      line: 1,
+      column: 7,
     }),
   ).toMatchObject({
     content: [
@@ -514,8 +512,8 @@ it("shows the header path absolute when the file is outside the session cwd", as
   expect(
     await tool(state, "hl_lsp_hover", {
       file: outside,
-      line: 0,
-      character: 6,
+      line: 1,
+      column: 7,
     }),
   ).toMatchObject({
     content: [
@@ -531,6 +529,12 @@ it("lists each hl_lsp tool with a one-line snippet in the system prompt", async 
   const { runtime } = await session(true);
   for (const name of ["hover", "definition", "references", "symbols", "diagnostics"])
     expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- hl_lsp_${name}: .+$`, "mu"));
+});
+
+it("names each hl_lsp tool in its own prompt guideline", async () => {
+  const { runtime } = await session(true);
+  for (const name of ["hover", "definition", "references", "symbols", "diagnostics"])
+    expect(runtime.session.systemPrompt).toMatch(new RegExp(`^- Use hl_lsp_${name} `, "mu"));
 });
 
 it("keeps fifty edited revisions out of persistent diagnostic context", async () => {
@@ -614,10 +618,9 @@ it("adds one bounded transient summary per natural request without raw diagnosti
 it("keeps the real SDK tool blocked when the extension is disabled", async () => {
   const { runtime, faux } = await session(false);
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(
@@ -647,10 +650,9 @@ it("reports an invalid session LSP override as the unavailable reason, and launc
   });
   await runtime.session.reload();
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(
@@ -683,10 +685,9 @@ it("launches nothing for an untrusted project whose hl-lsp servers are set", asy
     }),
   });
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(
@@ -714,10 +715,9 @@ it("fails closed when a trusted project's hl-lsp servers try to replace the glob
     }),
   });
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(
@@ -750,10 +750,9 @@ it("keeps a valid session enable blocked without global project-execution consen
     data: { version: 1, overrides: { enabled: true } },
   });
   faux.setResponses([
-    fauxAssistantMessage(
-      fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 0, character: 6 }),
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage(fauxToolCall("hl_lsp_hover", { file: "index.ts", line: 1, column: 7 }), {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("done"),
   ]);
   await runtime.session.sendCustomMessage(

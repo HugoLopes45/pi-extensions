@@ -19,6 +19,11 @@ import type { LspSettings, ServerConfig, ServerFamily } from "./settings.js";
 
 export type Operation = "hover" | "definition" | "references" | "symbols" | "diagnostics";
 type Position = { line: number; character: number };
+export type NavigationTarget = {
+  line: number;
+  symbol?: string | undefined;
+  column?: number | undefined;
+};
 type SelectedRoute = Extract<Route, { outcome: "completed" }>;
 type Document = {
   file: string;
@@ -63,18 +68,53 @@ async function snapshot(file: string, signal: AbortSignal): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function validatePosition(text: string, position: Position | undefined): void {
-  if (
-    !position ||
-    !Number.isSafeInteger(position.line) ||
-    !Number.isSafeInteger(position.character) ||
-    position.line < 0 ||
-    position.character < 0
-  )
-    throw new Error("A nonnegative UTF-16 position is required");
-  const line = text.split(/\r?\n/u)[position.line];
-  if (line === undefined || position.character > line.length)
-    throw new Error("Position is outside the file snapshot");
+const lineBreak = /\r\n|\r|\n/u;
+const identifierCharacter = /[A-Za-z0-9_$]/u;
+
+function isIdentifierCharacter(character: string | undefined): boolean {
+  return character !== undefined && identifierCharacter.test(character);
+}
+
+function symbolCharacter(line: string, symbol: string): number {
+  if (symbol.length === 0) throw new Error("Symbol must not be empty");
+  const matches: number[] = [];
+  for (let index = line.indexOf(symbol); index !== -1; index = line.indexOf(symbol, index + 1))
+    if (
+      !isIdentifierCharacter(line[index - 1]) &&
+      !isIdentifierCharacter(line[index + symbol.length])
+    )
+      matches.push(index);
+  const [first] = matches;
+  if (first === undefined)
+    throw new Error(`Symbol "${symbol}" is not on the line: ${line.slice(0, 200)}`);
+  if (matches.length > 1)
+    throw new Error(
+      `Symbol "${symbol}" occurs at columns ${matches.map((index) => index + 1).join(", ")}; give column instead`,
+    );
+  return first;
+}
+
+function columnCharacter(line: string, column: number): number {
+  if (!Number.isSafeInteger(column) || column < 1)
+    throw new Error("Column must be a positive integer");
+  if (column - 1 > line.length) throw new Error("Column is beyond the line end");
+  return column - 1;
+}
+
+function characterOf(line: string, target: NavigationTarget): number {
+  if (target.symbol !== undefined && target.column === undefined)
+    return symbolCharacter(line, target.symbol);
+  if (target.column !== undefined && target.symbol === undefined)
+    return columnCharacter(line, target.column);
+  throw new Error("Give exactly one of symbol or column");
+}
+
+// The target line is 1-based; the returned LSP position is 0-based.
+function resolvePosition(text: string, target: NavigationTarget | undefined): Position {
+  if (!target) throw new Error("A line and a symbol or column are required");
+  const line = text.split(lineBreak)[target.line - 1];
+  if (line === undefined) throw new Error("Line is outside the file snapshot");
+  return { line: target.line - 1, character: characterOf(line, target) };
 }
 
 async function diagnostics(document: Document, signal: AbortSignal): Promise<Observation> {
@@ -397,7 +437,7 @@ export class LspController {
     };
   }
 
-  async query(operation: Operation, file: string, position?: Position, signal?: AbortSignal) {
+  async query(operation: Operation, file: string, target?: NavigationTarget, signal?: AbortSignal) {
     const refusal = this.gate();
     if (refusal) return refusal;
     const deadline = AbortSignal.any([
@@ -416,7 +456,10 @@ export class LspController {
         reason: `No server configured for "${route.server}"; add servers.${route.server} with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)`,
       };
     const text = await snapshot(route.file, deadline);
-    if (operation !== "diagnostics" && operation !== "symbols") validatePosition(text, position);
+    const position =
+      operation === "diagnostics" || operation === "symbols"
+        ? undefined
+        : resolvePosition(text, target);
     const instance = await this.instance(route, config, deadline);
     return this.exchange(route, instance, operation, position, text, deadline);
   }
