@@ -25,7 +25,7 @@ import {
   formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
-import { applyWorkspaceEdit } from "./rename.js";
+import { applyTextEdits, applyWorkspaceEdit } from "./rename.js";
 import { outside, resolveRoute, type Route } from "./routing.js";
 import { LanguageServer, type Initialization } from "./server.js";
 import {
@@ -89,6 +89,10 @@ export type ServerStatus = {
   server: ServerFamily;
   instances: InstanceStatus[];
 };
+export type FormatOutcome =
+  | { outcome: "unchanged" }
+  | { outcome: "formatted"; edits: number }
+  | { outcome: "skipped"; reason: string };
 const publication = Type.Object({ uri: Type.String() });
 const capability = {
   hover: "hoverProvider",
@@ -452,6 +456,12 @@ async function prepareRefusal(
     deadline,
   );
   return prepared === null ? "Rename is not available at this position" : undefined;
+}
+
+// Indentation follows the first indented line: a tab selects tabs, otherwise spaces.
+function formattingOptions(text: string) {
+  const indent = /^[ \t]+(?=\S)/mu.exec(text)?.[0] ?? "";
+  return { tabSize: 2, insertSpaces: !indent.startsWith("\t") };
 }
 
 function supportsChange(capabilities: Initialization["capabilities"]): boolean {
@@ -868,6 +878,33 @@ export class LspController {
       ...route,
       outcome: "completed" as const,
       changed: applied.changed,
+    };
+  }
+
+  // Formats the file an edit just wrote; the server's edits are applied all or none, as in rename.
+  async format(file: string, signal: AbortSignal): Promise<FormatOutcome> {
+    if (!this.settings.formatOnWrite || this.gate() !== undefined) return { outcome: "unchanged" };
+    const route = await resolveRoute(file, this.cwd);
+    if (route.outcome !== "completed") return { outcome: "unchanged" };
+    const config = this.settings.servers[route.server];
+    if (!config) return { outcome: "unchanged" };
+    const instance = await this.instance(route, config, signal);
+    const { capabilities } = await ready(instance, signal);
+    if (!capabilities.documentFormattingProvider) return { outcome: "unchanged" };
+    const text = await snapshot(route.file, signal);
+    const document = await synchronize(instance, route, text, signal, supportsChange(capabilities));
+    const edits = await instance.client.request(
+      "textDocument/formatting",
+      { textDocument: { uri: document.uri }, options: formattingOptions(text) },
+      signal,
+    );
+    if (edits === null || (Array.isArray(edits) && edits.length === 0))
+      return { outcome: "unchanged" };
+    const applied = await applyTextEdits(edits, await realpath(this.cwd), document);
+    if (applied.outcome !== "written") return { outcome: "skipped", reason: applied.reason };
+    return {
+      outcome: "formatted",
+      edits: applied.changed.reduce((sum, { edits }) => sum + edits, 0),
     };
   }
 

@@ -14,7 +14,7 @@ import {
 import { lspSettings, type LspOptions } from "./settings.js";
 
 export type LspChange = LayeredSettingChange<LspOptions>;
-type MenuKey = "enabled" | "name" | "timeoutMs" | "allowProjectExecution";
+type MenuKey = "enabled" | "name" | "timeoutMs" | "allowProjectExecution" | "formatOnWrite";
 type View = ReturnType<typeof lspSettings.readSettingsLeniently> & SettingsMenuView;
 
 function change(key: MenuKey, text: string, scope: LayeredSettingScope): LspChange {
@@ -43,6 +43,8 @@ const descriptions = {
   timeoutMs: "Request timeout in milliseconds, from 100 to 60000.",
   allowProjectExecution:
     "Allow approved servers to execute project-controlled code in trusted projects.",
+  formatOnWrite:
+    "Format files that an edit or write changed, when the server offers formatting; this rewrites other lines too.",
 };
 
 function row(view: View, scope: LayeredSettingScope, key: MenuKey): SettingRow<LspChange> {
@@ -89,7 +91,7 @@ export function menuSpec(host: {
     },
     rows(view, scope) {
       const keys: MenuKey[] = ["enabled", "name"];
-      if (scope === "global") keys.push("timeoutMs", "allowProjectExecution");
+      if (scope === "global") keys.push("timeoutMs", "allowProjectExecution", "formatOnWrite");
       return [{ kind: "scope" }, ...keys.map((key) => row(view, scope, key))];
     },
     apply: host.apply,

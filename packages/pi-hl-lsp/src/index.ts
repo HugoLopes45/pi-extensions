@@ -14,6 +14,7 @@ import { Value } from "typebox/value";
 
 import {
   LspController,
+  type FormatOutcome,
   type InstanceStatus,
   type NavigationTarget,
   type Operation,
@@ -40,7 +41,7 @@ const rename = Type.Object({
 const document = Type.Object({ file });
 // Edit and write inputs come from the model, so the path is checked before use.
 const editedFile = Type.Object({ path: file });
-// Bounds the wait for new errors after an edit; a server that is still starting keeps starting.
+// Bounds the post-edit wait for formatting and, separately, for new errors; a server still starting keeps starting.
 const POST_EDIT_MS = 3000;
 const workspaceSymbols = Type.Object({
   file,
@@ -156,6 +157,44 @@ function renameLines(changed: { file: string; edits: number }[], cwd: string): s
   ].join("\n");
 }
 
+function postEditDeadline(signal: AbortSignal | undefined): AbortSignal {
+  return AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(POST_EDIT_MS)]);
+}
+
+// A failed format never fails the edit; its reason can carry server text, so it is bounded.
+async function formatLine(
+  current: LspController,
+  cwd: string,
+  file: string,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  const outcome = await current
+    .format(file, postEditDeadline(signal))
+    .catch((error: unknown): FormatOutcome => ({
+      outcome: "skipped",
+      reason: errorText(error),
+    }));
+  if (outcome.outcome === "unchanged") return undefined;
+  if (outcome.outcome === "skipped")
+    return `hl-lsp: format skipped: ${bounded(outcome.reason, { maxBytes: 512, maxLines: 1 }).content}`;
+  return `hl-lsp: formatted ${displayPath(cwd, file)} (${outcome.edits} edits)`;
+}
+
+// Formatting runs before the new-error check, so the reported errors describe the final text.
+async function postEditNotes(
+  current: LspController,
+  cwd: string,
+  file: string,
+  signal: AbortSignal | undefined,
+): Promise<string[]> {
+  const formatted = await formatLine(current, cwd, file, signal);
+  const notes = formatted === undefined ? [] : [formatted];
+  const errors = await current.newErrors(file, postEditDeadline(signal)).catch(() => undefined);
+  if (!errors || errors.length === 0) return notes;
+  const header = `hl-lsp: ${errors.length} new errors in ${displayPath(cwd, file)}`;
+  return [...notes, `${header}\n${formatNewErrors(errors).text}`];
+}
+
 export default function hlLsp(pi: ExtensionAPI): void {
   let controller: LspController | undefined;
   let name = "HL LSP";
@@ -234,21 +273,10 @@ export default function hlLsp(pi: ExtensionAPI): void {
     if (event.isError || !(isEditToolResult(event) || isWriteToolResult(event))) return;
     const current = controller;
     if (!current || !Value.Check(editedFile, event.input)) return;
-    const deadline = AbortSignal.any([
-      ...(ctx.signal ? [ctx.signal] : []),
-      AbortSignal.timeout(POST_EDIT_MS),
-    ]);
-    const errors = await current.newErrors(event.input.path, deadline).catch(() => undefined);
-    if (!errors || errors.length === 0) return;
-    const header = `hl-lsp: ${errors.length} new errors in ${displayPath(ctx.cwd, event.input.path)}`;
+    const notes = await postEditNotes(current, ctx.cwd, event.input.path, ctx.signal);
+    if (notes.length === 0) return;
     return {
-      content: [
-        ...event.content,
-        {
-          type: "text" as const,
-          text: `${header}\n${formatNewErrors(errors).text}`,
-        },
-      ],
+      content: [...event.content, ...notes.map((text) => ({ type: "text" as const, text }))],
     };
   });
 

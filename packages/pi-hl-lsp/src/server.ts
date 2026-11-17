@@ -29,6 +29,7 @@ const initializedSchema = Type.Object({
     typeDefinitionProvider: provider,
     implementationProvider: provider,
     referencesProvider: provider,
+    documentFormattingProvider: provider,
     documentSymbolProvider: provider,
     diagnosticProvider: provider,
     workspaceSymbolProvider: provider,

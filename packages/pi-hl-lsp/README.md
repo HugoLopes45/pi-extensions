@@ -38,7 +38,7 @@ Output is capped. Hover is limited to 8 KiB and 100 lines. Other bodies are limi
 
 ## Configuration
 
-The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `allowProjectExecution`, and `timeoutMs` are global-only. Trusted project settings and session overrides may change `enabled` and `name`. Untrusted project settings are ignored.
+The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `allowProjectExecution`, `timeoutMs`, and `formatOnWrite` are global-only. Trusted project settings and session overrides may change `enabled` and `name`. Untrusted project settings are ignored.
 
 LSP runs only when all three conditions hold. A refusal names each failed condition and its fix.
 
@@ -73,7 +73,9 @@ Servers receive only `HOME` and `PATH` from the environment.
 
 `allowProjectExecution` acknowledges that an approved server may execute project-controlled code. Project trust is also required. This is not a sandbox.
 
-`/hl-lsp` opens the shared settings menu. It shows `enabled` and `name`, plus `timeoutMs` and `allowProjectExecution` in global scope. Configure servers through JSON commands, not the menu.
+`formatOnWrite` (default `false`) formats the file after a successful edit or write, when its server offers formatting. The server's edits apply all or none, after the same version check as rename. The tool result names the formatted file. Indentation is two spaces, or tabs when the file's first indented line starts with a tab. Formatting can rewrite lines that the model did not change.
+
+`/hl-lsp` opens the shared settings menu. It shows `enabled` and `name`, plus `timeoutMs`, `allowProjectExecution`, and `formatOnWrite` in global scope. Configure servers through JSON commands, not the menu.
 
 ```text
 /hl-lsp status

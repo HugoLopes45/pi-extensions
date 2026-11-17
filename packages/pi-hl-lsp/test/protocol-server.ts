@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { Writable } from "node:stream";
 import { setTimeout as delay, setImmediate as tick } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
@@ -143,6 +144,7 @@ const renameModes = new Set<string | undefined>([
   "rename-outside",
   "rename-prepare-null",
 ]);
+const formattingModes = new Set<string | undefined>(["format", "format-race", "format-errors"]);
 const renameRequest = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
   newName: Type.String(),
@@ -193,6 +195,7 @@ function capabilities() {
       ? { workspaceSymbolProvider: true }
       : {}),
     ...(renameModes.has(mode) ? { renameProvider: { prepareProvider: true } } : {}),
+    documentFormattingProvider: formattingModes.has(mode),
     positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
   };
 }
@@ -313,6 +316,20 @@ connection.onRequest("textDocument/prepareRename", (params: unknown): object | n
   if (!Value.Check(textDocumentPosition, params))
     throw new Error("Invalid prepareRename fixture request");
   return mode === "rename-prepare-null" ? null : span(0, 6);
+});
+// Formatting removes the indentation of each line, reading the file as the server sees it on disk.
+connection.onRequest("textDocument/formatting", (params: unknown): object[] => {
+  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid formatting fixture request");
+  const file = fileURLToPath(params.textDocument.uri);
+  log("format");
+  // A race rewrites the file after the server read it, as a save by another program would.
+  if (mode === "format-race") writeFileSync(file, "    const other = 3;\n");
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .flatMap((line, index) => {
+      const indent = /^[ \t]*/u.exec(line)?.[0] ?? "";
+      return indent.length === 0 ? [] : [replaceAt(index, 0, indent.length, "")];
+    });
 });
 // index.ts holds `const value = 1;` and other.ts holds `import { value } from "./index";`.
 connection.onRequest("textDocument/rename", (params: unknown): object => {
@@ -440,7 +457,7 @@ function errorLines(value: unknown): object[] {
   });
 }
 function reportedFindings(value: unknown): object[] {
-  if (mode === "error-lines") return errorLines(value);
+  if (mode === "error-lines" || mode === "format-errors") return errorLines(value);
   const code = reportedCodes.get(mode);
   return code === undefined ? [] : [finding(code)];
 }
@@ -448,6 +465,7 @@ function reportedFindings(value: unknown): object[] {
 const versionedModes = new Set<string | undefined>([
   "versioned",
   "error-lines",
+  "format-errors",
   "string-code",
   "pull-and-push",
   "pull-duplicate",

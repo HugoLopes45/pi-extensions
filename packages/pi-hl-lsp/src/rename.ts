@@ -1,6 +1,6 @@
 import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { errorText } from "pi-hl-utils/errors";
@@ -19,6 +19,7 @@ const textEdit = Type.Object({
   range: Type.Object({ start: position, end: position }),
   newText: Type.String(),
 });
+const textEdits = Type.Array(textEdit);
 const textDocumentEdit = Type.Object({
   textDocument: Type.Object({
     uri: Type.String(),
@@ -136,6 +137,24 @@ function fileOf(uri: string): string {
   } catch {
     throw new Refusal("The workspace edit targets a URI that is not a file");
   }
+}
+
+// Formatting answers with TextEdit[] for the synced document; the same checks apply to them as to a rename.
+export async function applyTextEdits(
+  response: unknown,
+  root: string,
+  synced: SyncedDocument,
+): Promise<ApplyOutcome> {
+  if (!Value.Check(textEdits, response))
+    return {
+      outcome: "refused",
+      reason: "The server returned invalid text edits",
+    };
+  return applyWorkspaceEdit(
+    { changes: { [pathToFileURL(synced.file).href]: response } },
+    root,
+    synced,
+  );
 }
 
 // Holds the queue of every target, in path order, so two renames cannot wait on each other.

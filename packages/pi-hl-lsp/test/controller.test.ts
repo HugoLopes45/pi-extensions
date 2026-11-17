@@ -33,6 +33,7 @@ async function controller(
     name: "HL LSP",
     allowProjectExecution: consent,
     timeoutMs: 5000,
+    formatOnWrite: false,
     servers: {
       typescript: {
         command: process.execPath,

@@ -32,6 +32,7 @@ import { directory } from "./fixtures.js";
 
 interface SessionOptions {
   allowProjectExecution?: boolean;
+  formatOnWrite?: boolean;
   projectTrusted?: boolean;
   projectSettings?: (spawnLog: string) => unknown;
 }
@@ -63,6 +64,7 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
         allowProjectExecution: options.allowProjectExecution ?? true,
         timeoutMs: 5000,
         servers: { typescript: typescriptServer(mode, spawnLog) },
+        ...(options.formatOnWrite === undefined ? {} : { formatOnWrite: options.formatOnWrite }),
       },
     }),
   );
@@ -1173,6 +1175,97 @@ it("appends new errors after a write too", async () => {
   expect(await tool(state, "write", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
     content: [
       { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
+  });
+});
+
+it("leaves an edit unformatted unless formatOnWrite is set", async () => {
+  const state = await session(true, "format");
+  expect(
+    await tool(state, "edit", {
+      path: "index.ts",
+      text: "  const value = 2;\n",
+    }),
+  ).toMatchObject({
+    content: [{ type: "text", text: "Wrote index.ts" }],
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("  const value = 2;\n");
+  expect(await readFile(state.spawnLog, "utf8")).not.toContain("format");
+});
+
+it("formats an edited file and appends the formatted line", async () => {
+  const state = await session(true, "format", { formatOnWrite: true });
+  expect(
+    await tool(state, "edit", {
+      path: "index.ts",
+      text: "  const value = 2;\n",
+    }),
+  ).toMatchObject({
+    isError: false,
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      { type: "text", text: "hl-lsp: formatted index.ts (1 edits)" },
+    ],
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 2;\n");
+});
+
+it("formats a written file too", async () => {
+  const state = await session(true, "format", { formatOnWrite: true });
+  expect(
+    await tool(state, "write", {
+      path: "index.ts",
+      text: "  const value = 2;\n",
+    }),
+  ).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      { type: "text", text: "hl-lsp: formatted index.ts (1 edits)" },
+    ],
+  });
+});
+
+it("skips formatting when the file changed after the server read it", async () => {
+  const state = await session(true, "format-race", { formatOnWrite: true });
+  expect(
+    await tool(state, "edit", {
+      path: "index.ts",
+      text: "  const value = 2;\n",
+    }),
+  ).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: "hl-lsp: format skipped: index.ts changed after the server read it",
+      },
+    ],
+  });
+  expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("    const other = 3;\n");
+});
+
+it("appends nothing for a server without a formatting provider", async () => {
+  const state = await session(true, "error-lines", { formatOnWrite: true });
+  expect(
+    await tool(state, "edit", {
+      path: "index.ts",
+      text: "  const value = 2;\n",
+    }),
+  ).toMatchObject({
+    content: [{ type: "text", text: "Wrote index.ts" }],
+  });
+});
+
+it("reports the format line before new errors", async () => {
+  const state = await session(true, "format-errors", { formatOnWrite: true });
+  expect(await tool(state, "edit", { path: "index.ts", text: "  ERROR\n" })).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      { type: "text", text: "hl-lsp: formatted index.ts (1 edits)" },
       {
         type: "text",
         text: "hl-lsp: 1 new errors in index.ts\n1:1 error 2322 Untrusted diagnostic prose",

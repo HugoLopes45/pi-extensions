@@ -120,6 +120,7 @@ it("starts disabled without executable approval", () => {
     name: "HL LSP",
     allowProjectExecution: false,
     timeoutMs: 5000,
+    formatOnWrite: false,
     servers: {},
   });
 });
@@ -133,7 +134,12 @@ it("accepts explicit global launch policy and trusted presentation overrides", (
   };
   expect(
     readSettings(
-      { enabled: true, servers, allowProjectExecution: true },
+      {
+        enabled: true,
+        servers,
+        allowProjectExecution: true,
+        formatOnWrite: true,
+      },
       { name: "Language tools" },
       true,
     ),
@@ -142,6 +148,7 @@ it("accepts explicit global launch policy and trusted presentation overrides", (
     name: "Language tools",
     allowProjectExecution: true,
     timeoutMs: 5000,
+    formatOnWrite: true,
     servers,
   });
 });
@@ -149,6 +156,7 @@ it("accepts explicit global launch policy and trusted presentation overrides", (
 it("does not let project settings authorize executable launch", () => {
   expect(() => readSettings({}, { servers: {} }, true)).toThrow(/project/);
   expect(() => readSettings({}, { allowProjectExecution: true }, true)).toThrow(/project/);
+  expect(() => readSettings({}, { formatOnWrite: true }, true)).toThrow(/project/);
 });
 
 it("ignores untrusted project settings entirely", () => {
@@ -164,6 +172,7 @@ it("rejects malformed global settings and excessive budgets", () => {
     { enabled: "yes" },
     { timeoutMs: 0 },
     { timeoutMs: 60001 },
+    { formatOnWrite: "yes" },
     { unknown: true },
   ]) {
     expect(() => readSettings(value, undefined, false)).toThrow(/global/);

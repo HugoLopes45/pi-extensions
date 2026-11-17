@@ -45,6 +45,7 @@ const schema = Type.Object(
     ),
     allowProjectExecution: Type.Optional(Type.Boolean()),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 60000 })),
+    formatOnWrite: Type.Optional(Type.Boolean()),
     servers: Type.Optional(serversSchema),
   },
   { additionalProperties: false },
@@ -62,6 +63,7 @@ const defaults: LspSettings = {
   name: "HL LSP",
   allowProjectExecution: false,
   timeoutMs: 5000,
+  formatOnWrite: false,
   servers: {},
 };
 
@@ -71,7 +73,7 @@ export const lspSettings = defineLayeredSettings({
   schema,
   defaults,
   sessionEntryType: "hl-lsp-settings",
-  globalOnlyKeys: ["servers", "allowProjectExecution", "timeoutMs"],
+  globalOnlyKeys: ["servers", "allowProjectExecution", "timeoutMs", "formatOnWrite"],
 });
 
 export function readSettings(session: LayeredSettingsSession) {
