@@ -322,6 +322,40 @@ it.skipIf(process.platform === "win32")(
   },
 );
 
+it.skipIf(process.platform === "win32").each([
+  ["resolves when a fresh probe finds the group gone", "ESRCH", "resolved"],
+  ["rejects while the group still refuses", "EPERM", "LSP process group did not stop"],
+])("after the server exits and SIGKILL is refused, %s", async (_case, refusal, expected) => {
+  const { instance, file, spawnLog } = await controller("stubborn-grandchild");
+  await instance.query("hover", file, { line: 0, character: 6 });
+  const group = -(await lastPid(spawnLog));
+  const kill = process.kill.bind(process);
+  let killed = false;
+  // The server leaves on SIGTERM; its grandchild ignores it until SIGKILL. macOS may answer EPERM
+  // for a group whose last member is an unreaped zombie, so the real SIGKILL is delivered, the
+  // system is given time to reap, and EPERM is reported.
+  vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+    if (target !== group) return kill(target, signal);
+    if (signal === "SIGKILL") {
+      kill(target, signal);
+      killed = true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    if (killed && refusal === "EPERM")
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    return kill(target, signal);
+  });
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const outcome = await instance.dispose().then(
+    () => "resolved",
+    (error: unknown) => (error instanceof Error ? error.message : "rejected"),
+  );
+  expect(outcome).toBe(expected);
+});
+
 it.skipIf(process.platform === "win32")(
   "keeps one two-second budget for a server that ignores shutdown and SIGTERM",
   async () => {

@@ -31,8 +31,8 @@ const initializedSchema = Type.Object({
   }),
 });
 export type Initialization = Static<typeof initializedSchema>;
-// Part of the two-second budget kept after SIGKILL: macOS answers EPERM for a group whose only
-// member is a zombie that Node has not reaped yet, so the server's exit event is awaited first.
+// The last 100 ms of the two-second disposal budget, kept after SIGKILL: macOS answers EPERM for a
+// group whose only member is an unreaped zombie, so the group is probed again before failing.
 const REAP_RESERVE_MS = 100;
 
 class FrameSizes {
@@ -286,9 +286,10 @@ export class LanguageServer {
       throw new Error("LSP process group did not stop");
   }
 
-  /** Whether a refused group was only the server awaiting its reap, and is now gone. */
+  /** Whether a refused group was only awaiting its reap, and is now gone. */
   private async reaped(deadline: number): Promise<boolean> {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return false;
+    if (this.child.exitCode !== null || this.child.signalCode !== null)
+      return this.signal(0) === "gone";
     const exit = once(this.child, "exit").then(() => true);
     const late = delay(Math.max(0, deadline - performance.now()), false, { ref: false });
     return (await Promise.race([exit, late])) && this.signal(0) === "gone";
