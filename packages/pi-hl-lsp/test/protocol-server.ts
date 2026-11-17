@@ -357,6 +357,7 @@ const silentModes = new Set<string | undefined>([
   "silent",
   "pull-static",
   "pull-dynamic",
+  "pull-late-registration",
   "pull-cancel-once",
 ]);
 // The most recently synchronized document, which workspace symbols answer with.
@@ -406,6 +407,11 @@ connection.onNotification("textDocument/didOpen", async (value: unknown) => {
   if (mode === "progress-late") startLateLoading();
   if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
   await publishDiagnostics(value, false);
+  // Like basedpyright, the fixture registers the pull method in reply to the first open.
+  if (mode === "pull-late-registration")
+    await connection.sendRequest("client/registerCapability", {
+      registrations: [pullRegistration],
+    });
 });
 connection.onNotification("textDocument/didChange", async (value: unknown) => {
   if (syncLog && Value.Check(opened, value)) log(`didChange ${value.textDocument.version}`);
@@ -424,6 +430,7 @@ connection.onNotification("test/fail", async () => {
 const pulledCodes = new Map<string | undefined, number | string>([
   ["pull-static", "E0308"],
   ["pull-dynamic", "E0308"],
+  ["pull-late-registration", "E0308"],
   ["pull-cancel-once", "E0308"],
   ["pull-and-push", "E0308"],
   ["pull-duplicate", 2322],

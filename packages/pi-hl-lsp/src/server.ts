@@ -122,6 +122,7 @@ export class LanguageServer {
   private diagnosticProvider = false;
   private readonly registered = new Set<string>();
   private readonly progressTokens = new Set<string | number>();
+  private readonly pullListeners = new Set<() => void>();
   private quiescent = true;
   private lastProgressAt = Number.NEGATIVE_INFINITY;
   private signaled = false;
@@ -192,6 +193,8 @@ export class LanguageServer {
       if (!Value.Check(registrationParams, value))
         return this.reject("Invalid client/registerCapability payload");
       for (const { method } of value.registrations) this.registered.add(method);
+      if (value.registrations.some(({ method }) => method === "textDocument/diagnostic"))
+        for (const listener of this.pullListeners) listener();
       return null;
     });
     this.connection.onRequest("client/unregisterCapability", (value: unknown) => {
@@ -279,6 +282,14 @@ export class LanguageServer {
     this.signaled = true;
     this.changed.resolve();
     this.changed = Promise.withResolvers<void>();
+  }
+
+  // Runs when pull diagnostics get registered; the returned function removes the listener.
+  onPullRegistration(listener: () => void): () => void {
+    this.pullListeners.add(listener);
+    return () => {
+      this.pullListeners.delete(listener);
+    };
   }
 
   async initialize(signal?: AbortSignal): Promise<Initialization> {

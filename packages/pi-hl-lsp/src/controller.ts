@@ -233,16 +233,40 @@ async function pullReport(
 
 // A pull answers for this document version; a push already settled for it joins the answer.
 // A failed pull leaves the answer to the push path.
+async function pulledObservation(
+  client: LanguageServer,
+  document: Document,
+  signal: AbortSignal,
+): Promise<Observation | undefined> {
+  const answer = await pullReport(client, document, signal);
+  if (!answer) return undefined;
+  const pulled = pullResult(answer.report);
+  return document.observation ? unionObservation(pulled, document.observation) : pulled;
+}
+
+// basedpyright registers the pull method in reply to the first open, after this call has read
+// pullDiagnostics, so a push wait also starts a pull when that registration arrives.
 async function diagnosticsObservation(
   instance: Instance,
   document: Document,
   signal: AbortSignal,
 ): Promise<Observation> {
-  if (!instance.client.pullDiagnostics) return diagnostics(document, signal);
-  const answer = await pullReport(instance.client, document, signal);
-  if (!answer) return diagnostics(document, signal);
-  const pulled = pullResult(answer.report);
-  return document.observation ? unionObservation(pulled, document.observation) : pulled;
+  const { client } = instance;
+  if (client.pullDiagnostics)
+    return (await pulledObservation(client, document, signal)) ?? diagnostics(document, signal);
+  const pulled = Promise.withResolvers<Observation | undefined>();
+  const pushWait = new AbortController();
+  const push = diagnostics(document, AbortSignal.any([signal, pushWait.signal]));
+  const stop = client.onPullRegistration(() =>
+    pulled.resolve(pulledObservation(client, document, signal)),
+  );
+  try {
+    return await Promise.race([push, pulled.promise.then((answer) => answer ?? push)]);
+  } finally {
+    stop();
+    // A pull that won leaves no push wait behind; a push that won has already settled.
+    pushWait.abort();
+  }
 }
 
 async function readResponse(

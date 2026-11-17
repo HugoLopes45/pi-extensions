@@ -308,6 +308,17 @@ it("pulls once the server registers the pull method after initialization", async
   expect(await events(spawnLog)).toEqual(["pull"]);
 });
 
+it("pulls when the server registers the pull method in reply to the first open", async () => {
+  const { instance, file, spawnLog } = await controller("pull-late-registration", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
 it("lists the pulled item and the pushed item for the same version", async () => {
   const { instance, file } = await controller("pull-and-push", true, true, {
     timeoutMs: 1000,
