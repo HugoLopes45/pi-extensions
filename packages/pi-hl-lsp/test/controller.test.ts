@@ -278,13 +278,16 @@ it("sends nothing but exit after shutdown when a pending request is aborted", as
   onTestFinished(() => client.dispose());
   await client.initialize();
   const abort = new AbortController();
-  const pending = client.request("textDocument/hover", {}, abort.signal).catch(() => undefined);
+  const outcome = client.request("textDocument/hover", {}, abort.signal).then(
+    () => "resolved",
+    (error: unknown) => error,
+  );
   const disposing = client.dispose();
   // The fixture answers shutdown after 500 ms; the abort lands inside that window.
   await vi.waitFor(async () => expect(await events(spawnLog)).toContain("shutdown"));
-  abort.abort();
+  abort.abort(new Error("Caller cancelled"));
   await disposing;
-  await pending;
+  expect(await outcome).toHaveProperty("message", "Caller cancelled");
   expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
 });
 
