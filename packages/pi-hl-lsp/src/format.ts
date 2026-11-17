@@ -215,13 +215,19 @@ export async function formatWorkspaceSymbols(
 }
 
 export function formatDiagnostics(observation: Observation): Formatted {
-  if (observation.diagnostics.length === 0)
+  if (observation.diagnostics.length === 0) {
+    if (observation.evidence === "server_busy")
+      return {
+        text: "server still working: a progress token is open at the deadline, so diagnostics are not settled",
+        truncated: false,
+      };
     return observation.evidence === "settled_unversioned"
       ? {
           text: "no diagnostics (server published an empty list without a version)",
           truncated: false,
         }
       : emptyResult();
+  }
   const rendered = observation.diagnostics.map(diagnosticLine);
   return renderBody(
     rendered.map((line) => line.text),

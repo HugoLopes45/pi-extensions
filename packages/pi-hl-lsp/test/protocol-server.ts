@@ -120,6 +120,19 @@ const staticPullModes = new Set<string | undefined>([
   "pull-error",
   "pull-cancel-once",
   "pull-cancel-always",
+  "pull-progress-then-push",
+  "pull-progress-forever",
+  "pull-progress-forever-cancel",
+  "pull-progress-restart",
+  "pull-progress-open-late",
+  "pull-progress-clean",
+  "pull-empty-publish-clean",
+  "pull-refresh-then-push",
+  "pull-refresh-findings-then-push",
+  "pull-progress-chatter",
+  "publish-other-file",
+  "pull-empty-reopen",
+  "pull-empty-reopen-versioned",
 ]);
 const pullRegistration = { id: "pull", method: "textDocument/diagnostic" };
 const typeNavigationModes = new Set<string | undefined>(["type-navigation"]);
@@ -547,6 +560,7 @@ function reportedFindings(value: unknown): object[] {
 // Modes whose publication carries the document version, and the code each mode reports.
 const versionedModes = new Set<string | undefined>([
   "versioned",
+  "pull-empty-reopen-versioned",
   "error-lines",
   "format-errors",
   ...codeActionModes,
@@ -565,10 +579,20 @@ const reportedCodes = new Map<string | undefined, number | string>([
   ["pull-duplicate", 2322],
   ["pull-error", 2322],
   ["pull-cancel-always", 2322],
+  ["pull-empty-reopen", 2322],
+  ["pull-empty-reopen-versioned", 2322],
 ]);
 // Modes that never publish; their diagnostics come only from pull.
 const silentModes = new Set<string | undefined>([
   "silent",
+  "pull-progress-restart",
+  "pull-progress-open-late",
+  "pull-progress-clean",
+  "pull-empty-publish-clean",
+  "pull-refresh-then-push",
+  "pull-refresh-findings-then-push",
+  "pull-progress-chatter",
+  "publish-other-file",
   "pull-static",
   "pull-dynamic",
   "pull-late-registration",
@@ -577,6 +601,19 @@ const silentModes = new Set<string | undefined>([
   "pull-clean",
   "pull-cancel-once",
   "code-actions-silent",
+  "pull-progress-then-push",
+  "pull-progress-forever",
+  "pull-progress-forever-cancel",
+]);
+// Pull modes that hold a work-done token open after an empty pull, as rust-analyzer does while it analyses.
+const progressPullModes = new Set<string | undefined>([
+  "pull-progress-then-push",
+  "pull-progress-forever",
+  "pull-progress-forever-cancel",
+]);
+const foreverProgressModes = new Set<string | undefined>([
+  "pull-progress-forever",
+  "pull-progress-forever-cancel",
 ]);
 // Modes that register the pull method in reply to the first open, as basedpyright does.
 const lateRegistrationModes = new Set<string | undefined>([
@@ -587,12 +624,23 @@ const lateRegistrationModes = new Set<string | undefined>([
 ]);
 // The most recently synchronized document, which workspace symbols answer with.
 let synchronized: string | undefined;
+// Documents that pull-empty-reopen has published for; a reopen stays silent, as rust-analyzer does.
+const publishedUris = new Set<string>();
+// pull-empty-reopen publishes only the first time a document opens.
+function silent(uri: string, changed: boolean): boolean {
+  if (mode === "pull-empty-reopen" || mode === "pull-empty-reopen-versioned") {
+    if (publishedUris.has(uri)) return true;
+    publishedUris.add(uri);
+    return false;
+  }
+  return silentModes.has(mode) || (mode === "dedupe-empty" && changed);
+}
 // `changed` marks didChange; dedupe-empty stays silent for it, as cli.mjs:21942 does.
 async function publishDiagnostics(value: unknown, changed: boolean) {
   if (!Value.Check(opened, value)) throw new Error("Invalid didOpen fixture message");
   const { uri, version } = value.textDocument;
   synchronized = uri;
-  if (silentModes.has(mode) || (mode === "dedupe-empty" && changed)) return;
+  if (silent(uri, changed)) return;
   if (mode === "slow-error-lines") await delay(1000);
   if (mode === "staged") {
     await connection.sendNotification("textDocument/publishDiagnostics", {
@@ -629,9 +677,133 @@ function startLateLoading() {
     }, 400);
   }, 200);
 }
+// The token ends 1800 ms after open, past the client's quiet window, with a versioned error published first.
+// The begin is written before the open's reply, so the client holds the token before any pull answer.
+function startIndexing(uri: string, version: number) {
+  void connection.sendRequest("window/workDoneProgress/create", {
+    token: "index",
+  });
+  void connection.sendNotification("$/progress", {
+    token: "index",
+    value: { kind: "begin", title: "Indexing" },
+  });
+  if (foreverProgressModes.has(mode)) return;
+  setTimeout(() => {
+    void connection.sendNotification("textDocument/publishDiagnostics", {
+      uri,
+      version,
+      diagnostics: [finding("E0308")],
+    });
+    void connection.sendNotification("$/progress", {
+      token: "index",
+      value: { kind: "end" },
+    });
+  }, 1800);
+}
+// Progress after the open reply: a token ends, a new one starts inside the quiet window, and the finding follows.
+function publishAfterOpen(value: unknown) {
+  if (!Value.Check(opened, value)) return;
+  const { uri, version } = value.textDocument;
+  if (mode === "pull-progress-restart") {
+    void connection.sendNotification("$/progress", {
+      token: "index",
+      value: { kind: "begin", title: "Indexing" },
+    });
+    void connection.sendNotification("$/progress", {
+      token: "index",
+      value: { kind: "end" },
+    });
+    setTimeout(() => {
+      void connection.sendNotification("$/progress", {
+        token: "reindex",
+        value: { kind: "begin", title: "Checking" },
+      });
+    }, 500);
+    setTimeout(() => {
+      void connection.sendNotification("textDocument/publishDiagnostics", {
+        uri,
+        version,
+        diagnostics: [finding("E0308")],
+      });
+    }, 1500);
+    setTimeout(() => {
+      void connection.sendNotification("$/progress", {
+        token: "reindex",
+        value: { kind: "end" },
+      });
+    }, 1600);
+  }
+  if (mode === "pull-progress-open-late") {
+    setTimeout(() => {
+      void connection.sendNotification("$/progress", {
+        token: "index",
+        value: { kind: "begin", title: "Indexing" },
+      });
+    }, 300);
+    setTimeout(() => {
+      void connection.sendNotification("$/progress", {
+        token: "index",
+        value: { kind: "end" },
+      });
+    }, 2500);
+  }
+  if (mode === "pull-progress-clean") {
+    void connection.sendNotification("$/progress", {
+      token: "index",
+      value: { kind: "begin", title: "Indexing" },
+    });
+    void connection.sendNotification("$/progress", {
+      token: "index",
+      value: { kind: "end" },
+    });
+  }
+  publishAfterLoad(uri, version);
+  if (mode === "pull-empty-publish-clean")
+    setTimeout(() => {
+      void connection.sendNotification("textDocument/publishDiagnostics", {
+        uri,
+        version,
+        diagnostics: [],
+      });
+    }, 300);
+}
+// Activity of a server that loads its project after the open, as rust-analyzer does.
+function publishAfterLoad(uri: string, version: number) {
+  // A refresh while the server still loads, then the finding as a push.
+  if (mode === "pull-refresh-then-push" || mode === "pull-refresh-findings-then-push") {
+    setTimeout(() => {
+      void connection.sendRequest("workspace/diagnostic/refresh");
+    }, 200);
+    setTimeout(() => {
+      void connection.sendNotification("textDocument/publishDiagnostics", {
+        uri,
+        version,
+        diagnostics: [finding(mode === "pull-refresh-then-push" ? "E0308" : 2322)],
+      });
+    }, 700);
+  }
+  // A project check publishes, without a version, for a file that is not open, once.
+  if (mode === "publish-other-file" && !publishedUris.has("other")) {
+    publishedUris.add("other");
+    void connection.sendNotification("textDocument/publishDiagnostics", {
+      uri: new URL("other.ts", uri).href,
+      diagnostics: [finding(2322)],
+    });
+  }
+  // Progress reports without a begin keep arriving, so the server is never quiet and holds no token.
+  if (mode === "pull-progress-chatter")
+    setInterval(() => {
+      void connection.sendNotification("$/progress", {
+        token: "chatter",
+        value: { kind: "report", message: "working" },
+      });
+    }, 200);
+}
 connection.onNotification("textDocument/didOpen", async (value: unknown) => {
   if (mode === "progress-late") startLateLoading();
   if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
+  if (progressPullModes.has(mode) && Value.Check(opened, value))
+    startIndexing(value.textDocument.uri, value.textDocument.version);
   await publishDiagnostics(value, false);
   if (mode === "pull-empty-then-push" && Value.Check(opened, value)) {
     const { uri, version } = value.textDocument;
@@ -643,6 +815,7 @@ connection.onNotification("textDocument/didOpen", async (value: unknown) => {
       });
     }, 300);
   }
+  publishAfterOpen(value);
   if (mode === "pull-empty-then-refresh")
     setTimeout(() => {
       void connection.sendRequest("workspace/diagnostic/refresh");
@@ -675,6 +848,12 @@ const pulledCodes = new Map<string | undefined, number | string>([
   ["pull-and-push", "E0308"],
   ["pull-duplicate", 2322],
   ["pull-empty-then-refresh", "E0308"],
+  ["pull-refresh-findings-then-push", "E0308"],
+]);
+// Modes whose first pull is empty; the finding is pulled after the refresh, and the check's finding comes as a push.
+const firstPullEmptyModes = new Set<string | undefined>([
+  "pull-empty-then-refresh",
+  "pull-refresh-findings-then-push",
 ]);
 let pulls = 0;
 connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
@@ -682,9 +861,13 @@ connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
   pulls += 1;
   log("pull");
   if (mode === "pull-error") throw new rpc.ResponseError(-32603, "pull failed");
-  if (mode === "pull-cancel-always" || (mode === "pull-cancel-once" && pulls === 1))
+  if (
+    mode === "pull-cancel-always" ||
+    mode === "pull-progress-forever-cancel" ||
+    (mode === "pull-cancel-once" && pulls === 1)
+  )
     throw new rpc.ResponseError(-32802, "server cancelled the request");
-  if (mode === "pull-empty-then-refresh" && pulls === 1) return { kind: "full", items: [] };
+  if (firstPullEmptyModes.has(mode) && pulls === 1) return { kind: "full", items: [] };
   const code = pulledCodes.get(mode);
   return { kind: "full", items: code === undefined ? [] : [finding(code)] };
 });

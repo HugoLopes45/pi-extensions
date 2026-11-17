@@ -87,7 +87,7 @@ function observationOf(list: Static<typeof diagnosticList>, unversioned: boolean
 type Report = Exclude<ReturnType<typeof diagnosticResult>, { outcome: "superseded" }>;
 // An unversioned report is settled by the controller; raw reports keep their evidence value.
 export type Observation = Omit<Report, "evidence"> & {
-  evidence: Report["evidence"] | "settled_unversioned" | "unchanged_empty";
+  evidence: Report["evidence"] | "settled_unversioned" | "unchanged_empty" | "server_busy";
 };
 
 export function settledObservation(report: Report): Observation {
@@ -114,6 +114,21 @@ export function unionObservation(pulled: Observation, pushed: Observation): Obse
     reportedCount,
     omitted: reportedCount - diagnostics.length,
     diagnostics,
+  };
+}
+
+// Reported when a work-done progress token is still open at the deadline, so no answer settled.
+export function busyObservation(): Observation {
+  return {
+    outcome: "partial",
+    evidence: "server_busy",
+    source: "untrusted_lsp",
+    coverage: "observed",
+    projectComplete: false,
+    receivedAt: Date.now(),
+    reportedCount: 0,
+    omitted: 0,
+    diagnostics: [],
   };
 }
 

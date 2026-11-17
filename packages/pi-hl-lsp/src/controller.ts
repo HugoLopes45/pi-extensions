@@ -20,6 +20,7 @@ import {
   type Range,
 } from "./code-actions.js";
 import {
+  busyObservation,
   diagnosticResult,
   pullResult,
   settledObservation,
@@ -91,6 +92,9 @@ type Instance = {
     document: Document | undefined;
     initialization: Initialization | undefined;
     failure: string | undefined;
+    edits: Map<string, number>;
+    published: Map<string, { text: string; edits: number; observation: Observation }>;
+    pending: Map<string, unknown>;
   };
 };
 export type InstanceStatus = {
@@ -137,6 +141,8 @@ const SETTLE_MS = 500;
 const QUIET_MS = 1000;
 // Each baseline is a short error-count map. An evicted file reports all its errors as new on its next edit.
 const BASELINE_LIMIT = 128;
+// Each retained publication holds a file's text, up to the 1 MiB snapshot limit.
+const RETAINED_LIMIT = 128;
 
 async function snapshot(file: string, signal: AbortSignal): Promise<string> {
   const input: AsyncIterable<unknown> = createReadStream(file, { signal });
@@ -310,17 +316,128 @@ async function pullReport(
   }
 }
 
+// Number of text edits sent for the file; a publication made before an edit is stale.
+function editsOf(state: Instance["state"], file: string): number {
+  return state.edits.get(file) ?? 0;
+}
+
+// A new text of the file last synchronized is an edit; the same file reopened after another is not.
+function noteEdit(state: Instance["state"], previous: Document | undefined, file: string): void {
+  if (previous?.file === file) state.edits.set(file, editsOf(state, file) + 1);
+}
+
+// The latest publication stays in the answer while the file has the text and edits it was published for.
+function knownObservation(state: Instance["state"], document: Document): Observation | undefined {
+  const retained = state.published.get(document.file);
+  if (document.observation || !retained) return document.observation;
+  const current =
+    retained.text === document.text && retained.edits === editsOf(state, document.file);
+  return current ? retained.observation : undefined;
+}
+
+// A project check publishes for files that are not open. Such a publication describes the text on disk,
+// so it is kept with that text and joins the answer once the file opens with the same text.
+function retainUnopened(
+  state: Instance["state"],
+  file: string,
+  value: unknown,
+  signal: AbortSignal,
+): void {
+  const report = diagnosticResult(value, 0);
+  // A versioned publication belongs to an earlier open of the file, not to its text on disk.
+  if (report.outcome === "superseded" || report.evidence !== "unversioned_observation") return;
+  // An empty list only clears earlier findings, so the file is not read for it.
+  if (report.reportedCount === 0) {
+    state.pending.delete(file);
+    state.published.delete(file);
+    return;
+  }
+  const edits = editsOf(state, file);
+  state.pending.set(file, value);
+  snapshot(file, signal).then(
+    (text) => {
+      if (state.pending.get(file) !== value) return;
+      state.pending.delete(file);
+      if (editsOf(state, file) !== edits) return;
+      state.published.delete(file);
+      state.published.set(file, {
+        text,
+        edits,
+        observation: settledObservation(report),
+      });
+      // The oldest entry goes first; a file without one falls back to its own pull.
+      const oldest = state.published.keys().next();
+      if (state.published.size > RETAINED_LIMIT && !oldest.done)
+        state.published.delete(oldest.value);
+    },
+    // An unreadable file has no text to tie the publication to, so the publication is not kept.
+    () => {
+      if (state.pending.get(file) === value) state.pending.delete(file);
+    },
+  );
+}
+
 // A pull answers for this document version; a push already settled for it joins the answer.
 // A failed pull leaves the answer to the push path.
 async function pulledObservation(
   client: LanguageServer,
   document: Document,
   signal: AbortSignal,
+  state: Instance["state"],
 ): Promise<Observation | undefined> {
   const answer = await pullReport(client, document, signal);
   if (!answer) return undefined;
   const pulled = pullResult(answer.report);
-  return document.observation ? unionObservation(pulled, document.observation) : pulled;
+  const known = knownObservation(state, document);
+  return known ? unionObservation(pulled, known) : pulled;
+}
+
+// Quiet means no progress event, no open progress token, and no publication for QUIET_MS.
+// A refresh request ends the wait early; activity or an open token at the progress bound leaves the answer busy.
+async function quietOrRefresh(
+  client: LanguageServer,
+  refreshed: Promise<true>,
+  signal: AbortSignal,
+  progress: AbortSignal,
+): Promise<"refreshed" | "quiet" | "busy"> {
+  const bound = Promise.withResolvers<"busy">();
+  const stop = () => bound.resolve("busy");
+  progress.addEventListener("abort", stop, { once: true });
+  try {
+    return await quietLoop(client, refreshed, signal, progress, bound.promise);
+  } finally {
+    progress.removeEventListener("abort", stop);
+  }
+}
+
+async function quietLoop(
+  client: LanguageServer,
+  refreshed: Promise<true>,
+  signal: AbortSignal,
+  progress: AbortSignal,
+  bound: Promise<"busy">,
+): Promise<"refreshed" | "quiet" | "busy"> {
+  for (;;) {
+    if (progress.aborted) return "busy";
+    const quiet = delay(QUIET_MS, false, { signal }).catch(() => {
+      throw abortReason(signal, "No settled diagnostics before the timeout");
+    });
+    const outcome = await Promise.race([
+      refreshed.then(() => "refreshed" as const),
+      quiet.then(() => "quiet" as const),
+      client.nextActivity.then(() => "active" as const),
+      bound,
+    ]);
+    if (outcome === "busy") return outcome;
+    if (outcome === "active") continue;
+    if (outcome === "refreshed" || !client.busy) return outcome;
+    if (!(await client.awaitIdle(AbortSignal.any([signal, progress])))) return "busy";
+  }
+}
+
+// A progress token still open at the progress bound leaves the last settled answer, or none.
+function busyAnswer(state: Instance["state"], document: Document): Observation {
+  return knownObservation(state, document) ?? busyObservation();
 }
 
 // A pull is provisional: the server may still be analyzing. For one quiet window a push joins
@@ -329,18 +446,26 @@ async function provisionalPull(
   client: LanguageServer,
   document: Document,
   signal: AbortSignal,
+  progress: AbortSignal,
+  state: Instance["state"],
 ): Promise<Observation | undefined> {
   const refreshed = Promise.withResolvers<true>();
   const stop = client.onDiagnosticRefresh(() => refreshed.resolve(true));
   try {
-    const first = await pulledObservation(client, document, signal);
+    const first = await pulledObservation(client, document, signal, state);
+    // An empty or absent pull does not settle while server work-done progress is open; it repeats once that ends.
+    if (client.busy && (first === undefined || first.diagnostics.length === 0)) {
+      if (!(await client.awaitIdle(AbortSignal.any([signal, progress]))))
+        return busyAnswer(state, document);
+      return await provisionalPull(client, document, signal, progress, state);
+    }
     if (first === undefined) return undefined;
-    const quiet = delay(QUIET_MS, false, { signal }).catch(() => {
-      throw abortReason(signal, "No settled diagnostics before the timeout");
-    });
-    if (await Promise.race([refreshed.promise, quiet]))
-      return pulledObservation(client, document, signal);
-    return document.observation ? unionObservation(first, document.observation) : first;
+    const outcome = await quietOrRefresh(client, refreshed.promise, signal, progress);
+    if (outcome === "busy") return busyAnswer(state, document);
+    // A pull after a refresh is provisional too: servers refresh while they still load.
+    if (outcome === "refreshed") return provisionalPull(client, document, signal, progress, state);
+    const known = knownObservation(state, document);
+    return known ? unionObservation(first, known) : first;
   } finally {
     stop();
   }
@@ -352,15 +477,19 @@ async function diagnosticsObservation(
   instance: Instance,
   document: Document,
   signal: AbortSignal,
+  progress: AbortSignal,
 ): Promise<Observation> {
   const { client } = instance;
   if (client.pullDiagnostics)
-    return (await provisionalPull(client, document, signal)) ?? diagnostics(document, signal);
+    return (
+      (await provisionalPull(client, document, signal, progress, instance.state)) ??
+      diagnostics(document, signal)
+    );
   const pulled = Promise.withResolvers<Observation | undefined>();
   const pushWait = new AbortController();
   const push = diagnostics(document, AbortSignal.any([signal, pushWait.signal]));
   const stop = client.onPullRegistration(() =>
-    pulled.resolve(provisionalPull(client, document, signal)),
+    pulled.resolve(provisionalPull(client, document, signal, progress, instance.state)),
   );
   try {
     return await Promise.race([push, pulled.promise.then((answer) => answer ?? push)]);
@@ -378,10 +507,11 @@ async function readResponse(
   position: Position | undefined,
   search: string | undefined,
   signal: AbortSignal,
+  progress: AbortSignal,
   cwd: string,
 ) {
   if (operation === "diagnostics") {
-    const observation = await diagnosticsObservation(instance, document, signal);
+    const observation = await diagnosticsObservation(instance, document, signal, progress);
     return { ...observation, ...formatDiagnostics(observation) };
   }
   if (operation === "incoming_calls" || operation === "outgoing_calls") {
@@ -466,6 +596,7 @@ async function synchronize(
 ): Promise<Document> {
   const previous = instance.state.document;
   if (previous?.file === route.file && previous.text === text) return previous;
+  noteEdit(instance.state, previous, route.file);
   const changing = canChange && previous?.file === route.file;
   if (previous && !changing)
     await instance.client.notify(
@@ -747,6 +878,9 @@ export class LspController {
       document: undefined,
       initialization: undefined,
       failure: undefined,
+      edits: new Map(),
+      published: new Map(),
+      pending: new Map(),
     };
     const client = new LanguageServer(
       config,
@@ -754,10 +888,18 @@ export class LspController {
       this.settings.timeoutMs,
       (value) => {
         const document = state.document;
-        if (!document || !Value.Check(publication, value) || fileOf(value.uri) !== document.file)
-          return;
+        if (!Value.Check(publication, value)) return;
+        const file = fileOf(value.uri);
+        if (file !== undefined && file !== document?.file)
+          retainUnopened(state, file, value, this.lifetime.signal);
+        if (!document || file !== document.file) return;
         const report = diagnosticResult(value, document.version);
         if (report.outcome === "superseded") return;
+        state.published.set(document.file, {
+          text: document.text,
+          edits: editsOf(state, document.file),
+          observation: settledObservation(report),
+        });
         clearTimeout(document.timer);
         if (report.evidence === "revision_correlated") {
           settle(document, settledObservation(report));
@@ -830,6 +972,7 @@ export class LspController {
     search: string | undefined,
     text: string,
     deadline: AbortSignal,
+    progress: AbortSignal,
   ) {
     const { capabilities } = await ready(instance, deadline);
     deadline.throwIfAborted();
@@ -853,6 +996,7 @@ export class LspController {
       position,
       search,
       deadline,
+      progress,
       await realpath(this.cwd),
     );
     if (!this.current(instance, document) || (await snapshot(route.file, deadline)) !== text)
@@ -895,6 +1039,10 @@ export class LspController {
         ? undefined
         : resolvePosition(text, target);
     const instance = await this.instance(route, config, deadline);
+    // The progress wait ends early enough for the post-read edit check to run before the deadline.
+    const progress = AbortSignal.timeout(
+      this.settings.timeoutMs - Math.max(250, this.settings.timeoutMs / 10),
+    );
     const result = await this.exchange(
       route,
       instance,
@@ -903,6 +1051,7 @@ export class LspController {
       search,
       text,
       deadline,
+      progress,
     );
     if ("diagnostics" in result) this.rememberBaseline(route.file, errorCounts(result.diagnostics));
     return result;
@@ -1118,6 +1267,7 @@ export class LspController {
       instance,
       document,
       AbortSignal.any([deadline, budget]),
+      budget,
     ).catch((error: unknown) => {
       deadline.throwIfAborted();
       if (!budget.aborted) throw error;

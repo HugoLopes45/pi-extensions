@@ -423,6 +423,214 @@ it("pulls again when the server asks for a refresh after an empty pull", async (
   expect(await events(spawnLog)).toEqual(["pull", "pull"]);
 });
 
+it("waits for an open progress token before settling an empty pull, then reports the push", async () => {
+  const { instance, file, spawnLog } = await controller("pull-progress-then-push", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("reports a server still working, not a clean file, when a progress token stays open", async () => {
+  const { instance, file } = await controller("pull-progress-forever", true, true, {
+    timeoutMs: 1500,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "server_busy",
+    diagnostics: [],
+    text: "server still working: a progress token is open at the deadline, so diagnostics are not settled",
+  });
+});
+
+it("reports a server still working when the pull is cancelled and a progress token stays open", async () => {
+  const { instance, file } = await controller("pull-progress-forever-cancel", true, true, {
+    timeoutMs: 1500,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "server_busy",
+    diagnostics: [],
+  });
+});
+
+it("keeps waiting while progress restarts within the quiet window, then reports the push", async () => {
+  const { instance, file } = await controller("pull-progress-restart", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+});
+
+it("joins a push that follows a non-empty pull made after a refresh", async () => {
+  const { instance, file } = await controller("pull-refresh-findings-then-push", true, true, {
+    timeoutMs: 5000,
+  });
+  const result = await instance.query("diagnostics", file);
+  expect(result).toMatchObject({ outcome: "completed" });
+  expect("diagnostics" in result && result.diagnostics.map((item) => item.code)).toEqual(
+    expect.arrayContaining(["E0308", 2322]),
+  );
+});
+
+it("reports a server still working when activity never pauses for the quiet window", async () => {
+  const { instance, file } = await controller("pull-progress-chatter", true, true, {
+    timeoutMs: 2000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "server_busy",
+    diagnostics: [],
+  });
+});
+
+it("keeps an empty pull after a refresh provisional, then reports the push", async () => {
+  const { instance, file, spawnLog } = await controller("pull-refresh-then-push", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("reports a clean file from a server that publishes an empty list after an empty pull", async () => {
+  const { instance, file } = await controller("pull-empty-publish-clean", true, true, {
+    timeoutMs: 5000,
+  });
+  const started = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [],
+  });
+  expect(performance.now() - started).toBeLessThan(2000);
+});
+
+it("keeps a file's publication when a later empty pull follows a reopen after another file", async () => {
+  const { instance, file } = await controller("pull-empty-reopen", true, true, {
+    timeoutMs: 5000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await instance.query("diagnostics", other);
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("reports a publication made for a file before it was opened", async () => {
+  const { instance, file } = await controller("publish-other-file", true, true, {
+    timeoutMs: 5000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other: number = 'x';\n");
+  await instance.query("diagnostics", file);
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("ignores a publication made for a file whose text changed before it was opened", async () => {
+  const { instance, file } = await controller("publish-other-file", true, true, {
+    timeoutMs: 5000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other: number = 'x';\n");
+  await instance.query("diagnostics", file);
+  await writeFile(other, "const other = 1;\n");
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("reports clean after an edit fixes a versioned error that was published before the edit", async () => {
+  const { instance, file } = await controller("pull-empty-reopen-versioned", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await writeFile(file, "const value = 2;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("reports clean after an unversioned error is edited away without a new publication", async () => {
+  const { instance, file } = await controller("pull-empty-reopen", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await writeFile(file, "const value = 2;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("ignores a publication from before an edit when the edit is undone", async () => {
+  const { instance, file } = await controller("pull-empty-reopen", true, true, {
+    timeoutMs: 5000,
+  });
+  const original = await readFile(file, "utf8");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await writeFile(file, "const value = 2;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [],
+  });
+  await writeFile(file, original);
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("does not settle while a progress token opened inside the quiet window stays open", async () => {
+  const { instance, file } = await controller("pull-progress-open-late", true, true, {
+    timeoutMs: 5000,
+  });
+  const started = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [],
+  });
+  expect(performance.now() - started).toBeGreaterThan(2400);
+});
+
+it("settles a progress-only clean file one quiet window after the last progress end, without a second wait", async () => {
+  const { instance, file } = await controller("pull-progress-clean", true, true, {
+    timeoutMs: 5000,
+  });
+  for (let call = 0; call < 2; call += 1) {
+    const started = performance.now();
+    expect(await instance.query("diagnostics", file)).toMatchObject({
+      outcome: "completed",
+      evidence: "revision_correlated",
+      diagnostics: [],
+    });
+    expect(performance.now() - started).toBeLessThan(2000);
+  }
+});
+
 it("reports a clean file from a pull-only server after the quiet window", async () => {
   const { instance, file, spawnLog } = await controller("pull-clean", true, true, {
     timeoutMs: 5000,

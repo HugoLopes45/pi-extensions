@@ -194,6 +194,7 @@ export class LanguageServer {
   private diagnosticProvider = false;
   private readonly registered = new Set<string>();
   private readonly progressTokens = new Set<string | number>();
+  private activity = Promise.withResolvers<void>();
   private readonly pullListeners = new Set<() => void>();
   private readonly refreshListeners = new Set<() => void>();
   private quiescent = true;
@@ -297,6 +298,7 @@ export class LanguageServer {
       const { token, value: progress } = value;
       if (progress.kind === "begin") this.progressTokens.add(token);
       if (progress.kind === "end") this.progressTokens.delete(token);
+      this.markActivity();
       this.lastProgressAt = performance.now();
       this.wake();
     });
@@ -314,6 +316,7 @@ export class LanguageServer {
       if (this.stopped) return;
       try {
         publish(value);
+        this.markActivity();
       } catch (error) {
         this.fail(error instanceof Error ? error : new Error("Invalid diagnostic publication"));
       }
@@ -340,6 +343,34 @@ export class LanguageServer {
 
   get pullDiagnostics(): boolean {
     return this.diagnosticProvider || this.registered.has("textDocument/diagnostic");
+  }
+
+  get busy(): boolean {
+    return this.progressTokens.size > 0;
+  }
+
+  // Resolves on the next progress event or publication; the quiet window restarts on it.
+  get nextActivity(): Promise<void> {
+    return this.activity.promise;
+  }
+
+  private markActivity(): void {
+    this.activity.resolve();
+    this.activity = Promise.withResolvers<void>();
+  }
+
+  // Resolves true once no work-done progress is open, or false when signal aborts first.
+  async awaitIdle(signal: AbortSignal): Promise<boolean> {
+    const stopped = Promise.withResolvers<void>();
+    const stop = () => stopped.resolve();
+    signal.addEventListener("abort", stop, { once: true });
+    try {
+      while (this.busy && !signal.aborted)
+        await Promise.race([this.changed.promise, stopped.promise]);
+    } finally {
+      signal.removeEventListener("abort", stop);
+    }
+    return !this.busy;
   }
 
   // Resolves when the server is ready, or when budgetMs ends the wait. An abort of signal rejects.
