@@ -266,3 +266,33 @@ it("rejects oversized input before decoding its JSON payload", async () => {
   const client = await server("oversized");
   await expect(client.initialize()).rejects.toThrow(/wire budget/iu);
 });
+
+it("treats a dynamically registered pull method as pull support", async () => {
+  const client = await server("pull-dynamic");
+  await client.initialize();
+  await vi.waitFor(() => expect(client.pullDiagnostics).toBe(true));
+});
+
+it("reports no pull support when the server offers none", async () => {
+  const client = await server();
+  await client.initialize();
+  expect(client.pullDiagnostics).toBe(false);
+});
+
+it("drops pull support after the server unregisters the method", async () => {
+  const client = await server("pull-unregistered");
+  await client.initialize();
+  await vi.waitFor(() => expect(client.pullDiagnostics).toBe(true));
+  await client.notify("test/unregister", {});
+  await vi.waitFor(() => expect(client.pullDiagnostics).toBe(false));
+});
+
+it("fails the instance on an invalid capability registration", async () => {
+  const closed = Promise.withResolvers<Error>();
+  const client = await server("bad-registration", 1000, () => {}, closed.resolve);
+  await client.initialize();
+  expect(await closed.promise).toHaveProperty(
+    "message",
+    "Invalid client/registerCapability payload",
+  );
+});

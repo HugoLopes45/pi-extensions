@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { diagnosticResult } from "../src/diagnostics.js";
+import { diagnosticResult, pullResult } from "../src/diagnostics.js";
 
 const finding = {
   message: "Wrong type",
@@ -28,6 +28,21 @@ it("keeps a short string code and drops one with spaces or over 64 characters", 
   expect(
     diagnosticResult({ diagnostics: [{ ...finding, code: "x".repeat(65) }] }, 1),
   ).toMatchObject({ diagnostics: [{ code: undefined }] });
+});
+
+it("reads a full pull report as an observation correlated to the requested version", () => {
+  expect(pullResult({ kind: "full", items: [finding] })).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    reportedCount: 1,
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("rejects an unchanged pull report, which needs a previousResultId this client never sends", () => {
+  expect(() => pullResult({ kind: "unchanged", resultId: "1" })).toThrow(
+    "Invalid diagnostic pull report",
+  );
 });
 
 it("keeps an unversioned empty report partial and uncertified", () => {

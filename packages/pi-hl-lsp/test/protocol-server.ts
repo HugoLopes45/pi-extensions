@@ -111,6 +111,16 @@ const navigationModes = new Set<string | undefined>([
   "special-targets",
   "malformed-definition",
 ]);
+// Pull modes advertise a static diagnosticProvider; pull-dynamic registers the method after initialized.
+const staticPullModes = new Set<string | undefined>([
+  "pull-static",
+  "pull-and-push",
+  "pull-duplicate",
+  "pull-error",
+  "pull-cancel-once",
+  "pull-cancel-always",
+]);
+const pullRegistration = { id: "pull", method: "textDocument/diagnostic" };
 const textDocumentUri = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
 });
@@ -152,6 +162,7 @@ connection.onRequest("initialize", async () => {
       textDocumentSync: mode === "sync-open-close" ? { openClose: true, change: 0 } : 1,
       hoverProvider: true,
       ...(navigationModes.has(mode) ? { definitionProvider: true } : {}),
+      ...(staticPullModes.has(mode) ? { diagnosticProvider: true } : {}),
       positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
     },
   };
@@ -219,17 +230,35 @@ function finding(code: number | string) {
   };
 }
 // Modes whose publication carries the document version, and the code each mode reports.
-const versionedModes = new Set<string | undefined>(["versioned", "string-code"]);
+const versionedModes = new Set<string | undefined>([
+  "versioned",
+  "string-code",
+  "pull-and-push",
+  "pull-duplicate",
+  "pull-error",
+  "pull-cancel-always",
+]);
 const reportedCodes = new Map<string | undefined, number | string>([
   ["versioned", 2322],
   ["encoded-uri", 2322],
   ["string-code", "reportMissingImports"],
+  ["pull-and-push", 2322],
+  ["pull-duplicate", 2322],
+  ["pull-error", 2322],
+  ["pull-cancel-always", 2322],
+]);
+// Modes that never publish; their diagnostics come only from pull.
+const silentModes = new Set<string | undefined>([
+  "silent",
+  "pull-static",
+  "pull-dynamic",
+  "pull-cancel-once",
 ]);
 // `changed` marks didChange; dedupe-empty stays silent for it, as cli.mjs:21942 does.
 async function publishDiagnostics(value: unknown, changed: boolean) {
   if (!Value.Check(opened, value)) throw new Error("Invalid didOpen fixture message");
   const { uri, version } = value.textDocument;
-  if (mode === "silent" || (mode === "dedupe-empty" && changed)) return;
+  if (silentModes.has(mode) || (mode === "dedupe-empty" && changed)) return;
   if (mode === "staged") {
     await connection.sendNotification("textDocument/publishDiagnostics", {
       uri,
@@ -262,6 +291,40 @@ connection.onNotification("textDocument/didClose", () => {
 });
 connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
+});
+// Codes the pull modes return; the other pull modes fail or return the same item.
+const pulledCodes = new Map<string | undefined, number | string>([
+  ["pull-static", "E0308"],
+  ["pull-dynamic", "E0308"],
+  ["pull-cancel-once", "E0308"],
+  ["pull-and-push", "E0308"],
+  ["pull-duplicate", 2322],
+]);
+let pulls = 0;
+connection.onRequest("textDocument/diagnostic", (params: unknown): object => {
+  if (!Value.Check(textDocumentUri, params)) throw new Error("Invalid pull fixture request");
+  pulls += 1;
+  log("pull");
+  if (mode === "pull-error") throw new rpc.ResponseError(-32603, "pull failed");
+  if (mode === "pull-cancel-always" || (mode === "pull-cancel-once" && pulls === 1))
+    throw new rpc.ResponseError(-32802, "server cancelled the request");
+  const code = pulledCodes.get(mode);
+  return { kind: "full", items: code === undefined ? [] : [finding(code)] };
+});
+connection.onNotification("test/unregister", async () => {
+  await connection.sendRequest("client/unregisterCapability", {
+    unregisterations: [pullRegistration],
+  });
+});
+connection.onNotification("initialized", async () => {
+  if (mode === "pull-dynamic" || mode === "pull-unregistered")
+    await connection.sendRequest("client/registerCapability", {
+      registrations: [pullRegistration],
+    });
+  if (mode === "bad-registration")
+    await connection
+      .sendRequest("client/registerCapability", { registrations: "bad" })
+      .catch(() => log("rejected"));
 });
 const handshake = new Set([
   "handshake",

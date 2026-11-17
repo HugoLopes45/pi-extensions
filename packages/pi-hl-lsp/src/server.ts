@@ -28,9 +28,17 @@ const initializedSchema = Type.Object({
     definitionProvider: provider,
     referencesProvider: provider,
     documentSymbolProvider: provider,
+    diagnosticProvider: provider,
   }),
 });
 export type Initialization = Static<typeof initializedSchema>;
+const registration = Type.Object({ id: Type.String(), method: Type.String() });
+const registrationParams = Type.Object({
+  registrations: Type.Array(registration),
+});
+const unregistrationParams = Type.Object({
+  unregisterations: Type.Array(registration),
+});
 // The last 100 ms of the two-second disposal budget, kept after SIGKILL: macOS answers EPERM for a
 // group whose only member is an unreaped zombie, so the group is probed again before failing.
 const REAP_RESERVE_MS = 100;
@@ -95,6 +103,8 @@ export class LanguageServer {
   private failure: Error | undefined;
   private stopped = false;
   private initialized = false;
+  private diagnosticProvider = false;
+  private readonly registered = new Set<string>();
   private stderr = "";
 
   constructor(
@@ -156,6 +166,18 @@ export class LanguageServer {
     this.child.once("exit", (code) => {
       if (!this.stopped) this.fail(new Error(`LSP process exited (${code}): ${this.stderr}`));
     });
+    this.connection.onRequest("client/registerCapability", (value: unknown) => {
+      if (!Value.Check(registrationParams, value))
+        return this.reject("Invalid client/registerCapability payload");
+      for (const { method } of value.registrations) this.registered.add(method);
+      return null;
+    });
+    this.connection.onRequest("client/unregisterCapability", (value: unknown) => {
+      if (!Value.Check(unregistrationParams, value))
+        return this.reject("Invalid client/unregisterCapability payload");
+      for (const { method } of value.unregisterations) this.registered.delete(method);
+      return null;
+    });
     this.connection.onNotification("textDocument/publishDiagnostics", (value: unknown) => {
       if (this.stopped) return;
       try {
@@ -173,8 +195,19 @@ export class LanguageServer {
     this.dispose().catch(() => {});
   }
 
+  // A malformed server request fails the instance like a malformed publication.
+  private reject(message: string): never {
+    const error = new Error(message);
+    this.fail(error);
+    throw error;
+  }
+
   get active(): boolean {
     return !this.stopped && !this.failure;
+  }
+
+  get pullDiagnostics(): boolean {
+    return this.diagnosticProvider || this.registered.has("textDocument/diagnostic");
   }
 
   async initialize(signal?: AbortSignal): Promise<Initialization> {
@@ -196,6 +229,7 @@ export class LanguageServer {
           general: { positionEncodings: ["utf-16"] },
           textDocument: {
             publishDiagnostics: { versionSupport: true },
+            diagnostic: { dynamicRegistration: true },
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             hover: { contentFormat: ["markdown", "plaintext"] },
           },
@@ -212,6 +246,7 @@ export class LanguageServer {
     ) {
       throw new Error("Unsupported LSP position encoding");
     }
+    this.diagnosticProvider = Boolean(result.capabilities.diagnosticProvider);
     await this.notify("initialized", {}, signal, STARTUP_TIMEOUT_MS);
     this.initialized = true;
     return result;

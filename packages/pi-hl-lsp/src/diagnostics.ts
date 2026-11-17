@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
 import { bounded } from "./text.js";
@@ -8,26 +8,33 @@ const coordinate = Type.Integer({
   maximum: Number.MAX_SAFE_INTEGER,
 });
 const position = Type.Object({ line: coordinate, character: coordinate });
+const diagnosticList = Type.Array(
+  Type.Object({
+    message: Type.String(),
+    range: Type.Object({ start: position, end: position }),
+    severity: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
+    code: Type.Optional(
+      Type.Union([
+        Type.String(),
+        Type.Integer({
+          minimum: Number.MIN_SAFE_INTEGER,
+          maximum: Number.MAX_SAFE_INTEGER,
+        }),
+      ]),
+    ),
+  }),
+  { maxItems: 10000 },
+);
 const reportSchema = Type.Object({
   version: Type.Optional(coordinate),
-  diagnostics: Type.Array(
-    Type.Object({
-      message: Type.String(),
-      range: Type.Object({ start: position, end: position }),
-      severity: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
-      code: Type.Optional(
-        Type.Union([
-          Type.String(),
-          Type.Integer({
-            minimum: Number.MIN_SAFE_INTEGER,
-            maximum: Number.MAX_SAFE_INTEGER,
-          }),
-        ]),
-      ),
-    }),
-    { maxItems: 10000 },
-  ),
+  diagnostics: diagnosticList,
 });
+// Only full reports: this client sends no previousResultId, so an unchanged report is a protocol error.
+const pullSchema = Type.Object({
+  kind: Type.Literal("full"),
+  items: diagnosticList,
+});
+const shownLimit = 20;
 
 // Codes such as E0308 and reportMissingImports are short; other strings are dropped.
 const stringCode = /^[\w.-]{1,64}$/u;
@@ -37,7 +44,17 @@ export function diagnosticResult(report: unknown, version: number) {
   if (report.version !== undefined && report.version !== version) {
     return { outcome: "superseded" as const, coverage: "none" as const };
   }
-  const diagnostics = report.diagnostics.slice(0, 20).map((item) => {
+  return observationOf(report.diagnostics, report.version === undefined);
+}
+
+// A pull answers for the version the controller sent, so its observation is correlated by construction.
+export function pullResult(report: unknown) {
+  if (!Value.Check(pullSchema, report)) throw new Error("Invalid diagnostic pull report");
+  return observationOf(report.items, false);
+}
+
+function observationOf(list: Static<typeof diagnosticList>, unversioned: boolean) {
+  const diagnostics = list.slice(0, shownLimit).map((item) => {
     const { start, end } = item.range;
     if (end.line < start.line || (end.line === start.line && end.character < start.character)) {
       throw new Error("Invalid diagnostic range");
@@ -55,17 +72,14 @@ export function diagnosticResult(report: unknown, version: number) {
     };
   });
   return {
-    outcome: report.version === undefined ? ("partial" as const) : ("completed" as const),
-    evidence:
-      report.version === undefined
-        ? ("unversioned_observation" as const)
-        : ("revision_correlated" as const),
+    outcome: unversioned ? ("partial" as const) : ("completed" as const),
+    evidence: unversioned ? ("unversioned_observation" as const) : ("revision_correlated" as const),
     source: "untrusted_lsp" as const,
     coverage: "observed" as const,
     projectComplete: false,
     receivedAt: Date.now(),
-    reportedCount: report.diagnostics.length,
-    omitted: report.diagnostics.length - diagnostics.length,
+    reportedCount: list.length,
+    omitted: list.length - diagnostics.length,
     diagnostics,
   };
 }
@@ -80,6 +94,27 @@ export function settledObservation(report: Report): Observation {
   return report.evidence === "revision_correlated"
     ? { ...report, evidence: "revision_correlated" }
     : { ...report, evidence: "settled_unversioned" };
+}
+
+// Pull and push can report the same problem, so each (range, severity, code, message) is kept once.
+export function unionObservation(pulled: Observation, pushed: Observation): Observation {
+  const seen = new Set<string>();
+  const unique = [...pulled.diagnostics, ...pushed.diagnostics].filter((item) => {
+    const key = JSON.stringify([item.range, item.severity, item.code, item.message]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  // A duplicate beyond the shown part of both lists is not seen, so reportedCount can be high.
+  const shared = pulled.diagnostics.length + pushed.diagnostics.length - unique.length;
+  const reportedCount = pulled.reportedCount + pushed.reportedCount - shared;
+  const diagnostics = unique.slice(0, shownLimit);
+  return {
+    ...pulled,
+    reportedCount,
+    omitted: reportedCount - diagnostics.length,
+    diagnostics,
+  };
 }
 
 // Reported when the server stays silent after a clean edit, so the diagnostics did not change.

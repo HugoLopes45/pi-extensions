@@ -284,6 +284,85 @@ it("resolves a versioned publication without waiting for the settle period", asy
   expect(performance.now() - started).toBeLessThan(100);
 });
 
+it("answers from a pull the server offers, without waiting for a push", async () => {
+  const { instance, file, spawnLog } = await controller("pull-static", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("pulls once the server registers the pull method after initialization", async () => {
+  const { instance, file, spawnLog } = await controller("pull-dynamic", true, true, {
+    timeoutMs: 1000,
+  });
+  await instance.query("hover", file, { line: 1, column: 7 });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("lists the pulled item and the pushed item for the same version", async () => {
+  const { instance, file } = await controller("pull-and-push", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    reportedCount: 2,
+    diagnostics: [{ code: "E0308" }, { code: 2322 }],
+  });
+});
+
+it("lists an item that the pull and the push both return once", async () => {
+  const { instance, file } = await controller("pull-duplicate", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    reportedCount: 1,
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("falls back to the push path when a pull fails with an error other than cancellation", async () => {
+  const { instance, file, spawnLog } = await controller("pull-error", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: 2322 }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("retries a pull the server cancels, once", async () => {
+  const { instance, file, spawnLog } = await controller("pull-cancel-once", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("falls back to the push path when the retried pull is cancelled too", async () => {
+  const { instance, file, spawnLog } = await controller("pull-cancel-always", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: 2322 }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
 it("fails with the timeout error when the server never publishes", async () => {
   const { instance, file } = await controller("silent", true, true, {
     timeoutMs: 1000,

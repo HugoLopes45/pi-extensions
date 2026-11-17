@@ -4,11 +4,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import * as rpc from "vscode-jsonrpc/node";
 
 import {
   diagnosticResult,
+  pullResult,
   settledObservation,
   unchangedObservation,
+  unionObservation,
   type Observation,
 } from "./diagnostics.js";
 import {
@@ -189,6 +192,43 @@ async function formatResponse(
   return formatLocations(response, cwd, lines, operation);
 }
 
+// LSP ServerCancelled: the server asks for the pull to be sent again.
+const serverCancelled = -32802;
+
+// Sends the pull at most twice; a non-cancellation error or a transport failure is never retried.
+async function pullReport(
+  client: LanguageServer,
+  document: Document,
+  signal: AbortSignal,
+): Promise<{ report: unknown } | undefined> {
+  const params = { textDocument: { uri: document.uri } };
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return {
+        report: await client.request("textDocument/diagnostic", params, signal),
+      };
+    } catch (error) {
+      if (!client.active) throw error;
+      const cancelled = error instanceof rpc.ResponseError && error.code === serverCancelled;
+      if (attempt === 2 || !cancelled) return undefined;
+    }
+  }
+}
+
+// A pull answers for this document version; a push already settled for it joins the answer.
+// A failed pull leaves the answer to the push path.
+async function diagnosticsObservation(
+  instance: Instance,
+  document: Document,
+  signal: AbortSignal,
+): Promise<Observation> {
+  if (!instance.client.pullDiagnostics) return diagnostics(document, signal);
+  const answer = await pullReport(instance.client, document, signal);
+  if (!answer) return diagnostics(document, signal);
+  const pulled = pullResult(answer.report);
+  return document.observation ? unionObservation(pulled, document.observation) : pulled;
+}
+
 async function readResponse(
   operation: Operation,
   instance: Instance,
@@ -198,7 +238,7 @@ async function readResponse(
   cwd: string,
 ) {
   if (operation === "diagnostics") {
-    const observation = await diagnostics(document, signal);
+    const observation = await diagnosticsObservation(instance, document, signal);
     return { ...observation, ...formatDiagnostics(observation) };
   }
   const response = await instance.client.request(
