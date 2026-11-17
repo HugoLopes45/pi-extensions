@@ -29,6 +29,9 @@ const reportSchema = Type.Object({
   ),
 });
 
+// Codes such as E0308 and reportMissingImports are short; other strings are dropped.
+const stringCode = /^[\w.-]{1,64}$/u;
+
 export function diagnosticResult(report: unknown, version: number) {
   if (!Value.Check(reportSchema, report)) throw new Error("Invalid diagnostic publication");
   if (report.version !== undefined && report.version !== version) {
@@ -43,7 +46,7 @@ export function diagnosticResult(report: unknown, version: number) {
     return {
       message: message.content,
       truncated: message.truncated,
-      code: typeof item.code === "number" ? item.code : undefined,
+      code: typeof item.code === "string" && !stringCode.test(item.code) ? undefined : item.code,
       severity: item.severity,
       range: {
         start: { line: start.line, character: start.character },
@@ -67,4 +70,29 @@ export function diagnosticResult(report: unknown, version: number) {
   };
 }
 
-export type Observation = Exclude<ReturnType<typeof diagnosticResult>, { outcome: "superseded" }>;
+type Report = Exclude<ReturnType<typeof diagnosticResult>, { outcome: "superseded" }>;
+// An unversioned report is settled by the controller; raw reports keep their evidence value.
+export type Observation = Omit<Report, "evidence"> & {
+  evidence: Report["evidence"] | "settled_unversioned" | "unchanged_empty";
+};
+
+export function settledObservation(report: Report): Observation {
+  return report.evidence === "revision_correlated"
+    ? { ...report, evidence: "revision_correlated" }
+    : { ...report, evidence: "settled_unversioned" };
+}
+
+// Reported when the server stays silent after a clean edit, so the diagnostics did not change.
+export function unchangedObservation(): Observation {
+  return {
+    outcome: "partial",
+    evidence: "unchanged_empty",
+    source: "untrusted_lsp",
+    coverage: "observed",
+    projectComplete: false,
+    receivedAt: Date.now(),
+    reportedCount: 0,
+    omitted: 0,
+    diagnostics: [],
+  };
+}

@@ -207,34 +207,55 @@ const syncLog = mode === "sync-log" || mode === "sync-open-close";
 const opened = Type.Object({
   textDocument: Type.Object({ uri: Type.String(), version: Type.Integer() }),
 });
-async function publishDiagnostics(value: unknown) {
+function finding(code: number | string) {
+  return {
+    message: "Untrusted diagnostic prose",
+    code,
+    severity: 1,
+    range: {
+      start: { line: 0, character: 0 },
+      end: { line: 0, character: 1 },
+    },
+  };
+}
+// Modes whose publication carries the document version, and the code each mode reports.
+const versionedModes = new Set<string | undefined>(["versioned", "string-code"]);
+const reportedCodes = new Map<string | undefined, number | string>([
+  ["versioned", 2322],
+  ["encoded-uri", 2322],
+  ["string-code", "reportMissingImports"],
+]);
+// `changed` marks didChange; dedupe-empty stays silent for it, as cli.mjs:21942 does.
+async function publishDiagnostics(value: unknown, changed: boolean) {
   if (!Value.Check(opened, value)) throw new Error("Invalid didOpen fixture message");
+  const { uri, version } = value.textDocument;
+  if (mode === "silent" || (mode === "dedupe-empty" && changed)) return;
+  if (mode === "staged") {
+    await connection.sendNotification("textDocument/publishDiagnostics", {
+      uri,
+      diagnostics: [],
+    });
+    await delay(30);
+    await connection.sendNotification("textDocument/publishDiagnostics", {
+      uri,
+      diagnostics: [finding(2322)],
+    });
+    return;
+  }
+  const code = reportedCodes.get(mode);
   await connection.sendNotification("textDocument/publishDiagnostics", {
-    uri: value.textDocument.uri,
-    ...(mode === "versioned" || syncLog ? { version: value.textDocument.version } : {}),
-    diagnostics:
-      mode === "versioned"
-        ? [
-            {
-              message: "Untrusted diagnostic prose",
-              code: 2322,
-              severity: 1,
-              range: {
-                start: { line: 0, character: 0 },
-                end: { line: 0, character: 1 },
-              },
-            },
-          ]
-        : [],
+    uri: mode === "encoded-uri" ? uri.replaceAll("@", "%40") : uri,
+    ...(versionedModes.has(mode) || syncLog ? { version } : {}),
+    diagnostics: code === undefined ? [] : [finding(code)],
   });
 }
 connection.onNotification("textDocument/didOpen", async (value: unknown) => {
   if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
-  await publishDiagnostics(value);
+  await publishDiagnostics(value, false);
 });
 connection.onNotification("textDocument/didChange", async (value: unknown) => {
   if (syncLog && Value.Check(opened, value)) log(`didChange ${value.textDocument.version}`);
-  await publishDiagnostics(value);
+  await publishDiagnostics(value, true);
 });
 connection.onNotification("textDocument/didClose", () => {
   if (syncLog) log("didClose");

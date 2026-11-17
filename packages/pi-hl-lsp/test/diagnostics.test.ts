@@ -18,6 +18,18 @@ it("returns useful unversioned findings without certification", () => {
   });
 });
 
+it("keeps a short string code and drops one with spaces or over 64 characters", () => {
+  expect(diagnosticResult({ diagnostics: [{ ...finding, code: "E0308" }] }, 1)).toMatchObject({
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(diagnosticResult({ diagnostics: [{ ...finding, code: "bad code" }] }, 1)).toMatchObject({
+    diagnostics: [{ code: undefined }],
+  });
+  expect(
+    diagnosticResult({ diagnostics: [{ ...finding, code: "x".repeat(65) }] }, 1),
+  ).toMatchObject({ diagnostics: [{ code: undefined }] });
+});
+
 it("keeps an unversioned empty report partial and uncertified", () => {
   expect(diagnosticResult({ diagnostics: [] }, 1)).toMatchObject({
     outcome: "partial",

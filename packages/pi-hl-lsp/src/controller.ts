@@ -1,11 +1,16 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
-import { diagnosticResult, type Observation } from "./diagnostics.js";
+import {
+  diagnosticResult,
+  settledObservation,
+  unchangedObservation,
+  type Observation,
+} from "./diagnostics.js";
 import {
   formatDiagnostics,
   formatHover,
@@ -32,6 +37,10 @@ type Document = {
   version: number;
   observation: Observation | undefined;
   waiting: ReturnType<typeof Promise.withResolvers<Observation>> | undefined;
+  // Pending settle or quiet timer; the next publication replaces it.
+  timer: ReturnType<typeof setTimeout> | undefined;
+  // Set when the previous document of this file settled empty and this document changed it.
+  silenceMeansClean: boolean;
 };
 type Instance = {
   client: LanguageServer;
@@ -54,6 +63,9 @@ const method = {
   references: "textDocument/references",
   symbols: "textDocument/documentSymbol",
 } as const;
+// Measured on typescript-language-server; see lsp-dev/research/reports/publish-timing.md.
+const SETTLE_MS = 500;
+const QUIET_MS = 1000;
 
 async function snapshot(file: string, signal: AbortSignal): Promise<string> {
   const input: AsyncIterable<unknown> = createReadStream(file, { signal });
@@ -117,20 +129,34 @@ function resolvePosition(text: string, target: NavigationTarget | undefined): Po
   return { line: target.line - 1, character: characterOf(line, target) };
 }
 
+// Only settled observations reach document.observation.
+function settle(document: Document, observation: Observation): void {
+  clearTimeout(document.timer);
+  document.timer = undefined;
+  document.observation = observation;
+  document.waiting?.resolve(observation);
+}
+
+// A URI that is not a file: URL cannot match a document.
+function fileOf(uri: string): string | undefined {
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return undefined;
+  }
+}
+
 async function diagnostics(document: Document, signal: AbortSignal): Promise<Observation> {
   if (document.observation) return document.observation;
   const waiting = Promise.withResolvers<Observation>();
   document.waiting = waiting;
-  const abort = () => {
-    try {
-      signal.throwIfAborted();
-    } catch (error) {
-      waiting.reject(error);
-    }
-  };
+  // No publication has followed a clean edit yet, so silence means the diagnostics are still empty.
+  if (document.silenceMeansClean && document.timer === undefined)
+    document.timer = setTimeout(() => settle(document, unchangedObservation()), QUIET_MS);
+  const abort = () => waiting.reject(new Error("No settled diagnostics before the timeout"));
   signal.addEventListener("abort", abort, { once: true });
   try {
-    signal.throwIfAborted();
+    if (signal.aborted) abort();
     return await waiting.promise;
   } finally {
     signal.removeEventListener("abort", abort);
@@ -193,6 +219,25 @@ async function readResponse(
   return { outcome: "completed", source: "untrusted_lsp", ...formatted };
 }
 
+// A changed file keeps the silence memory of its previous observation.
+function nextDocument(
+  route: SelectedRoute,
+  text: string,
+  previous: Document | undefined,
+  changing: boolean,
+): Document {
+  return {
+    file: route.file,
+    uri: pathToFileURL(route.file).href,
+    text,
+    version: (previous?.version ?? 0) + 1,
+    observation: undefined,
+    waiting: undefined,
+    timer: undefined,
+    silenceMeansClean: changing && previous?.observation?.diagnostics.length === 0,
+  };
+}
+
 async function synchronize(
   instance: Instance,
   route: SelectedRoute,
@@ -209,14 +254,8 @@ async function synchronize(
       { textDocument: { uri: previous.uri } },
       signal,
     );
-  const document: Document = {
-    file: route.file,
-    uri: pathToFileURL(route.file).href,
-    text,
-    version: (previous?.version ?? 0) + 1,
-    observation: undefined,
-    waiting: undefined,
-  };
+  clearTimeout(previous?.timer);
+  const document = nextDocument(route, text, previous, changing);
   instance.state.document = document;
   await sendContent(instance, document, route.language, changing, signal);
   return document;
@@ -350,11 +389,16 @@ export class LspController {
       this.settings.timeoutMs,
       (value) => {
         const document = state.document;
-        if (!document || !Value.Check(publication, value) || value.uri !== document.uri) return;
-        const result = diagnosticResult(value, document.version);
-        if (result.outcome === "superseded") return;
-        document.observation = result;
-        document.waiting?.resolve(result);
+        if (!document || !Value.Check(publication, value) || fileOf(value.uri) !== document.file)
+          return;
+        const report = diagnosticResult(value, document.version);
+        if (report.outcome === "superseded") return;
+        clearTimeout(document.timer);
+        if (report.evidence === "revision_correlated") {
+          settle(document, settledObservation(report));
+          return;
+        }
+        document.timer = setTimeout(() => settle(document, settledObservation(report)), SETTLE_MS);
       },
       (error) => state.document?.waiting?.reject(error),
     );
@@ -498,7 +542,7 @@ export class LspController {
     if (!selected || !this.current(selected.instance, selected.document)) return undefined;
     const { instance, document } = selected;
     const observation = document.observation;
-    if (!observation || observation.evidence !== "revision_correlated") return undefined;
+    if (!observation) return undefined;
     if (!(await this.selectionMatches(selected))) return undefined;
     if (
       this.selected !== selected ||
@@ -513,6 +557,7 @@ export class LspController {
       server: instance.server,
       generation: instance.generation,
       documentVersion: document.version,
+      evidence: observation.evidence,
       reportedCount: observation.reportedCount,
       omitted: observation.omitted,
       receivedAt: observation.receivedAt,

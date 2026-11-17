@@ -8,9 +8,17 @@ The extension provides five read-only tools: `hl_lsp_hover`, `hl_lsp_definition`
 
 Each session owns its server processes. Servers start only when a tool needs them. Pi runs the tools sequentially through its native execution mechanism.
 
-Diagnostics use push publications. Unversioned observations remain `partial`. Matching versions can complete an observation, but never certify the whole project.
+Diagnostics use push publications. Results carry one of three `evidence` values. Matching versions never certify the whole project.
 
-Natural model requests can receive one transient summary of the latest revision-correlated observation. The extension rereads the file first. Automatic summaries exclude diagnostic prose.
+| `evidence`            | Meaning                                                                   | `outcome`   |
+| --------------------- | ------------------------------------------------------------------------- | ----------- |
+| `revision_correlated` | The publication carries the document version.                             | `completed` |
+| `settled_unversioned` | An unversioned publication, with no newer one for 500 ms.                 | `partial`   |
+| `unchanged_empty`     | After an edit, no publication for 1 s, and the previous result was empty. | `partial`   |
+
+If no result settles before the request deadline, the tool fails with `No settled diagnostics before the timeout`.
+
+Natural model requests can receive one transient summary of the latest settled observation. The summary includes its `evidence`. The extension rereads the file first. Automatic summaries exclude diagnostic prose.
 
 Files synchronize on explicit semantic requests. Edits do not trigger background analysis. The extension does not apply server edits or execute server-requested commands.
 

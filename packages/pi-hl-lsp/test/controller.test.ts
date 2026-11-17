@@ -213,10 +213,84 @@ it("reports unversioned empty diagnostics as partial and omits automatic certifi
   const { instance, file } = await controller();
   expect(await instance.query("diagnostics", file)).toMatchObject({
     outcome: "partial",
-    evidence: "unversioned_observation",
+    evidence: "settled_unversioned",
     projectComplete: false,
   });
-  expect(await instance.summary()).toBeUndefined();
+  expect(await instance.summary()).toMatchObject({
+    evidence: "settled_unversioned",
+    reportedCount: 0,
+  });
+});
+
+it("settles a staged unversioned publication on its last list", async () => {
+  const { instance, file } = await controller("staged");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "settled_unversioned",
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("returns unchanged_empty after a silent clean edit, then answers the same document at once", async () => {
+  const { instance, file } = await controller("dedupe-empty");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "settled_unversioned",
+    diagnostics: [],
+  });
+  await writeFile(file, "const value = 2;\n");
+  const edited = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "unchanged_empty",
+    diagnostics: [],
+  });
+  expect(performance.now() - edited).toBeLessThan(1500);
+  const again = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "unchanged_empty",
+  });
+  expect(performance.now() - again).toBeLessThan(100);
+});
+
+it("matches a publication whose URI encodes @ as %40", async () => {
+  const { instance, file } = await controller("encoded-uri");
+  const scoped = join(file, "..", "@scope+x", "index.ts");
+  await mkdir(join(file, "..", "@scope+x"));
+  await writeFile(scoped, "const value = 1;\n");
+  expect(await instance.query("diagnostics", scoped)).toMatchObject({
+    evidence: "settled_unversioned",
+    reportedCount: 1,
+  });
+});
+
+it("keeps a string diagnostic code from the server", async () => {
+  const { instance, file } = await controller("string-code");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "reportMissingImports" }],
+  });
+});
+
+it("resolves a versioned publication without waiting for the settle period", async () => {
+  const { instance, file } = await controller("versioned");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  const started = performance.now();
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    evidence: "revision_correlated",
+    reportedCount: 1,
+  });
+  expect(performance.now() - started).toBeLessThan(100);
+});
+
+it("fails with the timeout error when the server never publishes", async () => {
+  const { instance, file } = await controller("silent", true, true, {
+    timeoutMs: 1000,
+  });
+  await expect(instance.query("diagnostics", file)).rejects.toThrow(
+    "No settled diagnostics before the timeout",
+  );
 });
 
 it("reports an unreadable summary snapshot once, then drops the stale summary", async () => {
