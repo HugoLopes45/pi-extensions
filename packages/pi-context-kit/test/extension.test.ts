@@ -697,6 +697,22 @@ describe("pi-context-kit inside Pi", () => {
     ]);
   });
 
+  it("shows a settings problem without terminal control sequences", async () => {
+    const { session } = await start([], 200_000, true, {
+      "a\x1b]52;c;ZQ==\x07b\x9b": 1,
+    });
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    expect(notify.mock.calls).toEqual([
+      [
+        "pi-context-kit settings need attention: Invalid global context-kit settings: unknown option ab. Type /context-kit to see them.",
+        "warning",
+      ],
+    ]);
+  });
+
   it("reports an unreadable session override and keeps the other settings", async () => {
     const { session } = await start([], 200_000, true, { strategy: "frugal" });
     session.sessionManager.appendCustomEntry("pi-context-kit-settings", {
@@ -901,6 +917,33 @@ describe("pi-context-kit inside Pi", () => {
     expect(summaryIsHandoff).toBe(false);
     expect(result.summary).toContain("Pi summary");
     expect(result.details).toBeDefined();
+  });
+
+  it("shows a failed handoff's error text without terminal control sequences", async () => {
+    const { session } = await start([
+      fauxAssistantMessage(fauxToolCall("read", { path: "a.ts" })),
+      fauxAssistantMessage("hello"),
+      fauxAssistantMessage("again"),
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage:
+          "no tool\x1b]8;;https://evil.example\x07link\x1b]8;;\x07 \x1b]52;c;ZXZpbA==\x07ok\x9b\rnext\x1b[2J\tend\x1b",
+      }),
+      fauxAssistantMessage("## Goal\nPi summary"),
+    ]);
+    const notify = vi.fn<ExtensionUIContext["notify"]>();
+    await session.bindExtensions({
+      uiContext: { ...session.extensionRunner.getUIContext(), notify },
+    });
+    await session.prompt("Hi");
+    await session.prompt("Again");
+    await session.compact();
+    expect(notify.mock.calls).toEqual([
+      [
+        "pi-context-kit: handoff note failed (no toollink ok\nnext\tend). Pi's summary is used instead.",
+        "warning",
+      ],
+    ]);
   });
 
   it("reuses a ready early note at manual compaction near the threshold", async () => {
