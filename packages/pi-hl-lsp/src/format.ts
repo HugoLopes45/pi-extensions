@@ -87,15 +87,21 @@ const symbolInformation = Type.Object({
   location,
 });
 
-type Place = { uri: string; line: number; character: number };
+type Place = {
+  uri: string;
+  file: string | undefined;
+  line: number;
+  character: number;
+};
 type Rendered = { text: string; truncated: boolean };
 type MarkedString = Static<typeof markedString>;
 
 export function formatHover(response: unknown): Formatted {
   if (response === null) return emptyResult();
   const hover = checked(hoverSchema, response, "hover");
-  if (Array.isArray(hover.contents) && hover.contents.length === 0) return emptyResult();
-  const body = bounded(hoverText(hover.contents), hoverLimits);
+  const text = hoverText(hover.contents);
+  if (text === "") return emptyResult();
+  const body = bounded(text, hoverLimits);
   return { text: body.content, truncated: body.truncated };
 }
 
@@ -214,13 +220,18 @@ function responseItems(response: unknown, operation: string): unknown[] {
 }
 
 function placeOf(item: unknown, operation: string): Place {
-  if (Value.Check(location, item)) return toPlace(item.uri, item.range.start);
+  if (Value.Check(location, item)) return toPlace(item.uri, item.range.start, operation);
   const link = checked(locationLink, item, operation);
-  return toPlace(link.targetUri, link.targetSelectionRange.start);
+  return toPlace(link.targetUri, link.targetSelectionRange.start, operation);
 }
 
-function toPlace(uri: string, start: Static<typeof position>): Place {
-  return { uri, line: start.line, character: start.character };
+function toPlace(uri: string, start: Static<typeof position>, operation: string): Place {
+  return {
+    uri,
+    file: filePath(uri, operation),
+    line: start.line,
+    character: start.character,
+  };
 }
 
 function distinctPlaces(places: Place[]): Place[] {
@@ -232,8 +243,13 @@ function distinctPlaces(places: Place[]): Place[] {
 }
 
 // Returns the absolute path of a file: URI, or undefined for other URIs.
-function filePath(uri: string): string | undefined {
-  return uri.startsWith("file:") ? fileURLToPath(uri) : undefined;
+function filePath(uri: string, operation: string): string | undefined {
+  if (!uri.startsWith("file:")) return undefined;
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    throw unexpected(operation);
+  }
 }
 
 // Returns the path relative to cwd, or undefined when file lies outside cwd.
@@ -243,15 +259,15 @@ function insidePath(cwd: string, file: string): string | undefined {
   return outside ? undefined : path;
 }
 
-function displayPath(uri: string, cwd: string): string {
-  const file = filePath(uri);
-  if (file === undefined) return uri;
-  return insidePath(cwd, file) ?? file;
+function displayPath(place: Place, cwd: string): string {
+  if (place.file === undefined) return place.uri;
+  return insidePath(cwd, place.file) ?? place.file;
 }
 
-function readableFile(uri: string, cwd: string): string | undefined {
-  const file = filePath(uri);
-  return file !== undefined && insidePath(cwd, file) !== undefined ? file : undefined;
+function readableFile(place: Place, cwd: string): string | undefined {
+  return place.file !== undefined && insidePath(cwd, place.file) !== undefined
+    ? place.file
+    : undefined;
 }
 
 async function readSources(
@@ -261,7 +277,7 @@ async function readSources(
 ): Promise<Map<string, string[] | undefined>> {
   const files = new Set(
     places.flatMap((place) => {
-      const file = readableFile(place.uri, cwd);
+      const file = readableFile(place, cwd);
       return file === undefined ? [] : [file];
     }),
   );
@@ -279,7 +295,7 @@ function sourceText(
   cwd: string,
   sources: Map<string, string[] | undefined>,
 ): Rendered {
-  const file = readableFile(place.uri, cwd);
+  const file = readableFile(place, cwd);
   const text = file === undefined ? undefined : sources.get(file)?.[place.line];
   if (text === undefined) return { text: "", truncated: false };
   const source = bounded(oneLine(text.trim()), sourceLimits);
@@ -291,7 +307,7 @@ function renderPlace(
   cwd: string,
   sources: Map<string, string[] | undefined>,
 ): Rendered {
-  const head = oneLine(`${displayPath(place.uri, cwd)}:${place.line + 1}:${place.character + 1}`);
+  const head = oneLine(`${displayPath(place, cwd)}:${place.line + 1}:${place.character + 1}`);
   const source = sourceText(place, cwd, sources);
   return {
     text: source.text === "" ? head : `${head}  ${source.text}`,

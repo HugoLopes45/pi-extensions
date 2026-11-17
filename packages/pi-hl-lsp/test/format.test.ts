@@ -312,6 +312,48 @@ it("formats null and empty results as no result", async () => {
   expect(await formatLocations([], cwd, readSource, "references")).toEqual(empty);
 });
 
+it("reports hover with empty contents as no result", () => {
+  const empty = { text: "no result", truncated: false };
+  expect(formatHover({ contents: "" })).toEqual(empty);
+  expect(formatHover({ contents: [] })).toEqual(empty);
+});
+
+it("caps flat symbols at 200 lines and reports the rest", () => {
+  const response = Array.from({ length: 250 }, (_, line) => ({
+    name: `s${line}`,
+    kind: 12,
+    location: location("file:///repo/src/a.ts", line, 0),
+  }));
+  const printed = Array.from({ length: 200 }, (_, line) => `function s${line} ${line + 1}`);
+  expect(formatSymbols(response)).toEqual({
+    text: [...printed, "... 50 more"].join("\n"),
+    truncated: true,
+  });
+});
+
+it("replaces line breaks in a location URI and in a source line with spaces", async () => {
+  const result = await formatLocations(
+    [location("https://example.com/a\rb\nc", 0, 0)],
+    cwd,
+    async () => ["x\ry"],
+    "references",
+  );
+  expect(result.text).toBe("https://example.com/a b c:1:1");
+  const source = await formatLocations(
+    [location("file:///repo/src/a.ts", 0, 0)],
+    cwd,
+    async () => ["x\ry"],
+    "references",
+  );
+  expect(source.text).toBe("src/a.ts:1:1  x y");
+});
+
+it("rejects a file URI that is not a local path with the shape error", async () => {
+  await expect(
+    formatLocations([location("file://remote/repo/src/a.ts", 0, 0)], cwd, readSource, "definition"),
+  ).rejects.toThrow("Unexpected LSP definition response shape");
+});
+
 it("bounds an oversized hover to 8 KiB and reports truncation", () => {
   const result = formatHover({ contents: "x".repeat(9000) });
   expect(result.truncated).toBe(true);
