@@ -146,7 +146,7 @@ Run `/onlooker status` first. It shows the error and the counts of withheld and 
 
 **`Onlooker model is unavailable: ...`**: set a model from `/model`, or run `/onlooker inherit model`.
 
-**`Onlooker review deadline exceeded`**: pick a faster `model` or a lower `thinkingLevel`, then run `/onlooker on`.
+**`Onlooker review deadline exceeded`**: 3 Reviews in a row passed their 120 s deadline. A single late Review is left to the next turn. Pick a faster `model` or a lower `thinkingLevel`, then run `/onlooker on`.
 
 **`Onlooker project settings require a trusted project`**: trust the project, or use `--global`.
 

@@ -159,6 +159,7 @@ interface Review extends OperationBase {
   rejectedReports: number;
   /** Set when rejected reports ended this Review; it then delivers and re-validates nothing. */
   invalid?: boolean;
+  timedOut?: true;
 }
 interface Consultation extends OperationBase {
   kind: "consultation";
@@ -219,6 +220,7 @@ async function awaitWithSignal(
 
 /** `onlooker_report` calls rejected in one Review before it ends without findings. */
 const reportAttempts = 2;
+const maxDeadlinesInRow = 3;
 
 /**
  * The failure that ended the operation since `since`. A failed tool call followed by more work is
@@ -276,6 +278,9 @@ export class OnlookerObserver {
   private reviewed = 0;
   /** Completed turns a Review is due to cover, according to `reviewEvery`. */
   private dueThrough = 0;
+  /** A Review past its deadline waits for a new turn rather than retrying the same evidence. */
+  private skippedThrough = 0;
+  private deadlinesInRow = 0;
   /** Spend since this observer started, across Onlooker Session rebuilds and resets. */
   private spend: OnlookerSpend = {
     reviews: idleWork(),
@@ -526,7 +531,7 @@ export class OnlookerObserver {
       this.closed ||
       !this.config.enabled ||
       this.error ||
-      this.dueThrough <= this.reviewed
+      this.dueThrough <= Math.max(this.reviewed, this.skippedThrough)
     )
       return;
     const review: Review = {
@@ -543,8 +548,10 @@ export class OnlookerObserver {
     const operation = this.review(review)
       .then(() => this.compactAfter(review))
       .catch((cause) => {
-        if (review.epoch === this.epoch && !this.closed && this.sameObservation(review))
-          this.fail(errorText(cause));
+        if (review.epoch !== this.epoch || this.closed || !this.sameObservation(review)) return;
+        if (review.timedOut && ++this.deadlinesInRow < maxDeadlinesInRow)
+          this.skippedThrough = this.dueThrough;
+        else this.fail(errorText(cause));
       })
       .finally(() => {
         if (this.running !== operation) return;
@@ -563,10 +570,10 @@ export class OnlookerObserver {
   }
 
   private async review(review: Review): Promise<void> {
-    const timer = setTimeout(
-      () => review.cancellation.abort(new Error("Onlooker review deadline exceeded")),
-      this.limits.reviewTimeoutMs,
-    );
+    const timer = setTimeout(() => {
+      review.timedOut = true;
+      review.cancellation.abort(new Error("Onlooker review deadline exceeded"));
+    }, this.limits.reviewTimeoutMs);
     const cancelled = Promise.withResolvers<never>();
     const rejectCancellation = () => cancelled.reject(review.cancellation.signal.reason);
     review.cancellation.signal.addEventListener("abort", rejectCancellation, { once: true });
@@ -905,6 +912,7 @@ export class OnlookerObserver {
       this.suppliedBoundary = review.boundary;
       if (!review.findings) throw new Error("Onlooker Review did not call onlooker_report");
       this.reviewed = through;
+      this.deadlinesInRow = 0;
       // A Review ended by invalid reports judged nothing, so withheld findings wait for the next.
       if (!review.invalid) await this.deliver(review.findings, review, through);
     } finally {
@@ -1324,6 +1332,8 @@ export class OnlookerObserver {
     this.completed = 0;
     this.reviewed = 0;
     this.dueThrough = 0;
+    this.skippedThrough = 0;
+    this.deadlinesInRow = 0;
     this.error = undefined;
     this.pendingCorrection = false;
     this.restoreDedupe();

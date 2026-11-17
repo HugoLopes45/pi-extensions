@@ -569,6 +569,55 @@ it("accounts Reviews, consultations and compactions separately in status", async
   expect(evidence.seeds).toBe(1);
 });
 
+function deadlineOn(hung: number[]) {
+  const fixture = longSessionStream({}, [], ok);
+  let reviews = 0;
+  globalThis.onlookerObserverTest = {
+    ...fixture,
+    stream(model, context, options) {
+      if (
+        !context.tools?.some((tool) => tool.name === "onlooker_report") ||
+        !hung.includes(++reviews)
+      )
+        return fixture.stream(model, context, options);
+      const stream = createAssistantMessageEventStream();
+      const aborted = {
+        ...fauxAssistantMessage(""),
+        model: model.id,
+        provider: model.provider,
+        api: model.api,
+        stopReason: "aborted" as const,
+      };
+      options?.signal?.addEventListener(
+        "abort",
+        () => stream.push({ type: "error", reason: "aborted", error: aborted }),
+        { once: true },
+      );
+      return stream;
+    },
+  };
+  return () => reviews;
+}
+
+it("leaves a Review past its deadline to the next turn without pausing", async () => {
+  const reviews = deadlineOn([1]);
+  const { session, observer } = await observe({ reviewTimeoutMs: 20 });
+  await session.prompt("First");
+  expect(reviews()).toBe(1);
+  expect(observer.status.lastError).toBeNull();
+  await session.prompt("Second");
+  expect(reviews()).toBe(2);
+  expect(observer.status.lastError).toBeNull();
+});
+
+it("counts only Review deadlines in a row toward the pause", async () => {
+  const reviews = deadlineOn([1, 2, 4, 5]);
+  const { session, observer } = await observe({ reviewTimeoutMs: 20 });
+  for (const prompt of ["1", "2", "3", "4", "5"]) await session.prompt(prompt);
+  expect(reviews()).toBe(5);
+  expect(observer.status.lastError).toBeNull();
+});
+
 it("charges a cancelled Review the usage its provider reports after the abort", async () => {
   const fixture = longSessionStream({}, [], ok);
   globalThis.onlookerObserverTest = {
@@ -598,7 +647,6 @@ it("charges a cancelled Review the usage its provider reports after the abort", 
   const { session, observer } = await observe({ reviewTimeoutMs: 50 });
   await session.prompt("First");
   await vi.waitFor(() => expect(observer.status.spend.reviews).toMatchObject({ count: 1 }));
-  expect(observer.status.lastError).toMatch(/deadline/);
   expect(observer.status.spend.reviews).toMatchObject({ calls: 1, input: 1_000 });
 });
 
