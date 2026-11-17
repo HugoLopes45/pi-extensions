@@ -54,6 +54,48 @@ it("reports competing Python environments instead of selecting one", async () =>
   });
 });
 
+it("routes a Python project with one environment", async () => {
+  const root = await directory();
+  await writeFile(join(root, "pyproject.toml"), "");
+  await writeFile(join(root, "main.py"), "");
+  await mkdir(join(root, ".venv"));
+  await writeFile(join(root, ".venv", "pyvenv.cfg"), "");
+  expect(await resolveRoute(join(root, "main.py"), root)).toEqual({
+    outcome: "completed",
+    file: join(root, "main.py"),
+    root,
+    language: "python",
+    server: "python",
+    coverage: "local-marker",
+  });
+});
+
+it("blocks a Python environment symlinked outside the boundary", async () => {
+  const root = await directory();
+  const outside = await directory();
+  await writeFile(join(root, "pyproject.toml"), "");
+  await writeFile(join(root, "main.py"), "");
+  await writeFile(join(outside, "pyvenv.cfg"), "");
+  await symlink(outside, join(root, ".venv"));
+  expect(await resolveRoute(join(root, "main.py"), root)).toMatchObject({
+    outcome: "blocked",
+  });
+});
+
+it("routes a Python project marked only by requirements.txt", async () => {
+  const root = await directory();
+  await writeFile(join(root, "requirements.txt"), "");
+  await writeFile(join(root, "main.py"), "");
+  expect(await resolveRoute(join(root, "main.py"), root)).toEqual({
+    outcome: "completed",
+    file: join(root, "main.py"),
+    root,
+    language: "python",
+    server: "python",
+    coverage: "local-marker",
+  });
+});
+
 it("does not guess the root of nested Cargo manifests", async () => {
   const root = await directory();
   await writeFile(join(root, "Cargo.toml"), "");

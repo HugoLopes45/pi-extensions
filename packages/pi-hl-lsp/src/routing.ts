@@ -46,7 +46,7 @@ async function realpathIfExists(path: string): Promise<string | undefined> {
 
 const projectMarkers: Record<ServerFamily, string[]> = {
   typescript: ["tsconfig.json", "jsconfig.json", "package.json"],
-  python: ["pyproject.toml", "pyrightconfig.json"],
+  python: ["pyproject.toml", "pyrightconfig.json", "setup.py", "setup.cfg", "requirements.txt"],
   rust: ["Cargo.toml", "rust-project.json"],
 };
 
@@ -63,7 +63,7 @@ async function nearestRoot(
 async function pythonEnvironment(
   root: string,
   boundary: string,
-): Promise<{ outcome: "blocked" | "ambiguous" | "unsupported"; reason: string } | undefined> {
+): Promise<{ outcome: "blocked" | "ambiguous"; reason: string } | undefined> {
   const environments = await Promise.all(
     [".venv", "venv"].map(async (name) => {
       return (await isFile(join(root, name, "pyvenv.cfg")))
@@ -77,9 +77,9 @@ async function pythonEnvironment(
       outcome: "blocked",
       reason: "Environment is outside the workspace boundary",
     };
-  if (candidates.length)
+  if (candidates.length > 1)
     return {
-      outcome: candidates.length > 1 ? "ambiguous" : "unsupported",
+      outcome: "ambiguous",
       reason: "Project environment binding requires an explicit policy",
     };
   return undefined;
@@ -108,7 +108,7 @@ async function environmentProblem(
   family: ServerFamily,
   root: string,
   base: string,
-): Promise<{ outcome: "blocked" | "ambiguous" | "unsupported"; reason: string } | undefined> {
+): Promise<{ outcome: "blocked" | "ambiguous"; reason: string } | undefined> {
   if (family === "python") return pythonEnvironment(root, base);
   if (
     family === "rust" &&
