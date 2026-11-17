@@ -537,6 +537,9 @@ export class LspController {
       supportsChange(capabilities),
     );
     this.selected = { instance, document };
+    // Diagnostics keep their own settle path; a query waits for loading and then sends with the remaining deadline.
+    if (operation !== "diagnostics")
+      await instance.client.settled(deadline, this.settings.timeoutMs / 2);
     const result = await readResponse(
       operation,
       instance,

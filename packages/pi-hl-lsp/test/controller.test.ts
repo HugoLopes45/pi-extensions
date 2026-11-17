@@ -458,6 +458,63 @@ it("rejects a malformed workspace symbol response", async () => {
   ).rejects.toThrow("Unexpected LSP workspace_symbols response shape");
 });
 
+it("holds a workspace symbol query until progress ends", async () => {
+  const { instance, file, spawnLog } = await controller("progress-load");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(
+    lines.filter((line) => !line.startsWith("create")).map((line) => line.split(" ")[0]),
+  ).toEqual(["begin", "end", "symbol"]);
+});
+
+it("waits for progress that starts only after the first document is opened", async () => {
+  const { instance, file, spawnLog } = await controller("progress-late");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(lines.map((line) => line.split(" ")[0])).toEqual(["begin", "end", "symbol"]);
+});
+
+it("answers the workDoneProgress create request with null", async () => {
+  const { instance, file, spawnLog } = await controller("progress-load");
+  await instance.query("workspace_symbols", file, undefined, undefined, "value");
+  expect(await events(spawnLog)).toContain("create null");
+});
+
+it("waits a quiet window after progress ends before a workspace symbol query", async () => {
+  const { instance, file, spawnLog } = await controller("progress-load");
+  await instance.query("workspace_symbols", file, undefined, undefined, "value");
+  const lines = await events(spawnLog);
+  const at = (name: string) =>
+    Number(lines.find((line) => line.startsWith(`${name} `))?.split(" ")[1]);
+  expect(at("symbol") - at("end")).toBeGreaterThanOrEqual(300);
+});
+
+it("sends a workspace symbol query after half the call timeout while progress never ends", async () => {
+  const { instance, file, spawnLog } = await controller("progress-stuck", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(
+    lines.filter((line) => !line.startsWith("create")).map((line) => line.split(" ")[0]),
+  ).toEqual(["begin", "symbol"]);
+});
+
+it("waits for the server status to report quiescence before a workspace symbol query", async () => {
+  const { instance, file, spawnLog } = await controller("server-status");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(lines.map((line) => line.split(" ")[0])).toEqual(["quiet", "symbol"]);
+});
+
 async function packages(cwd: string, count: number) {
   return Promise.all(
     Array.from({ length: count }, async (_, index) => {
@@ -525,6 +582,8 @@ it("warm: keeps the server after a request timeout", async () => {
 it("warm: keeps the server after the caller cancels", async () => {
   const { instance, file, spawnLog } = await controller("ignore");
   await instance.query("diagnostics", file);
+  // A query inside the 1 s readiness grace sends nothing, so the cancel needs a request already sent.
+  await delay(1100);
   for (let attempt = 0; attempt < 2; attempt++)
     await expect(instance.query("hover", file, position, AbortSignal.timeout(50))).rejects.toThrow(
       "aborted due to timeout",

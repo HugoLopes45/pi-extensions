@@ -42,6 +42,19 @@ const registrationParams = Type.Object({
 const unregistrationParams = Type.Object({
   unregisterations: Type.Array(registration),
 });
+const progressToken = Type.Union([Type.String(), Type.Integer()]);
+const progressCreateParams = Type.Object({ token: progressToken });
+const progressParams = Type.Object({
+  token: progressToken,
+  value: Type.Object({
+    kind: Type.Union([Type.Literal("begin"), Type.Literal("report"), Type.Literal("end")]),
+  }),
+});
+const serverStatusParams = Type.Object({ quiescent: Type.Boolean() });
+// Servers pause briefly between loading phases, so a server counts as ready only after this quiet window.
+const READY_QUIET_MS = 300;
+// Servers start loading after the first document opens, so a query in this window waits for the first signal.
+const READY_GRACE_MS = 1000;
 // The last 100 ms of the two-second disposal budget, kept after SIGKILL: macOS answers EPERM for a
 // group whose only member is an unreaped zombie, so the group is probed again before failing.
 const REAP_RESERVE_MS = 100;
@@ -108,6 +121,12 @@ export class LanguageServer {
   private initialized = false;
   private diagnosticProvider = false;
   private readonly registered = new Set<string>();
+  private readonly progressTokens = new Set<string | number>();
+  private quiescent = true;
+  private lastProgressAt = Number.NEGATIVE_INFINITY;
+  private signaled = false;
+  private graceUntil = Number.NEGATIVE_INFINITY;
+  private changed = Promise.withResolvers<void>();
   private stderr = "";
 
   constructor(
@@ -181,6 +200,26 @@ export class LanguageServer {
       for (const { method } of value.unregisterations) this.registered.delete(method);
       return null;
     });
+    this.connection.onRequest("window/workDoneProgress/create", (value: unknown) => {
+      if (!Value.Check(progressCreateParams, value))
+        return this.reject("Invalid window/workDoneProgress/create payload");
+      return null;
+    });
+    this.connection.onNotification("$/progress", (value: unknown) => {
+      if (!Value.Check(progressParams, value))
+        return this.fail(new Error("Invalid progress notification"));
+      const { token, value: progress } = value;
+      if (progress.kind === "begin") this.progressTokens.add(token);
+      if (progress.kind === "end") this.progressTokens.delete(token);
+      this.lastProgressAt = performance.now();
+      this.wake();
+    });
+    this.connection.onNotification("experimental/serverStatus", (value: unknown) => {
+      if (!Value.Check(serverStatusParams, value))
+        return this.fail(new Error("Invalid server status notification"));
+      this.quiescent = value.quiescent;
+      this.wake();
+    });
     this.connection.onNotification("textDocument/publishDiagnostics", (value: unknown) => {
       if (this.stopped) return;
       try {
@@ -213,6 +252,33 @@ export class LanguageServer {
     return this.diagnosticProvider || this.registered.has("textDocument/diagnostic");
   }
 
+  // Resolves when the server is ready, or when budgetMs ends the wait. An abort of signal rejects.
+  async settled(signal: AbortSignal, budgetMs: number): Promise<void> {
+    const stop = AbortSignal.any([signal, AbortSignal.timeout(budgetMs)]);
+    const stopped = Promise.withResolvers<void>();
+    stop.addEventListener("abort", () => stopped.resolve(), { once: true });
+    for (let wait = this.readyIn(); wait > 0 && !stop.aborted; wait = this.readyIn())
+      await Promise.race([
+        this.changed.promise,
+        stopped.promise,
+        ...(wait === Infinity ? [] : [delay(wait)]),
+      ]);
+    signal.throwIfAborted();
+  }
+
+  // Milliseconds until the server counts as ready; Infinity while progress is active or the server is busy.
+  private readyIn(): number {
+    if (this.progressTokens.size > 0 || !this.quiescent) return Infinity;
+    if (!this.signaled) return Math.max(0, this.graceUntil - performance.now());
+    return Math.max(0, this.lastProgressAt + READY_QUIET_MS - performance.now());
+  }
+
+  private wake(): void {
+    this.signaled = true;
+    this.changed.resolve();
+    this.changed = Promise.withResolvers<void>();
+  }
+
   async initialize(signal?: AbortSignal): Promise<Initialization> {
     try {
       return await this.handshake(signal);
@@ -236,6 +302,8 @@ export class LanguageServer {
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             hover: { contentFormat: ["markdown", "plaintext"] },
           },
+          window: { workDoneProgress: true },
+          experimental: { serverStatusNotification: true },
         },
       },
       signal,
@@ -251,6 +319,7 @@ export class LanguageServer {
     }
     this.diagnosticProvider = Boolean(result.capabilities.diagnosticProvider);
     await this.notify("initialized", {}, signal, STARTUP_TIMEOUT_MS);
+    this.graceUntil = performance.now() + READY_GRACE_MS;
     this.initialized = true;
     return result;
   }

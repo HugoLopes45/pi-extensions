@@ -65,6 +65,19 @@ it("closes an idle instance when publication validation fails", async () => {
   await client.dispose();
 });
 
+it("closes an idle instance when a progress notification is invalid", async () => {
+  const closed = Promise.withResolvers<Error>();
+  const client = await server("normal", 1000, () => {}, closed.resolve);
+  await client.initialize();
+  await client.notify("test/invalid-progress", {});
+  const result = await Promise.race([
+    closed.promise.then((error) => error.message),
+    delay(300, "not closed"),
+  ]);
+  expect(result).toBe("Invalid progress notification");
+  await client.dispose();
+});
+
 it("initializes and returns a real framed RPC response", async () => {
   const client = await server();
   expect(await client.initialize()).toMatchObject({

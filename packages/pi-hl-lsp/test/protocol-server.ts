@@ -122,6 +122,13 @@ const staticPullModes = new Set<string | undefined>([
 ]);
 const pullRegistration = { id: "pull", method: "textDocument/diagnostic" };
 const typeNavigationModes = new Set<string | undefined>(["type-navigation"]);
+// Loading modes report project work, and their workspace symbol replies log when the server answered.
+const loadingModes = new Set<string | undefined>([
+  "progress-load",
+  "progress-stuck",
+  "progress-late",
+  "server-status",
+]);
 const textDocumentUri = Type.Object({
   textDocument: Type.Object({ uri: Type.String() }),
 });
@@ -152,9 +159,44 @@ function capabilities() {
     ...(typeNavigationModes.has(mode)
       ? { typeDefinitionProvider: true, implementationProvider: true }
       : {}),
-    ...(mode === "workspace-symbols" ? { workspaceSymbolProvider: true } : {}),
+    ...(mode === "workspace-symbols" || loadingModes.has(mode)
+      ? { workspaceSymbolProvider: true }
+      : {}),
     positionEncoding: mode === "wrong-encoding" ? "utf-8" : "utf-16",
   };
+}
+// Loading modes announce work before the initialize reply, so the first query starts while the server is busy.
+async function startLoading() {
+  void connection.sendRequest("window/workDoneProgress/create", { token: "load" }).then(
+    (reply) => log(`create ${reply === null ? "null" : "other"}`),
+    () => log("create failed"),
+  );
+  await connection.sendNotification("$/progress", {
+    token: "load",
+    value: { kind: "begin", title: "Loading" },
+  });
+  log("begin");
+  if (mode === "progress-stuck") return;
+  setTimeout(() => {
+    log(`end ${Date.now()}`);
+    void connection.sendNotification("$/progress", {
+      token: "load",
+      value: { kind: "end" },
+    });
+  }, 400);
+}
+async function startStatus() {
+  await connection.sendNotification("experimental/serverStatus", {
+    health: "ok",
+    quiescent: false,
+  });
+  setTimeout(() => {
+    log(`quiet ${Date.now()}`);
+    void connection.sendNotification("experimental/serverStatus", {
+      health: "ok",
+      quiescent: true,
+    });
+  }, 400);
 }
 connection.onRequest("initialize", async () => {
   if (mode === "slow-init") await delay(600);
@@ -171,6 +213,8 @@ connection.onRequest("initialize", async () => {
     await connection.sendNotification("noise", {
       text: "x".repeat(9 * 1024 * 1024),
     });
+  if (mode === "progress-load" || mode === "progress-stuck") await startLoading();
+  if (mode === "server-status") await startStatus();
   return { capabilities: capabilities() };
 });
 connection.onRequest(
@@ -220,6 +264,7 @@ function workspaceSymbols(query: string): unknown[] {
 connection.onRequest("workspace/symbol", (params: unknown): unknown[] => {
   if (!Value.Check(workspaceQuery, params))
     throw new Error("Invalid workspace symbol fixture request");
+  if (loadingModes.has(mode)) log(`symbol ${Date.now()}`);
   return workspaceSymbols(params.query);
 });
 connection.onRequest("textDocument/typeDefinition", (params: unknown): object => {
@@ -340,7 +385,25 @@ async function publishDiagnostics(value: unknown, changed: boolean) {
     diagnostics: reportedFindings(value),
   });
 }
+// Late loading starts on didOpen, as typescript-language-server does, so the first query precedes its first progress.
+function startLateLoading() {
+  setTimeout(() => {
+    log("begin");
+    void connection.sendNotification("$/progress", {
+      token: "load",
+      value: { kind: "begin", title: "Loading" },
+    });
+    setTimeout(() => {
+      log(`end ${Date.now()}`);
+      void connection.sendNotification("$/progress", {
+        token: "load",
+        value: { kind: "end" },
+      });
+    }, 400);
+  }, 200);
+}
 connection.onNotification("textDocument/didOpen", async (value: unknown) => {
+  if (mode === "progress-late") startLateLoading();
   if (syncLog && Value.Check(opened, value)) log(`didOpen ${value.textDocument.version}`);
   await publishDiagnostics(value, false);
 });
@@ -350,6 +413,9 @@ connection.onNotification("textDocument/didChange", async (value: unknown) => {
 });
 connection.onNotification("textDocument/didClose", () => {
   if (syncLog) log("didClose");
+});
+connection.onNotification("test/invalid-progress", async () => {
+  await connection.sendNotification("$/progress", { token: true, value: {} });
 });
 connection.onNotification("test/fail", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {});
