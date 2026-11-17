@@ -305,12 +305,14 @@ export class LspController {
   private gate(): { outcome: "unavailable" | "blocked"; reason: string } | undefined {
     if (this.lifetime.signal.aborted)
       return { outcome: "unavailable", reason: "Controller is closed" };
-    if (!this.settings.enabled || !this.trusted || !this.settings.allowProjectExecution)
-      return {
-        outcome: "blocked",
-        reason: "Enable LSP, trust the project, and grant global project-execution consent first",
-      };
-    return undefined;
+    const failures: string[] = [];
+    if (!this.settings.enabled) failures.push("LSP is off; run /hl-lsp on");
+    if (!this.trusted) failures.push("project is not trusted; run /trust");
+    if (!this.settings.allowProjectExecution)
+      failures.push(
+        "project execution is not allowed; run /hl-lsp set allowProjectExecution true --global",
+      );
+    return failures.length > 0 ? { outcome: "blocked", reason: failures.join("; ") } : undefined;
   }
 
   private async exchange(
@@ -365,7 +367,7 @@ export class LspController {
       return {
         ...route,
         outcome: "unavailable",
-        reason: "No globally approved server for this language",
+        reason: `No server configured for "${route.server}"; add servers.${route.server} with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)`,
       };
     const text = await snapshot(route.file, deadline);
     if (operation !== "diagnostics" && operation !== "symbols") validatePosition(text, position);

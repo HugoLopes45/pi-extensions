@@ -104,7 +104,8 @@ async function pythonEnvironment(
   if (candidates.length > 1)
     return {
       outcome: "ambiguous",
-      reason: "Project environment binding requires an explicit policy",
+      reason:
+        "Two Python environments (.venv and venv); remove one or open the project with only one",
     };
   return undefined;
 }
@@ -143,7 +144,8 @@ async function cargoWorkspace(root: string, base: string): Promise<string | Refu
   return parentManifest
     ? {
         outcome: "ambiguous",
-        reason: "Nested Cargo manifests require workspace resolution",
+        reason:
+          "Parent Cargo.toml without a readable [workspace]; declare [workspace] in the parent or open the crate on its own",
       }
     : root;
 }

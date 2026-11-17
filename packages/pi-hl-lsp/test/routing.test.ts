@@ -54,6 +54,23 @@ it("reports competing Python environments instead of selecting one", async () =>
   });
 });
 
+it("names both Python environments and the fix in the refusal", async () => {
+  const root = await directory();
+  await writeFile(join(root, "pyproject.toml"), "");
+  await writeFile(join(root, "main.py"), "");
+  await Promise.all(
+    [".venv", "venv"].map(async (name) => {
+      await mkdir(join(root, name));
+      await writeFile(join(root, name, "pyvenv.cfg"), "");
+    }),
+  );
+  expect(await resolveRoute(join(root, "main.py"), root)).toMatchObject({
+    outcome: "ambiguous",
+    reason:
+      "Two Python environments (.venv and venv); remove one or open the project with only one",
+  });
+});
+
 it("routes a Python project with one environment", async () => {
   const root = await directory();
   await writeFile(join(root, "pyproject.toml"), "");
@@ -118,6 +135,20 @@ it("does not guess the root of nested Cargo manifests", async () => {
   await writeFile(join(nested, "lib.rs"), "");
   expect(await resolveRoute(join(nested, "lib.rs"), root)).toMatchObject({
     outcome: "ambiguous",
+  });
+});
+
+it("names the parent manifest and the fix when a nested crate has no readable workspace", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), "");
+  const nested = join(root, "crate");
+  await mkdir(nested);
+  await writeFile(join(nested, "Cargo.toml"), "");
+  await writeFile(join(nested, "lib.rs"), "");
+  expect(await resolveRoute(join(nested, "lib.rs"), root)).toMatchObject({
+    outcome: "ambiguous",
+    reason:
+      "Parent Cargo.toml without a readable [workspace]; declare [workspace] in the parent or open the crate on its own",
   });
 });
 

@@ -62,6 +62,44 @@ it("requires project trust before launch, even with global consent", async () =>
   });
 });
 
+it("names only the disabled condition and its fix", async () => {
+  const { instance, file } = await controller("normal", true, true, {
+    enabled: false,
+  });
+  expect(await instance.query("hover", file, { line: 0, character: 6 })).toEqual({
+    outcome: "blocked",
+    reason: "LSP is off; run /hl-lsp on",
+  });
+});
+
+it("names the trust and consent fixes, not the enable fix, when both fail", async () => {
+  const { instance, file } = await controller("normal", false, false, {
+    enabled: true,
+  });
+  const result = await instance.query("hover", file, { line: 0, character: 6 });
+  expect(result).toMatchObject({ outcome: "blocked" });
+  const reason = "reason" in result ? result.reason : undefined;
+  expect(reason).toContain("/trust");
+  expect(reason).toContain("allowProjectExecution");
+  expect(reason).not.toContain("/hl-lsp on");
+});
+
+it("names the server key and its fix when no server is configured for the language", async () => {
+  const { instance, file } = await controller();
+  const root = join(file, "..");
+  await writeFile(join(root, "pyproject.toml"), "");
+  await writeFile(join(root, "main.py"), "");
+  const result = await instance.query("hover", join(root, "main.py"), {
+    line: 0,
+    character: 0,
+  });
+  expect(result).toMatchObject({ outcome: "unavailable" });
+  const reason = "reason" in result ? result.reason : undefined;
+  expect(reason).toBe(
+    'No server configured for "python"; add servers.python with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)',
+  );
+});
+
 it("routes, synchronizes, and returns bounded read-only hover output", async () => {
   const { instance, file } = await controller();
   const result = await instance.query("hover", file, { line: 0, character: 6 });
@@ -164,7 +202,9 @@ const launches = async (spawnLog: string) =>
 const position = { line: 0, character: 6 };
 
 it("warm: keeps the server after a request timeout", async () => {
-  const { instance, file, spawnLog } = await controller("ignore", true, true, { timeoutMs: 1000 });
+  const { instance, file, spawnLog } = await controller("ignore", true, true, {
+    timeoutMs: 1000,
+  });
   await instance.query("diagnostics", file);
   await expect(instance.query("hover", file, position)).rejects.toThrow("aborted due to timeout");
   await expect(instance.query("hover", file, position)).rejects.toThrow("aborted due to timeout");

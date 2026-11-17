@@ -592,7 +592,7 @@ it("launches nothing for an untrusted project whose hl-lsp servers are set", asy
   expect(result).toMatchObject({
     details: {
       outcome: "blocked",
-      reason: stringMatching(/trust the project/u),
+      reason: stringMatching(/project is not trusted; run \/trust/u),
     },
   });
   await expect(readFile(spawnLog, "utf8")).rejects.toMatchObject({
@@ -659,7 +659,9 @@ it("keeps a valid session enable blocked without global project-execution consen
   expect(result).toMatchObject({
     details: {
       outcome: "blocked",
-      reason: stringMatching(/grant global project-execution consent/u),
+      reason: stringMatching(
+        /project execution is not allowed; run \/hl-lsp set allowProjectExecution true --global/u,
+      ),
     },
   });
   await expect(readFile(spawnLog, "utf8")).rejects.toMatchObject({
