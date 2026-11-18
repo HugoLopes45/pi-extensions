@@ -1,7 +1,9 @@
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { expect, it, onTestFinished } from "vitest";
 
 import { applyWorkspaceEdit, moveFile } from "../src/rename.js";
@@ -70,10 +72,20 @@ it("applies two concurrent edits that list the same files in opposite orders", a
       [uriOf(root, "a.ts")]: edit("w"),
     },
   };
+  // Both queues stay held until each edit waits on its first file, so the order the edits
+  // take their second queue does not depend on timing.
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const held = Promise.all(
+    ["a.ts", "b.ts"].map((name) => withFileMutationQueue(join(root, name), () => gate)),
+  );
   const both = Promise.all([
     applyWorkspaceEdit(forward, root, undefined),
     applyWorkspaceEdit(backward, root, undefined),
   ]).then((outcomes) => outcomes.map(({ outcome }) => outcome));
+  await delay(100);
+  release();
+  await held;
   const stalled = new Promise((resolve) => setTimeout(resolve, 1000, "stalled"));
   expect(await Promise.race([both, stalled])).toEqual(["written", "written"]);
 });
