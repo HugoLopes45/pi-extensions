@@ -49,8 +49,14 @@ export async function realpathIfExists(path: string): Promise<string | undefined
   }
 }
 
-function insideDependencies(boundary: string, dir: string): boolean {
-  return relative(boundary, dir).split(sep).includes("node_modules");
+function insideDependencies(
+  boundary: string,
+  dir: string,
+  dependencyDirs: readonly string[],
+): boolean {
+  return relative(boundary, dir)
+    .split(sep)
+    .some((name) => dependencyDirs.includes(name));
 }
 
 // A plain marker names a file or a directory; a marker with a leading * matches an entry whose name ends with the rest.
@@ -67,10 +73,13 @@ export async function nearestRoot(
   root: string,
   boundary: string,
   markers: readonly string[],
+  dependencyDirs: readonly string[],
 ): Promise<string | undefined> {
-  if (!insideDependencies(boundary, root)) {
+  if (!insideDependencies(boundary, root, dependencyDirs)) {
     const matches = await Promise.all(markers.map((marker) => hasMarker(root, marker)));
     if (matches.some(Boolean)) return root;
   }
-  return root === boundary ? undefined : nearestRoot(dirname(root), boundary, markers);
+  return root === boundary
+    ? undefined
+    : nearestRoot(dirname(root), boundary, markers, dependencyDirs);
 }

@@ -10,6 +10,7 @@ export type RootHook = (
   directory: string,
   boundary: string,
   markers: readonly string[],
+  dependencyDirs: readonly string[],
 ) => Promise<string | Refusal | undefined>;
 
 // How setup finds a language in a project and a server for it.
@@ -27,6 +28,8 @@ export type Preset = {
   fileTypes: readonly string[];
   rootMarkers: readonly string[];
   languageIds: Readonly<Partial<Record<string, string>>>;
+  // Installed dependency directories; a root marker inside one does not end the search for a root.
+  dependencyDirs?: readonly string[];
   rootHook?: RootHook;
   discovery?: Discovery;
 };
@@ -55,8 +58,9 @@ async function cargoRoot(
   directory: string,
   boundary: string,
   markers: readonly string[],
+  dependencyDirs: readonly string[],
 ): Promise<string | Refusal | undefined> {
-  const nearest = await nearestRoot(directory, boundary, markers);
+  const nearest = await nearestRoot(directory, boundary, markers, dependencyDirs);
   return nearest === undefined ? undefined : cargoWorkspace(nearest, boundary);
 }
 
@@ -87,10 +91,11 @@ async function pythonRoot(
   directory: string,
   boundary: string,
   markers: readonly string[],
+  dependencyDirs: readonly string[],
 ): Promise<string | Refusal | undefined> {
   const root =
-    (await nearestRoot(directory, boundary, markers)) ??
-    (await nearestRoot(directory, boundary, ["requirements.txt"]));
+    (await nearestRoot(directory, boundary, markers, dependencyDirs)) ??
+    (await nearestRoot(directory, boundary, ["requirements.txt"], dependencyDirs));
   if (root === undefined) return undefined;
   return (await pythonEnvironment(root, boundary)) ?? root;
 }
@@ -106,6 +111,7 @@ export const presets: Readonly<Record<string, Preset>> = {
       ".mjs": "javascript",
       ".cjs": "javascript",
     },
+    dependencyDirs: ["node_modules"],
     discovery: {
       candidates: [{ command: "typescript-language-server", args: ["--stdio"] }],
       localBins: ["node_modules/.bin"],

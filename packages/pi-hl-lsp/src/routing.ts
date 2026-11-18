@@ -10,6 +10,7 @@ export type ServerDefinition = {
   fileTypes: readonly string[];
   rootMarkers: readonly string[];
   languageIds: Readonly<Partial<Record<string, string>>>;
+  dependencyDirs: readonly string[];
   rootHook?: RootHook | undefined;
 };
 
@@ -49,6 +50,7 @@ function definitionOf(name: string, config?: ServerConfig): ServerDefinition {
     fileTypes: config?.fileTypes ?? preset.fileTypes,
     rootMarkers: config?.rootMarkers ?? preset.rootMarkers,
     languageIds: { ...preset.languageIds, ...config?.languageId },
+    dependencyDirs: preset.dependencyDirs ?? [],
     rootHook: preset.rootHook,
   };
 }
@@ -73,8 +75,8 @@ function projectRoot(
 ): Promise<string | Refusal | undefined> {
   const directory = dirname(path);
   return definition.rootHook
-    ? definition.rootHook(directory, base, definition.rootMarkers)
-    : nearestRoot(directory, base, definition.rootMarkers);
+    ? definition.rootHook(directory, base, definition.rootMarkers, definition.dependencyDirs)
+    : nearestRoot(directory, base, definition.rootMarkers, definition.dependencyDirs);
 }
 
 export async function resolveRoute(

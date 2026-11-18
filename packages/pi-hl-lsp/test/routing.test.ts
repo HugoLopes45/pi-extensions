@@ -389,6 +389,18 @@ it("routes a dependency file under node_modules to the project root", async () =
   });
 });
 
+it("skips dependency directories only for the language that declares them", async () => {
+  const root = await directory();
+  await writeFile(join(root, "Cargo.toml"), "[package]\n");
+  const crate = join(root, "node_modules", "crate");
+  await mkdir(crate, { recursive: true });
+  await writeFile(join(crate, "Cargo.toml"), "[package]\n");
+  await writeFile(join(crate, "lib.rs"), "");
+  expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "ambiguous",
+  });
+});
+
 it("ignores node_modules segments above the boundary", async () => {
   const outer = await directory();
   const boundary = join(outer, "node_modules", "app");
