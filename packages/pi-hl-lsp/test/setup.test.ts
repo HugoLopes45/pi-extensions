@@ -143,6 +143,18 @@ it("saves ready servers, keeps failed ones offered and ignores the rest", () => 
   ]);
 });
 
+it("offers again at startup an ignored language that failed when retried", () => {
+  const changes = setupChanges(
+    { ignoredLanguages: ["go", "rust"] },
+    [rust],
+    new Map([["rust", "exited with status 1"]]),
+    false,
+  );
+  expect(changes).toEqual([
+    { action: "set", key: "ignoredLanguages", patch: { ignoredLanguages: ["go"] } },
+  ]);
+});
+
 function action(spec: ReturnType<typeof setupSpec>) {
   const row = spec.rows(spec.read(), "session").find((item) => item.kind === "action");
   if (row?.kind !== "action") throw new Error("no action row");

@@ -98,16 +98,25 @@ export function setupChanges(
       key: "allowProjectExecution",
       patch: { allowProjectExecution: true },
     });
+  const ignored = ignoredChange(global.ignoredLanguages ?? [], offers, results);
+  if (ignored) changes.push(ignored);
+  return changes;
+}
+
+// A retried language leaves the ignored list, so a failed retry is offered again at the next start.
+function ignoredChange(
+  ignored: readonly string[],
+  offers: readonly Offer[],
+  results: SetupResults,
+): LspChange | undefined {
   const skipped = offers
     .filter(({ language }) => !results.has(language))
     .map(({ language }) => language);
-  if (skipped.length > 0) {
-    const ignoredLanguages = [...new Set([...(global.ignoredLanguages ?? []), ...skipped])];
-    changes.push({
-      action: "set",
-      key: "ignoredLanguages",
-      patch: { ignoredLanguages },
-    });
-  }
-  return changes;
+  const kept = ignored.filter((language) => !results.has(language));
+  if (skipped.length === 0 && kept.length === ignored.length) return undefined;
+  return {
+    action: "set",
+    key: "ignoredLanguages",
+    patch: { ignoredLanguages: [...new Set([...kept, ...skipped])] },
+  };
 }
