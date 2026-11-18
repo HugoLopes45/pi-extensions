@@ -100,19 +100,33 @@ it("names the trust and consent fixes, not the enable fix, when both fail", asyn
   expect(reason).not.toContain("/hl-lsp on");
 });
 
-it("names the server key and its fix when no server is configured for the language", async () => {
+async function unconfiguredPython(bin: string) {
+  vi.stubEnv("PATH", bin);
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
   const { instance, file } = await controller();
   const root = join(file, "..");
   await writeFile(join(root, "pyproject.toml"), "");
   await writeFile(join(root, "main.py"), "");
-  const result = await instance.query("hover", join(root, "main.py"), {
-    line: 1,
-    column: 1,
+  return instance.query("hover", join(root, "main.py"), { line: 1, column: 1 });
+}
+
+it("points at /hl-lsp-setup when the language has no server configured but one is installed", async () => {
+  const bin = await directory();
+  const server = join(bin, "pylsp");
+  await writeFile(server, "#!/bin/sh\n", { mode: 0o755 });
+  expect(await unconfiguredPython(bin)).toMatchObject({
+    outcome: "unavailable",
+    reason: `No server configured for "python"; ${server} is installed: ask the user to run /hl-lsp-setup`,
   });
-  expect(result).toMatchObject({
+});
+
+it("gives the install command when the language has no server configured or installed", async () => {
+  expect(await unconfiguredPython(await directory())).toMatchObject({
     outcome: "unavailable",
     reason:
-      'No server configured for "python"; add servers.python with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)',
+      'No server configured for "python"; none is installed: install one (pipx install basedpyright), then ask the user to run /hl-lsp-setup',
   });
 });
 

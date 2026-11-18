@@ -19,6 +19,7 @@ import {
   listedAction,
   type Range,
 } from "./code-actions.js";
+import { detectLanguages, findServer } from "./detect.js";
 import {
   busyObservation,
   diagnosticResult,
@@ -38,6 +39,7 @@ import {
   formatWorkspaceSymbols,
   type LineReader,
 } from "./format.js";
+import { presetFor } from "./presets.js";
 import { outside } from "./project-files.js";
 import {
   applyTextEdits,
@@ -108,6 +110,8 @@ export type ServerStatus = {
   server: string;
   configured: boolean;
   instances: InstanceStatus[];
+  // How to set up a detected language that has no server configured.
+  setup?: string | undefined;
 };
 export type FormatOutcome =
   | { outcome: "unchanged" }
@@ -632,11 +636,29 @@ function sendContent(
       );
 }
 
-function unconfigured(route: SelectedRoute) {
+// The model cannot enable a server, so it is told what the user can run; undefined without discovery.
+async function setupHint(
+  server: string,
+  markerDir: string,
+  cwd: string,
+): Promise<string | undefined> {
+  const install = presetFor(server)?.discovery?.install;
+  if (install === undefined) return undefined;
+  const found = await findServer(server, markerDir, cwd, process.env.PATH);
+  return found
+    ? `${found.command} is installed: ask the user to run /hl-lsp-setup`
+    : `none is installed: install one (${install}), then ask the user to run /hl-lsp-setup`;
+}
+
+async function unconfigured(route: SelectedRoute, cwd: string) {
+  const { server } = route;
+  const hint =
+    (await setupHint(server, route.root, cwd)) ??
+    `add servers.${server} with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)`;
   return {
     ...route,
     outcome: "unavailable" as const,
-    reason: `No server configured for "${route.server}"; add servers.${route.server} with /hl-lsp set servers <JSON> --global (this replaces the whole servers map)`,
+    reason: `No server configured for "${server}"; ${hint}`,
   };
 }
 
@@ -793,18 +815,26 @@ export class LspController {
     return Object.keys(this.settings.servers);
   }
 
-  serverStatus() {
+  async serverStatus() {
     const refusal = this.gate();
     if (refusal) return refusal;
     const instances = [...this.instances.values()];
-    return {
-      outcome: "completed" as const,
-      servers: this.definitions.map(({ name }): ServerStatus => ({
-        server: name,
-        configured: Object.hasOwn(this.settings.servers, name),
-        instances: instances.filter((instance) => instance.server === name).map(instanceStatus),
-      })),
-    };
+    const detected = await detectLanguages(this.cwd);
+    const servers = await Promise.all(
+      this.definitions.map(async ({ name }): Promise<ServerStatus> => {
+        const configured = Object.hasOwn(this.settings.servers, name);
+        const markerDir = detected.get(name);
+        return {
+          server: name,
+          configured,
+          instances: instances.filter((instance) => instance.server === name).map(instanceStatus),
+          ...(configured || markerDir === undefined
+            ? {}
+            : { setup: await setupHint(name, markerDir, this.cwd) }),
+        };
+      }),
+    );
+    return { outcome: "completed" as const, servers };
   }
 
   // Stops the running instances of one configured server; the next query starts a fresh one.
@@ -1032,7 +1062,7 @@ export class LspController {
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
-    if (!config) return unconfigured(route);
+    if (!config) return unconfigured(route, this.cwd);
     const text = await snapshot(route.file, deadline);
     const position =
       operation === "diagnostics" || operation === "symbols" || operation === "workspace_symbols"
@@ -1087,7 +1117,7 @@ export class LspController {
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
-    if (!config) return unconfigured(route);
+    if (!config) return unconfigured(route, this.cwd);
     const text = await snapshot(route.file, deadline);
     const position = resolvePosition(text, target);
     const instance = await this.instance(route, config, deadline);
@@ -1161,7 +1191,7 @@ export class LspController {
     const route = await resolveRoute(oldPath, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
-    if (!config) return unconfigured(route);
+    if (!config) return unconfigured(route, this.cwd);
     const root = await realpath(this.cwd);
     const plan = await planMove(route.file, newPath, root);
     if (plan.outcome === "refused")
@@ -1243,7 +1273,7 @@ export class LspController {
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
-    if (!config) return unconfigured(route);
+    if (!config) return unconfigured(route, this.cwd);
     const text = await snapshot(route.file, deadline);
     const range = actionRange(text, target);
     const instance = await this.instance(route, config, deadline);

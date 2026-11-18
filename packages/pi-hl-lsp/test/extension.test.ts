@@ -773,6 +773,32 @@ it("rejects an empty workspace symbol query before any server launch", async () 
   });
 });
 
+it("tells how to set up each detected language that has no server configured", async () => {
+  vi.stubEnv("PATH", await directory());
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  const state = await session(true);
+  const server = await pythonProject(state.cwd, "exit 1");
+  await writeFile(join(state.cwd, "Cargo.toml"), '[package]\nname = "demo"\n');
+  const result = await tool(state, "hl_lsp_status", {});
+  expect(result).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+  });
+  const text = JSON.stringify(result);
+  expect(text).toContain(
+    JSON.stringify(
+      `python: not configured; ${server} is installed: ask the user to run /hl-lsp-setup`,
+    ).slice(1, -1),
+  );
+  expect(text).toContain(
+    "rust: not configured; none is installed: install one (rustup component add rust-analyzer), then ask the user to run /hl-lsp-setup",
+  );
+  // Swift is not detected here, so its line carries no setup hint.
+  expect(text).toContain('\\nswift: not configured"');
+});
+
 it("reports server state and supported tools, and starts no server for it", async () => {
   const state = await session(true);
   expect(await tool(state, "hl_lsp_status", {})).toMatchObject({

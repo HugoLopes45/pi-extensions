@@ -241,8 +241,8 @@ function unavailable(issue: string | undefined) {
 // One line per server; several instances of one server share that line.
 function serverLines(servers: ServerStatus[]): string {
   return servers
-    .map(({ server, configured, instances }) => {
-      if (!configured) return `${server}: not configured`;
+    .map(({ server, configured, instances, setup }) => {
+      if (!configured) return `${server}: not configured${setup === undefined ? "" : `; ${setup}`}`;
       return `${server}: ${instances.length === 0 ? "not started" : instances.map(instanceLine).join("; ")}`;
     })
     .join("\n");
@@ -586,7 +586,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
     executionMode: "sequential",
     execute: async () => {
       if (!controller) return toolResult("status", unavailable(issue));
-      const result = controller.serverStatus();
+      const result = await controller.serverStatus();
       if (result.outcome !== "completed") return toolResult("status", result);
       return toolResult("status", {
         ...result,
