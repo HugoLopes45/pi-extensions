@@ -1061,8 +1061,7 @@ export class LspController {
     );
     this.selected = { instance, document };
     // Diagnostics keep their own settle path; a query waits for loading and then sends with the remaining deadline.
-    if (operation !== "diagnostics")
-      await instance.client.settled(deadline, this.settings.timeoutMs / 2);
+    if (operation !== "diagnostics") await instance.client.settled(deadline, this.halfTimeoutMs);
     const result = await readResponse(
       operation,
       instance,
@@ -1115,7 +1114,7 @@ export class LspController {
     const instance = await this.instance(route, config, deadline);
     // The progress wait ends early enough for the post-read edit check to run before the deadline.
     const progress = AbortSignal.timeout(
-      this.settings.timeoutMs - Math.max(250, this.settings.timeoutMs / 10),
+      Math.max(0, this.settings.timeoutMs - Math.max(250, Math.ceil(this.settings.timeoutMs / 10))),
     );
     const result = await this.exchange(
       route,
@@ -1201,7 +1200,7 @@ export class LspController {
       deadline,
       supportsChange(capabilities),
     );
-    await instance.client.settled(deadline, this.settings.timeoutMs / 2);
+    await instance.client.settled(deadline, this.halfTimeoutMs);
     const textDocument = { uri: document.uri };
     const refused = await prepareRefusal(instance, capabilities, textDocument, position, deadline);
     if (refused) return { ...route, outcome: "refused" as const, reason: refused };
@@ -1328,6 +1327,11 @@ export class LspController {
     };
   }
 
+  // AbortSignal.timeout throws on a fractional delay, and an odd timeoutMs is valid.
+  private get halfTimeoutMs(): number {
+    return Math.floor(this.settings.timeoutMs / 2);
+  }
+
   private deadlineFor(signal?: AbortSignal): AbortSignal {
     return AbortSignal.any([
       this.lifetime.signal,
@@ -1339,7 +1343,7 @@ export class LspController {
   // Lists the code actions at a position, with the cached diagnostics that overlap its range as context.
   private async listedActions(file: string, target: NavigationTarget, deadline: AbortSignal) {
     // Readiness and diagnostics share half the call timeout, counted from the start of the listing.
-    const budget = AbortSignal.timeout(this.settings.timeoutMs / 2);
+    const budget = AbortSignal.timeout(this.halfTimeoutMs);
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
@@ -1362,7 +1366,7 @@ export class LspController {
       deadline,
       supportsChange(capabilities),
     );
-    await instance.client.settled(deadline, this.settings.timeoutMs / 2);
+    await instance.client.settled(deadline, this.halfTimeoutMs);
     const observation = await diagnosticsObservation(
       instance,
       document,

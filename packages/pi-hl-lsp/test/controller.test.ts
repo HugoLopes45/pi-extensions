@@ -113,6 +113,27 @@ it("reports a new error after more warnings than are shown", async () => {
   });
 });
 
+it("answers with a timeout whose half and tenth are not whole milliseconds", async () => {
+  const { instance, file } = await controller("normal", true, true, { timeoutMs: 3001 });
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+  });
+  expect(await instance.codeActions(file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "unsupported",
+  });
+});
+
+it("answers with a timeout shorter than the time kept for the post-read edit check", async () => {
+  const { instance, file } = await controller("normal", true, true, { timeoutMs: 200 });
+  // 200 ms can be too short to start the server, which keeps starting across retries.
+  const hover = async (): Promise<unknown> =>
+    instance.query("hover", file, { line: 1, column: 7 }).catch((error: unknown) => {
+      if (error instanceof Error && error.message.includes("still starting")) return hover();
+      throw error;
+    });
+  expect(await hover()).toMatchObject({ outcome: "completed" });
+});
+
 it("requires separate global project-execution consent before launch", async () => {
   const { instance, file } = await controller("normal", false);
   expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
