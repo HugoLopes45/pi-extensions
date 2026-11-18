@@ -421,6 +421,15 @@ it("prints a workspace symbol without a range as its path", async () => {
   expect(result).toEqual({ text: "class Server  src/a.ts", truncated: false });
 });
 
+it("keeps a workspace symbol without a range on one line when its path holds a line break", async () => {
+  const result = await formatWorkspaceSymbols(
+    [{ name: "Server", kind: 5, location: { uri: "file:///repo/src/a%0Aerror.ts" } }],
+    cwd,
+    readSource,
+  );
+  expect(result).toEqual({ text: "class Server  src/a error.ts", truncated: false });
+});
+
 it("caps workspace symbols at 50 and reports the other 10", async () => {
   const response = Array.from({ length: 60 }, (_, line) => ({
     name: `s${line}`,

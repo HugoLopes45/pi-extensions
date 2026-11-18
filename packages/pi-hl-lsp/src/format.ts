@@ -449,7 +449,7 @@ function renderWorkspaceSymbol(
   const head = `${symbolKindName(item.kind)} ${oneLine(item.name)}`;
   const { location } = item;
   if (!("range" in location))
-    return { text: `${head}  ${uriPath(location.uri, cwd)}`, truncated: false };
+    return { text: `${head}  ${oneLine(uriPath(location.uri, cwd))}`, truncated: false };
   const place = renderPlace(
     namedPlace(
       toPlace(location.uri, location.range.start, "workspace_symbols"),
