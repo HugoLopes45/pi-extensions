@@ -724,6 +724,34 @@ it("does not keep an older read of a file whose newer publication was dropped", 
   });
 });
 
+it("forgets a kept publication of a file whose newer publication was dropped", async () => {
+  const { instance, file } = await controller("publish-kept-past-limit", true, true, {
+    timeoutMs: 3000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  for (let index = 0; index < 128; index += 1)
+    await writeFile(join(file, "..", `many${index}.ts`), "const many = 1;\n");
+  reads.queried = file;
+  onTestFinished(() => {
+    reads.queried = undefined;
+    reads.paths = [];
+    reads.streams.clear();
+  });
+  await instance.query("diagnostics", file);
+  const stream = [...reads.streams].find(([read]) => read.endsWith("other.ts"))?.[1];
+  if (stream === undefined) throw new Error("other.ts was not read");
+  stream.end("const other = 1;\n");
+  await delay(100);
+  // At the hover the server fills the read limit with 128 files, so its second publication of other.ts is dropped.
+  await instance.query("hover", file, { line: 1, column: 7 });
+  reads.queried = other;
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
 it("reads a file at most 128 times at once for repeated publications", async () => {
   await publishMany("publish-repeat");
   expect(reads.paths).toHaveLength(128);

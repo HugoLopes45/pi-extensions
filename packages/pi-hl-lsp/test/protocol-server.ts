@@ -135,6 +135,7 @@ const staticPullModes = new Set<string | undefined>([
   "publish-many",
   "publish-repeat",
   "publish-past-limit",
+  "publish-kept-past-limit",
   "pull-empty-reopen",
   "pull-empty-reopen-versioned",
 ]);
@@ -329,6 +330,8 @@ connection.onRequest(
     if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
     if (mode === "long-error") throw new rpc.ResponseError(-32603, "z".repeat(5000));
     if (mode === "echo-position") return echoPosition(params);
+    if (mode === "publish-kept-past-limit" && unopenedBase)
+      publishFindings(unopenedBase, laterUnopenedNames);
     const raw = rawReplies.get(mode);
     if (raw) {
       process.stdout.write(raw());
@@ -634,6 +637,7 @@ const silentModes = new Set<string | undefined>([
   "publish-many",
   "publish-repeat",
   "publish-past-limit",
+  "publish-kept-past-limit",
   "pull-static",
   "pull-dynamic",
   "pull-late-registration",
@@ -819,11 +823,22 @@ const unopenedNames = new Map<string | undefined, string[]>([
     "publish-past-limit",
     ["other.ts", ...Array.from({ length: 128 }, (_, index) => `many${index}.ts`), "other.ts"],
   ],
+  ["publish-kept-past-limit", ["other.ts"]],
 ]);
 function publishUnopened(uri: string) {
   const names = unopenedNames.get(mode);
   if (names === undefined || publishedUris.has("unopened")) return;
   publishedUris.add("unopened");
+  unopenedBase = uri;
+  publishFindings(uri, names);
+}
+// publish-kept-past-limit publishes these at the hover, once the first publication of other.ts is kept.
+const laterUnopenedNames = [
+  ...Array.from({ length: 128 }, (_, index) => `many${index}.ts`),
+  "other.ts",
+];
+let unopenedBase: string | undefined;
+function publishFindings(uri: string, names: string[]) {
   for (const name of names)
     void connection.sendNotification("textDocument/publishDiagnostics", {
       uri: new URL(name, uri).href,
