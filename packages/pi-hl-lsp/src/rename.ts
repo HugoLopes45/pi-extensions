@@ -70,13 +70,10 @@ export async function applyWorkspaceEdit(
 ): Promise<ApplyOutcome> {
   try {
     const targets = await targetsOf(response, root);
-    return await queued(
-      targets.map((target) => target.file),
-      async () => {
-        const planned = await planAll(targets, root, synced);
-        return writeAll(planned, root, afterWrite);
-      },
-    );
+    return await queued(targets.map((target) => target.file).toSorted(), async () => {
+      const planned = await planAll(targets, root, synced);
+      return writeAll(planned, root, afterWrite);
+    });
   } catch (error) {
     if (error instanceof Refusal) return { outcome: "refused", reason: error.message };
     throw error;

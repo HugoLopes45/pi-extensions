@@ -51,6 +51,33 @@ it("applies every changed file and reports the edit counts", async () => {
   ]);
 });
 
+it("applies two concurrent edits that list the same files in opposite orders", async () => {
+  const root = await directory();
+  await writeFile(join(root, "a.ts"), "a\n");
+  await writeFile(join(root, "b.ts"), "b\n");
+  const edit = (name: string) => [
+    { range: { start, end: { line: 0, character: 1 } }, newText: name },
+  ];
+  const forward = {
+    changes: {
+      [uriOf(root, "a.ts")]: edit("x"),
+      [uriOf(root, "b.ts")]: edit("y"),
+    },
+  };
+  const backward = {
+    changes: {
+      [uriOf(root, "b.ts")]: edit("z"),
+      [uriOf(root, "a.ts")]: edit("w"),
+    },
+  };
+  const both = Promise.all([
+    applyWorkspaceEdit(forward, root, undefined),
+    applyWorkspaceEdit(backward, root, undefined),
+  ]).then((outcomes) => outcomes.map(({ outcome }) => outcome));
+  const stalled = new Promise((resolve) => setTimeout(resolve, 1000, "stalled"));
+  expect(await Promise.race([both, stalled])).toEqual(["written", "written"]);
+});
+
 it("refuses an edit that targets a file outside the root and writes nothing", async () => {
   const root = await directory();
   const outside = await directory();
