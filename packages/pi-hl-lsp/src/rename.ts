@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -271,7 +271,14 @@ export async function planMove(from: string, newPath: string, root: string): Pro
 
 export async function moveFile({ from, to }: FileMove): Promise<void> {
   await mkdir(dirname(to), { recursive: true });
-  await rename(from, to);
+  // link fails on an existing destination, so a file created since planning is never replaced.
+  await link(from, to);
+  try {
+    await unlink(from);
+  } catch (error) {
+    await unlink(to);
+    throw error;
+  }
 }
 
 function isMissingPath(error: unknown): boolean {

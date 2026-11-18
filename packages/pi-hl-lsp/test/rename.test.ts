@@ -1,10 +1,10 @@
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { expect, it } from "vitest";
+import { expect, it, onTestFinished } from "vitest";
 
-import { applyWorkspaceEdit } from "../src/rename.js";
+import { applyWorkspaceEdit, moveFile } from "../src/rename.js";
 import { directory } from "./fixtures.js";
 
 const start = { line: 0, character: 0 };
@@ -161,6 +161,29 @@ it("refuses a resource operation in documentChanges", async () => {
   expect(outcome).toMatchObject({ outcome: "refused" });
   expect(JSON.stringify(outcome)).toContain("resource operations");
   expect(await filesIn(root, ["index.ts"])).toEqual(["const value = 1;\n"]);
+});
+
+it("does not overwrite a file that appeared at the destination after planning", async () => {
+  const root = await directory();
+  await writeFile(join(root, "old.ts"), "moved\n");
+  await writeFile(join(root, "new.ts"), "kept\n");
+  await expect(moveFile({ from: join(root, "old.ts"), to: join(root, "new.ts") })).rejects.toThrow(
+    "EEXIST",
+  );
+  expect(await filesIn(root, ["old.ts", "new.ts"])).toEqual(["moved\n", "kept\n"]);
+});
+
+it("leaves no destination behind when the old name cannot be removed", async () => {
+  const root = await directory();
+  const source = join(root, "locked");
+  await mkdir(source);
+  await writeFile(join(source, "old.ts"), "moved\n");
+  await chmod(source, 0o555);
+  onTestFinished(() => chmod(source, 0o755));
+  await expect(
+    moveFile({ from: join(source, "old.ts"), to: join(root, "new.ts") }),
+  ).rejects.toThrow("EACCES");
+  expect(await readdir(root)).toEqual(["locked"]);
 });
 
 it("restores the written files when a later file cannot be written", async () => {
