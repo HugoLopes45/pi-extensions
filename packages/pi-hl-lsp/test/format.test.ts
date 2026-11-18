@@ -173,7 +173,7 @@ it("caps locations at 50 and reports the rest", async () => {
 
 it("reads each distinct file once", async () => {
   const reader = vi.fn<LineReader>(async () => ["x", "y"]);
-  await formatLocations(
+  const result = await formatLocations(
     [
       location("file:///repo/src/a.ts", 0, 0),
       location("file:///repo/src/a.ts", 1, 0),
@@ -186,6 +186,7 @@ it("reads each distinct file once", async () => {
   expect(reader).toHaveBeenCalledTimes(2);
   expect(reader).toHaveBeenCalledWith("/repo/src/a.ts");
   expect(reader).toHaveBeenCalledWith("/repo/src/b.ts");
+  expect(result.text).toBe("src/a.ts:1:1  x\nsrc/a.ts:2:1  y\nsrc/b.ts:1:1  x");
 });
 
 it("indents hierarchical symbols two spaces per level with line spans", () => {

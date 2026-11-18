@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 
 import { expect, it } from "vitest";
 
-import { presetFor } from "../src/presets.js";
 import { setupSpec } from "../src/setup-menu.js";
 import {
   checkOffers,
@@ -44,7 +43,8 @@ it("offers each detected language that is not known, with its server or install 
       language: "swift",
       root: join(root, "ios"),
       server: undefined,
-      install: presetFor("swift")?.discovery?.install,
+      install:
+        "install Xcode (then run xcodebuild -runFirstLaunch) or a Swift toolchain from swift.org",
       fileTypes: [".swift"],
     },
   ]);

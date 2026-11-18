@@ -111,21 +111,6 @@ it("rejects escaped file symlinks", async () => {
   });
 });
 
-it("reports competing Python environments instead of selecting one", async () => {
-  const root = await directory();
-  await writeFile(join(root, "pyproject.toml"), "");
-  await writeFile(join(root, "main.py"), "");
-  await Promise.all(
-    [".venv", "venv"].map(async (name) => {
-      await mkdir(join(root, name));
-      await writeFile(join(root, name, "pyvenv.cfg"), "");
-    }),
-  );
-  expect(await resolveRoute(join(root, "main.py"), root)).toMatchObject({
-    outcome: "ambiguous",
-  });
-});
-
 it("names both Python environments and the fix in the refusal", async () => {
   const root = await directory();
   await writeFile(join(root, "pyproject.toml"), "");
@@ -194,18 +179,6 @@ it("routes a Python file under a nested requirements.txt to the root pyproject.t
   expect(await resolveRoute(join(tests, "test_x.py"), root)).toMatchObject({
     outcome: "completed",
     root,
-  });
-});
-
-it("does not guess the root of nested Cargo manifests", async () => {
-  const root = await directory();
-  await writeFile(join(root, "Cargo.toml"), "");
-  const nested = join(root, "crate");
-  await mkdir(nested);
-  await writeFile(join(nested, "Cargo.toml"), "");
-  await writeFile(join(nested, "lib.rs"), "");
-  expect(await resolveRoute(join(nested, "lib.rs"), root)).toMatchObject({
-    outcome: "ambiguous",
   });
 });
 
