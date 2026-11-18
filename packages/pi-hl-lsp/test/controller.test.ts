@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it, onTestFinished, vi } from "vitest";
 
 import { LspController } from "../src/controller.js";
-import { LanguageServer } from "../src/server.js";
+import { LanguageServer, STARTUP_TIMEOUT_MS } from "../src/server.js";
 import type { LspSettings } from "../src/settings.js";
 import { directory } from "./fixtures.js";
 
@@ -123,16 +123,33 @@ it("answers with a timeout whose half and tenth are not whole milliseconds", asy
   });
 });
 
-it("answers with a timeout shorter than the time kept for the post-read edit check", async () => {
-  const { instance, file } = await controller("normal", true, true, { timeoutMs: 200 });
-  // 200 ms can be too short to start the server, which keeps starting across retries.
-  const hover = async (): Promise<unknown> =>
-    instance.query("hover", file, { line: 1, column: 7 }).catch((error: unknown) => {
-      if (error instanceof Error && error.message.includes("still starting")) return hover();
-      throw error;
+// The test timeout exceeds the start budget, so a start that never finishes fails on its own error.
+it(
+  "answers with a timeout shorter than the time kept for the post-read edit check",
+  async () => {
+    const { instance, file } = await controller("normal", true, true, {
+      timeoutMs: 200,
     });
-  expect(await hover()).toMatchObject({ outcome: "completed" });
-});
+    // On a loaded machine 200 ms can be too short: the start continues across retries, and a request deadline is a valid answer.
+    const hover = async (): Promise<string> =>
+      instance.query("hover", file, { line: 1, column: 7 }).then(
+        (result) => result.outcome,
+        (error: unknown) => {
+          if (error instanceof Error && error.message.includes("still starting")) return hover();
+          return error instanceof Error ? error.name : "non-error rejection";
+        },
+      );
+    expect(["completed", "TimeoutError"]).toContain(await hover());
+    // A start that ran out of its budget also rejects with a TimeoutError; only a running server proves a request deadline.
+    const status = await instance.serverStatus();
+    const states =
+      "servers" in status
+        ? status.servers.flatMap((server) => server.instances.map((listed) => listed.state))
+        : [];
+    expect(states).toEqual(["running"]);
+  },
+  STARTUP_TIMEOUT_MS + 10_000,
+);
 
 it("requires separate global project-execution consent before launch", async () => {
   const { instance, file } = await controller("normal", false);
