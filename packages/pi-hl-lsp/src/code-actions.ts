@@ -38,7 +38,7 @@ export type ListedAction = {
 
 // Server text is untrusted: one bounded line is shown, and an apply title must equal this same text.
 export function displayText(text: string): string {
-  return bounded(text, { maxBytes: 512, maxLines: 1 }).content;
+  return bounded(text.replaceAll("\r", " "), { maxBytes: 512, maxLines: 1 }).content;
 }
 
 export function editOf(action: CodeActionItem): unknown {

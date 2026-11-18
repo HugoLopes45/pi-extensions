@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 
+import { displayText } from "../src/code-actions.js";
 import { diagnosticResult, type Observation } from "../src/diagnostics.js";
 import {
   formatDiagnostics,
@@ -486,4 +487,8 @@ it("bounds the whole location body when a URI is 20 KiB", async () => {
   );
   expect(result.truncated).toBe(true);
   expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(16 * 1024);
+});
+
+it("shows a server title with a carriage return on one line that the terminal cannot overwrite", () => {
+  expect(displayText("Fix import\rDelete file")).toBe("Fix import Delete file");
 });
