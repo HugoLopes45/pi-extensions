@@ -89,6 +89,18 @@ it("counts each error once when pull and push report it", () => {
   expect(unionObservation(pulled, pushed)).toMatchObject({ reportedErrors: 2 });
 });
 
+it("shows a pushed error after more pulled warnings than are shown", () => {
+  const warnings = Array.from({ length: 20 }, () => ({
+    ...finding,
+    severity: 2,
+  }));
+  const pulled = pullResult({ kind: "full", items: warnings });
+  const pushed = pullResult({ kind: "full", items: [finding] });
+  expect(unionObservation(pulled, pushed).diagnostics[0]).toMatchObject({
+    severity: 1,
+  });
+});
+
 it("keeps a bounded leading part of an oversized single-line message", () => {
   const result = diagnosticResult({ diagnostics: [{ ...finding, message: "y".repeat(2000) }] }, 1);
   expect(result).toMatchObject({
