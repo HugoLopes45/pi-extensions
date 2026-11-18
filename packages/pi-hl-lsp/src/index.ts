@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
 import {
@@ -685,12 +686,13 @@ export default function hlLsp(pi: ExtensionAPI): void {
           signal,
         );
         if (result.outcome !== "completed") return toolResult(header, result);
+        const root = await realpath(ctx.cwd);
         return toolResult(
           header,
-          { ...result, text: renameLines(result.changed, ctx.cwd) },
+          { ...result, text: renameLines(result.changed, root) },
           await changedFileLines(
             controller,
-            ctx.cwd,
+            root,
             result.changed.map(({ file }) => file),
             signal,
           ),
@@ -715,12 +717,13 @@ export default function hlLsp(pi: ExtensionAPI): void {
       try {
         const result = await controller.renameFile(params.old_path, params.new_path, signal);
         if (result.outcome !== "completed") return toolResult(header, result);
-        const moved = `moved ${displayPath(ctx.cwd, result.move.from)} -> ${displayPath(ctx.cwd, result.move.to)}`;
+        const root = await realpath(ctx.cwd);
+        const moved = `moved ${displayPath(root, result.move.from)} -> ${displayPath(root, result.move.to)}`;
         const files = [...result.changed.map(({ file }) => file), result.move.to];
         return toolResult(
           header,
-          { ...result, text: renameLines(result.changed, ctx.cwd, moved) },
-          await changedFileLines(controller, ctx.cwd, files, signal),
+          { ...result, text: renameLines(result.changed, root, moved) },
+          await changedFileLines(controller, root, files, signal),
         );
       } catch (error) {
         return toolResult(header, failureDetails(error, signal?.aborted === true));
@@ -776,12 +779,13 @@ export default function hlLsp(pi: ExtensionAPI): void {
           signal,
         );
         if (result.outcome !== "completed") return toolResult(header, result);
+        const root = await realpath(ctx.cwd);
         return toolResult(
           header,
-          { ...result, text: renameLines(result.changed, ctx.cwd) },
+          { ...result, text: renameLines(result.changed, root) },
           await changedFileLines(
             controller,
-            ctx.cwd,
+            root,
             result.changed.map(({ file }) => file),
             signal,
           ),

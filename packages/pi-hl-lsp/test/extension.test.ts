@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -36,6 +36,14 @@ interface SessionOptions {
   timeoutMs?: number;
   projectTrusted?: boolean;
   projectSettings?: (spawnLog: string) => unknown;
+  // Runs the session from a symlink to the project, as on macOS where /tmp links to /private/tmp.
+  linkedCwd?: boolean;
+}
+
+async function linkedDirectory() {
+  const link = join(await directory(), "link");
+  await symlink(await directory(), link);
+  return link;
 }
 
 /** A protocol server that appends one line to `spawnLog` each time Pi launches it. */
@@ -53,7 +61,7 @@ async function session(enabled: boolean, mode = "normal", options: SessionOption
     errors.push(error);
   };
   expect(basename(homedir())).toMatch(/^pi-hl-lsp-tests-/u);
-  const cwd = await directory();
+  const cwd = options.linkedCwd ? await linkedDirectory() : await directory();
   const agentDir = getAgentDir();
   const spawnLog = join(cwd, "spawns.log");
   await mkdir(agentDir, { recursive: true });
@@ -928,6 +936,19 @@ it.each(["rename-changes", "rename-versioned"])(
     );
   },
 );
+
+it("names renamed files relative to a symlinked session cwd", async () => {
+  const state = await session(true, "rename-changes", { linkedCwd: true });
+  await writeFile(join(state.cwd, "other.ts"), 'import { value } from "./index";\n');
+  expect(await rename(state)).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp rename index.ts: completed\nindex.ts: 1 edits\nother.ts: 1 edits\ntotal: 2 edits in 2 files",
+      },
+    ],
+  });
+});
 
 it("checks every file a rename changed for errors", async () => {
   const state = await renameSession("rename-errors");
