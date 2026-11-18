@@ -1,4 +1,3 @@
-import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
 import {
@@ -686,7 +685,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
           signal,
         );
         if (result.outcome !== "completed") return toolResult(header, result);
-        const root = await realpath(ctx.cwd);
+        const root = await controller.root();
         return toolResult(
           header,
           { ...result, text: renameLines(result.changed, root) },
@@ -717,7 +716,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
       try {
         const result = await controller.renameFile(params.old_path, params.new_path, signal);
         if (result.outcome !== "completed") return toolResult(header, result);
-        const root = await realpath(ctx.cwd);
+        const root = await controller.root();
         const moved = `moved ${displayPath(root, result.move.from)} -> ${displayPath(root, result.move.to)}`;
         const files = [...result.changed.map(({ file }) => file), result.move.to];
         return toolResult(
@@ -779,7 +778,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
           signal,
         );
         if (result.outcome !== "completed") return toolResult(header, result);
-        const root = await realpath(ctx.cwd);
+        const root = await controller.root();
         return toolResult(
           header,
           { ...result, text: renameLines(result.changed, root) },

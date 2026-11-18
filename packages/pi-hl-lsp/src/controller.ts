@@ -814,6 +814,11 @@ export class LspController {
     this.definitions = serverDefinitions(settings.servers);
   }
 
+  // Server paths are real paths; a symlinked cwd must be resolved before comparing or displaying them.
+  root(): Promise<string> {
+    return realpath(this.cwd);
+  }
+
   private configured(): string[] {
     return Object.keys(this.settings.servers);
   }
@@ -1030,7 +1035,7 @@ export class LspController {
       search,
       deadline,
       progress,
-      await realpath(this.cwd),
+      await this.root(),
     );
     if (!this.current(instance, document) || (await snapshot(route.file, deadline)) !== text)
       return {
@@ -1161,7 +1166,7 @@ export class LspController {
       { textDocument, position, newName },
       deadline,
     );
-    const applied = await applyWorkspaceEdit(edit, await realpath(this.cwd), document);
+    const applied = await applyWorkspaceEdit(edit, await this.root(), document);
     if (applied.outcome !== "written") return { ...route, ...applied };
     await this.resync(instance, route, applied.changed, supportsChange(capabilities), deadline);
     return {
@@ -1190,7 +1195,7 @@ export class LspController {
     );
     if (edits === null || (Array.isArray(edits) && edits.length === 0))
       return { outcome: "unchanged" };
-    const applied = await applyTextEdits(edits, await realpath(this.cwd), document);
+    const applied = await applyTextEdits(edits, await this.root(), document);
     if (applied.outcome !== "written") return { outcome: "skipped", reason: applied.reason };
     return {
       outcome: "formatted",
@@ -1208,7 +1213,7 @@ export class LspController {
     if (route.outcome !== "completed") return route;
     const config = this.settings.servers[route.server];
     if (!config) return unconfigured(route, this.cwd);
-    const root = await realpath(this.cwd);
+    const root = await this.root();
     const plan = await planMove(route.file, newPath, root);
     if (plan.outcome === "refused")
       return { ...route, outcome: "refused" as const, reason: plan.reason };
@@ -1386,7 +1391,7 @@ export class LspController {
       : chosen;
     const edit = editOf(action);
     if (edit === undefined) return refuse(`Code action ${index} has no edit; commands are not run`);
-    const applied = await applyWorkspaceEdit(edit, await realpath(this.cwd), listed.document);
+    const applied = await applyWorkspaceEdit(edit, await this.root(), listed.document);
     if (applied.outcome !== "written") return { ...listed.route, ...applied };
     await this.resync(listed.instance, listed.route, applied.changed, listed.canChange, deadline);
     return {
