@@ -1,13 +1,9 @@
 import type { SettingRow, SettingsMenuSpec, SettingsMenuView } from "pi-hl-utils/settings-menu";
 
-import type { Candidate } from "./detect.js";
-import type { Offer } from "./setup.js";
+import type { FoundOffer, Offer, SetupResults } from "./setup.js";
 
 export type SetupChange = { id: string; value: string };
-// Language to failure text; undefined marks a server that started and was saved.
-export type SetupResults = ReadonlyMap<string, string | undefined>;
 type SetupRow = SettingRow<SetupChange>;
-type Found = Offer & { server: Candidate };
 
 const CONSENT = "consent";
 
@@ -46,9 +42,9 @@ function resultLine(language: string, error: string | undefined): string {
 export function setupSpec(
   offers: readonly Offer[],
   needsConsent: boolean,
-  enable: (chosen: Offer[]) => Promise<SetupResults>,
+  enable: (chosen: FoundOffer[]) => Promise<SetupResults>,
 ): SettingsMenuSpec<SettingsMenuView, SetupChange> {
-  const found = offers.filter((offer): offer is Found => offer.server !== undefined);
+  const found = offers.filter((offer): offer is FoundOffer => offer.server !== undefined);
   const missing = offers.filter((offer) => !offer.server);
   const choices = new Map(found.map((offer) => [offer.language, "enable"]));
   let consent = "no";

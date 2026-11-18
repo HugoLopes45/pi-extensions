@@ -6,7 +6,13 @@ import { expect, it } from "vitest";
 
 import { presetFor } from "../src/presets.js";
 import { setupSpec } from "../src/setup-menu.js";
-import { checkServer, findOffers, setupChanges, type Offer } from "../src/setup.js";
+import {
+  checkOffers,
+  findOffers,
+  type FoundOffer,
+  setupChanges,
+  type Offer,
+} from "../src/setup.js";
 import { directory } from "./fixtures.js";
 
 const protocolServer = fileURLToPath(new URL("./protocol-server.ts", import.meta.url));
@@ -44,23 +50,36 @@ it("offers each detected language that is not known, with its server or install 
   ]);
 });
 
-it("reports a server that completes the handshake as ready and a failing one by its error", async () => {
-  const root = await directory();
-  const ready = { command: process.execPath, args: [protocolServer, "normal"] };
-  expect(await checkServer(ready, root, 5000)).toBeUndefined();
-  const failing = {
-    command: process.execPath,
-    args: ["-e", "process.exit(3)"],
+function offerOf(language: string, root: string, args: string[]): FoundOffer {
+  return {
+    language,
+    root,
+    server: { command: process.execPath, args },
+    install: "",
+    fileTypes: [],
   };
-  expect(await checkServer(failing, root, 5000)).toMatch(/\S/u);
+}
+
+it("reports, in offer order, a server that completes the handshake as ready and a failing one by its error", async () => {
+  const root = await directory();
+  const results = await checkOffers(
+    [
+      offerOf("failing", root, ["-e", "process.exit(3)"]),
+      offerOf("ready", root, [protocolServer, "normal"]),
+    ],
+    5000,
+  );
+  expect([...results.keys()]).toEqual(["failing", "ready"]);
+  expect(results.get("failing")).toMatch(/\S/u);
+  expect(results.get("ready")).toBeUndefined();
 });
 
 it("stops a server whose handshake times out", async () => {
   const root = await directory();
   const pidFile = join(root, "pid");
   const hang = `require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
-  const error = await checkServer({ command: process.execPath, args: ["-e", hang] }, root, 300);
-  expect(error).toMatch(/\S/u);
+  const results = await checkOffers([offerOf("hang", root, ["-e", hang])], 300);
+  expect(results.get("hang")).toMatch(/\S/u);
   const pid = Number(await readFile(pidFile, "utf8"));
   expect(() => process.kill(pid, 0)).toThrow("ESRCH");
 });
@@ -80,12 +99,16 @@ const python: Offer = {
   fileTypes: [".py"],
 };
 
-it("adds enabled servers to the global ones, turns LSP on and remembers skipped languages", () => {
+it("saves ready servers, keeps failed ones offered and ignores the rest", () => {
   const typescript = { command: "/bin/tsls", args: ["--stdio"] };
+  const swift: Offer = { ...rust, language: "swift", server: undefined };
   const changes = setupChanges(
     { servers: { typescript }, ignoredLanguages: ["go"] },
-    [rust],
-    ["swift"],
+    [rust, python, swift],
+    new Map([
+      ["rust", undefined],
+      ["python", "exited with status 1"],
+    ]),
     true,
   );
   expect(changes).toEqual([
@@ -111,7 +134,7 @@ it("adds enabled servers to the global ones, turns LSP on and remembers skipped 
       patch: { ignoredLanguages: ["go", "swift"] },
     },
   ]);
-  expect(setupChanges({}, [], ["swift"], false)).toEqual([
+  expect(setupChanges({}, [swift], new Map(), true)).toEqual([
     {
       action: "set",
       key: "ignoredLanguages",

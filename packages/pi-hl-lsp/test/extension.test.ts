@@ -26,7 +26,7 @@ import { stringMatching } from "pi-hl-utils/testing/matchers";
 import { createMenuTui, keys, menuDriver } from "pi-hl-utils/testing/menu-ui";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { expect, it, onTestFinished } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 
 import { directory } from "./fixtures.js";
 
@@ -311,6 +311,170 @@ it("shows launch policy only in the global menu scope", async () => {
   expect(screens[2]).toContain("timeoutMs");
   expect(screens[2]).toContain("allowProjectExecution");
   for (const screen of screens) expect(screen).not.toContain("servers");
+});
+
+/** A Python project whose `.venv` holds a server script; `body` is the script after the shebang. */
+async function pythonProject(cwd: string, body: string): Promise<string> {
+  await writeFile(join(cwd, "pyproject.toml"), '[project]\nname = "demo"\n');
+  const bin = join(cwd, ".venv", "bin");
+  await mkdir(bin, { recursive: true });
+  const server = join(bin, "basedpyright-langserver");
+  await writeFile(server, `#!/bin/sh\n${body}\n`);
+  await chmod(server, 0o755);
+  return server;
+}
+
+function pythonProtocolServer(cwd: string): string {
+  const script = fileURLToPath(new URL("./protocol-server.ts", import.meta.url));
+  return `exec "${process.execPath}" "${script}" normal "${join(cwd, "python-spawns.log")}"`;
+}
+
+type Driver = ReturnType<typeof menuDriver>;
+
+/** Rebind in TUI mode, which starts the session again; each opened dialog is driven by `drive`. */
+async function startTui(
+  runtime: Awaited<ReturnType<typeof session>>["runtime"],
+  drive: (driver: Driver) => Promise<void>,
+) {
+  const ui = runtime.session.extensionRunner.getUIContext();
+  const dialogs: Promise<void>[] = [];
+  const notifications: Parameters<typeof ui.notify>[] = [];
+  const bind = () =>
+    runtime.session.bindExtensions({
+      mode: "tui",
+      uiContext: {
+        ...ui,
+        notify: (...args) => {
+          notifications.push(args);
+        },
+        custom: (factory) =>
+          new Promise((resolve) => {
+            const { tui, keybindings } = createMenuTui();
+            const component = Promise.resolve(factory(tui, ui.theme, keybindings, resolve));
+            dialogs.push(component.then((shown) => drive(menuDriver(() => shown))));
+          }),
+      },
+    });
+  await bind();
+  return { dialogs, notifications, bind };
+}
+
+async function globalLsp(agentDir: string): Promise<unknown> {
+  const settings: unknown = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"));
+  return Value.Check(Type.Object({ "hl-lsp": Type.Unknown() }), settings)
+    ? settings["hl-lsp"]
+    : undefined;
+}
+
+it("offers a new language at startup and saves the server the user enables with consent", async () => {
+  initTheme("dark");
+  const { runtime, cwd, agentDir } = await session(false, "normal", {
+    allowProjectExecution: false,
+  });
+  const server = await pythonProject(cwd, pythonProtocolServer(cwd));
+  const screens: string[] = [];
+  const { dialogs } = await startTui(runtime, async (driver) => {
+    screens.push(driver.screen());
+    driver.goTo("Allow project code");
+    driver.press(keys.enter);
+    driver.goTo("Enable");
+    driver.press(keys.enter);
+    await vi.waitFor(() => expect(driver.screen()).toContain("python: ready"), {
+      timeout: 10_000,
+    });
+    driver.press(keys.escape);
+  });
+  expect(dialogs).toHaveLength(1);
+  await Promise.all(dialogs);
+  expect(screens[0]).toContain("Language servers for this project");
+  expect(screens[0]?.replaceAll(/\s*\n\s*/gu, "")).toContain(`${server} for .py files`);
+  await vi.waitFor(async () =>
+    expect(await globalLsp(agentDir)).toMatchObject({
+      enabled: true,
+      allowProjectExecution: true,
+      servers: {
+        typescript: { command: process.execPath },
+        python: { command: server, args: ["--stdio"] },
+      },
+    }),
+  );
+});
+
+it("remembers a dismissed language until /hl-lsp-setup reopens it", async () => {
+  initTheme("dark");
+  const { runtime, cwd, agentDir } = await session(false);
+  await pythonProject(cwd, pythonProtocolServer(cwd));
+  const { dialogs, bind } = await startTui(runtime, async (driver) => {
+    driver.press(keys.escape);
+  });
+  expect(dialogs).toHaveLength(1);
+  await Promise.all(dialogs);
+  await vi.waitFor(async () =>
+    expect(await globalLsp(agentDir)).toMatchObject({
+      ignoredLanguages: ["python"],
+    }),
+  );
+  await bind();
+  expect(dialogs).toHaveLength(1);
+  await runtime.session.prompt("/hl-lsp-setup");
+  expect(dialogs).toHaveLength(2);
+});
+
+it("neither saves nor hides a server that fails its handshake", async () => {
+  initTheme("dark");
+  const { runtime, cwd, agentDir } = await session(false);
+  await pythonProject(cwd, "exit 1");
+  const { dialogs, bind } = await startTui(runtime, async (driver) => {
+    driver.goTo("Enable");
+    driver.press(keys.enter);
+    await vi.waitFor(() => expect(driver.screen()).toContain("python: failed"), {
+      timeout: 10_000,
+    });
+    driver.press(keys.escape);
+  });
+  await Promise.all(dialogs);
+  const settings = await globalLsp(agentDir);
+  expect(settings).not.toHaveProperty("ignoredLanguages");
+  expect(settings).not.toHaveProperty("servers.python");
+  await bind();
+  expect(dialogs).toHaveLength(2);
+});
+
+it("drops the answers of a dialog whose session was replaced while it was open", async () => {
+  initTheme("dark");
+  const { runtime, cwd, agentDir } = await session(false);
+  await pythonProject(cwd, pythonProtocolServer(cwd));
+  const before = await readFile(join(agentDir, "settings.json"), "utf8");
+  const drivers: Driver[] = [];
+  const { dialogs, bind } = await startTui(runtime, async (driver) => {
+    drivers.push(driver);
+  });
+  await bind();
+  expect(dialogs).toHaveLength(2);
+  await Promise.all(dialogs);
+  drivers[0]?.press(keys.escape);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(await readFile(join(agentDir, "settings.json"), "utf8")).toBe(before);
+  drivers[1]?.press(keys.escape);
+  await vi.waitFor(async () =>
+    expect(await globalLsp(agentDir)).toMatchObject({
+      ignoredLanguages: ["python"],
+    }),
+  );
+});
+
+it("offers no setup in an untrusted project", async () => {
+  initTheme("dark");
+  const { runtime, cwd } = await session(false, "normal", {
+    projectTrusted: false,
+  });
+  await pythonProject(cwd, pythonProtocolServer(cwd));
+  const { dialogs, notifications } = await startTui(runtime, async (driver) => {
+    driver.press(keys.escape);
+  });
+  await runtime.session.prompt("/hl-lsp-setup");
+  expect(dialogs).toHaveLength(0);
+  expect(notifications).toContainEqual([stringMatching(/^Trust /u), "warning"]);
 });
 
 it("shows status through Pi UI without adding model or session context", async () => {

@@ -36,8 +36,24 @@ export async function findOffers(
   );
 }
 
+export type FoundOffer = Offer & { server: Candidate };
+// Language to failure text; undefined marks a server that completed its handshake.
+export type SetupResults = ReadonlyMap<string, string | undefined>;
+
 // A present binary can still fail to start, so a server is saved only after its handshake.
-export async function checkServer(
+export async function checkOffers(
+  chosen: readonly FoundOffer[],
+  timeoutMs: number,
+): Promise<SetupResults> {
+  const errors = await Promise.all(
+    chosen.map((offer) => checkServer(offer.server, offer.root, timeoutMs)),
+  );
+  return new Map<string, string | undefined>(
+    chosen.map((offer, index) => [offer.language, errors[index]]),
+  );
+}
+
+async function checkServer(
   server: Candidate,
   root: string,
   timeoutMs: number,
@@ -53,28 +69,38 @@ export async function checkServer(
   return undefined;
 }
 
+/**
+ * The global settings changes after the dialog closes. Ready servers are saved; a failed one stays
+ * offered so the next start shows it again; every other offered language is ignored.
+ */
 export function setupChanges(
   global: LspOptions,
-  enabled: readonly Offer[],
-  skipped: readonly string[],
-  consent: boolean,
+  offers: readonly Offer[],
+  results: SetupResults,
+  grantsExecution: boolean,
 ): LspChange[] {
   const changes: LspChange[] = [];
   const servers = { ...global.servers };
-  for (const { language, server } of enabled)
-    if (server) servers[language] = { command: server.command, args: server.args };
-  if (enabled.some(({ server }) => server)) {
+  let saved = 0;
+  for (const { language, server } of offers)
+    if (server && results.has(language) && results.get(language) === undefined) {
+      servers[language] = { command: server.command, args: server.args };
+      saved++;
+    }
+  if (saved > 0)
     changes.push(
       { action: "set", key: "servers", patch: { servers } },
       { action: "set", key: "enabled", patch: { enabled: true } },
     );
-  }
-  if (consent)
+  if (saved > 0 && grantsExecution)
     changes.push({
       action: "set",
       key: "allowProjectExecution",
       patch: { allowProjectExecution: true },
     });
+  const skipped = offers
+    .filter(({ language }) => !results.has(language))
+    .map(({ language }) => language);
   if (skipped.length > 0) {
     const ignoredLanguages = [...new Set([...(global.ignoredLanguages ?? []), ...skipped])];
     changes.push({

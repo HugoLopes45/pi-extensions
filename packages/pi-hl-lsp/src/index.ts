@@ -25,8 +25,11 @@ import { formatNewErrors } from "./format.js";
 import type { LspChange } from "./menu.js";
 import { outside } from "./project-files.js";
 import { commandSpec, lspSettings, readSettings } from "./settings.js";
+import { checkOffers, findOffers, setupChanges, type Offer, type SetupResults } from "./setup.js";
 import { bounded } from "./text.js";
 
+// Language servers may load their toolchain before answering initialize.
+const SETUP_CHECK_TIMEOUT_MS = 15_000;
 const file = Type.String({ minLength: 1, maxLength: 4096 });
 const oneBased = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const navigation = Type.Object({
@@ -353,7 +356,10 @@ export default function hlLsp(pi: ExtensionAPI): void {
     footer(ctx);
   }
 
-  pi.on("session_start", async (_event, ctx) => reset(ctx));
+  pi.on("session_start", async (_event, ctx) => {
+    await reset(ctx);
+    if (ctx.mode === "tui" && !issue) await setup(ctx, true);
+  });
   pi.on("session_tree", async (_event, ctx) => reset(ctx));
   pi.on("session_shutdown", async (_event, ctx) => {
     await stop();
@@ -389,17 +395,82 @@ export default function hlLsp(pi: ExtensionAPI): void {
     };
   });
 
-  async function apply(ctx: ExtensionContext, scope: LayeredSettingScope, change: LspChange) {
+  async function apply(ctx: ExtensionContext, scope: LayeredSettingScope, ...changes: LspChange[]) {
     const generation = epoch;
-    await lspSettings.writeChange(
-      pi,
-      layeredSettingsSession(ctx),
-      scope,
-      change,
-      () => epoch === generation,
-    );
+    for (const change of changes)
+      await lspSettings.writeChange(
+        pi,
+        layeredSettingsSession(ctx),
+        scope,
+        change,
+        () => epoch === generation,
+      );
     if (epoch === generation) await reset(ctx);
   }
+
+  /**
+   * Offer the languages detected in a trusted project that have no server yet. At startup the
+   * dialog opens before the session continues but is answered in the background, and languages
+   * the user dismissed are not offered again.
+   */
+  async function setup(ctx: ExtensionContext, startup: boolean) {
+    if (!ctx.isProjectTrusted()) {
+      if (!startup) ctx.ui.notify("Trust this project to set up its language servers.", "warning");
+      return;
+    }
+    const { settings: config } = readSettings(layeredSettingsSession(ctx));
+    const known = new Set(Object.keys(config.servers));
+    if (startup) for (const language of config.ignoredLanguages) known.add(language);
+    const offers = await findOffers(ctx.cwd, known, process.env.PATH);
+    if (offers.length === 0) {
+      if (!startup) ctx.ui.notify("Every detected language already has a server.", "info");
+      return;
+    }
+    const { closed } = await openSetup(ctx, offers, !config.allowProjectExecution);
+    if (!startup) return closed;
+    closed.catch((cause: unknown) => ctx.ui.notify(errorText(cause), "error"));
+  }
+
+  // Resolves once the dialog is shown; `closed` saves the answers when it closes.
+  async function openSetup(ctx: ExtensionContext, offers: readonly Offer[], needsConsent: boolean) {
+    const [{ SettingsMenu }, { setupSpec }] = await Promise.all([
+      import("pi-hl-utils/settings-menu"),
+      import("./setup-menu.js"),
+    ]);
+    let results: SetupResults = new Map();
+    const generation = epoch;
+    const closed = ctx.ui.custom<void>(
+      (tui, theme, _keys, done) =>
+        new SettingsMenu(
+          setupSpec(offers, needsConsent, async (chosen) => {
+            results = await checkOffers(chosen, SETUP_CHECK_TIMEOUT_MS);
+            return results;
+          }),
+          { tui, theme },
+          () => done(),
+        ),
+    );
+    return {
+      closed: closed.then(async () => {
+        // A replaced session invalidates ctx; its answers are dropped.
+        if (epoch !== generation) return;
+        // Read again: settings may have changed while the dialog was open.
+        const { settings: config } = readSettings(layeredSettingsSession(ctx));
+        // The dialog checks servers only after consent, so a saved server implies it was given.
+        const changes = setupChanges(config, offers, results, needsConsent);
+        if (changes.length > 0) await apply(ctx, "global", ...changes);
+      }),
+    };
+  }
+
+  pi.registerCommand("hl-lsp-setup", {
+    description: "Detect this project's languages and enable their language servers",
+    handler: async (_args, ctx) => {
+      if (ctx.mode !== "tui")
+        ctx.ui.notify("/hl-lsp-setup needs the interactive terminal.", "warning");
+      else await setup(ctx, false);
+    },
+  });
 
   registerSettingsCommand(pi, {
     name: "hl-lsp",
