@@ -1,13 +1,27 @@
+import type * as fsPromises from "node:fs/promises";
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { expect, it, onTestFinished } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 
 import { applyWorkspaceEdit, moveFile } from "../src/rename.js";
 import { directory } from "./fixtures.js";
+
+// Set to an error code, link fails with it, as on a file system without hard links.
+const links = vi.hoisted(() => ({ failure: undefined as string | undefined }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof fsPromises>();
+  return {
+    ...actual,
+    link: async (from: string, to: string) => {
+      if (links.failure === undefined) return actual.link(from, to);
+      throw Object.assign(new Error(`${links.failure}: link failed`), { code: links.failure });
+    },
+  };
+});
 
 const start = { line: 0, character: 0 };
 
@@ -184,6 +198,21 @@ it("does not overwrite a file that appeared at the destination after planning", 
   );
   expect(await filesIn(root, ["old.ts", "new.ts"])).toEqual(["moved\n", "kept\n"]);
 });
+
+it.each(["EXDEV", "EPERM", "ENOTSUP"])(
+  "explains a move refused for want of a hard link (%s)",
+  async (code) => {
+    const root = await directory();
+    await writeFile(join(root, "old.ts"), "moved\n");
+    links.failure = code;
+    onTestFinished(() => {
+      links.failure = undefined;
+    });
+    await expect(
+      moveFile({ from: join(root, "old.ts"), to: join(root, "new.ts") }),
+    ).rejects.toThrow(`The file system refuses the hard link that moving the file needs (${code})`);
+  },
+);
 
 it("leaves no destination behind when the old name cannot be removed", async () => {
   const root = await directory();

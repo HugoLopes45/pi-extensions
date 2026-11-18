@@ -272,7 +272,17 @@ export async function planMove(from: string, newPath: string, root: string): Pro
 export async function moveFile({ from, to }: FileMove): Promise<void> {
   await mkdir(dirname(to), { recursive: true });
   // link fails on an existing destination, so a file created since planning is never replaced.
-  await link(from, to);
+  await link(from, to).catch((error: unknown) => {
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (code === "EXDEV" || code === "EPERM" || code === "ENOTSUP")
+      throw new Error(
+        `The file system refuses the hard link that moving the file needs (${code})`,
+        {
+          cause: error,
+        },
+      );
+    throw error;
+  });
   try {
     await unlink(from);
   } catch (error) {
