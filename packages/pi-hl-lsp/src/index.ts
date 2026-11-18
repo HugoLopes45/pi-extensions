@@ -59,6 +59,7 @@ const diagnosticsInput = Type.Object({
 const editedFile = Type.Object({ path: file });
 // Bounds the post-edit wait for formatting and, separately, for new errors; a server still starting keeps starting.
 const POST_EDIT_MS = 3000;
+const CHECKED_FILES_LIMIT = 10;
 const workspaceSymbols = Type.Object({
   file,
   query: Type.String({ minLength: 1, maxLength: 200 }),
@@ -167,9 +168,12 @@ function blockText(header: string, details: Details): string {
   return `hl-lsp ${header}: ${details.outcome}\n${details.text ?? details.reason}`;
 }
 
-function toolResult(header: string, details: Details) {
+function toolResult(header: string, details: Details, lines: string[] = []) {
   return {
-    content: [{ type: "text" as const, text: blockText(header, details) }],
+    content: [blockText(header, details), ...lines].map((text): { type: "text"; text: string } => ({
+      type: "text",
+      text,
+    })),
     details,
     isError: !isServed(details),
   };
@@ -300,12 +304,38 @@ async function postEditNotes(
   signal: AbortSignal | undefined,
 ): Promise<string[]> {
   const formatted = await formatLine(current, cwd, file, signal);
-  const notes = formatted === undefined ? [] : [formatted];
+  const checked = await checkLine(current, cwd, file, signal);
+  return [formatted, checked].filter((line) => line !== undefined);
+}
+
+async function checkLine(
+  current: LspController,
+  cwd: string,
+  file: string,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
   const check = await current
     .newErrors(file, postEditDeadline(signal))
-    .catch((error: unknown): EditCheck => ({ outcome: "unchecked", reason: errorText(error) }));
-  const line = check && editCheckLine(check, displayPath(cwd, file));
-  return line === undefined ? notes : [...notes, line];
+    .catch((error: unknown): EditCheck => ({
+      outcome: "unchecked",
+      reason: errorText(error),
+    }));
+  return check && editCheckLine(check, displayPath(cwd, file));
+}
+
+// A multi-file edit can break callers of what it changed, so each changed file is checked in turn.
+async function changedFileLines(
+  current: LspController,
+  cwd: string,
+  files: string[],
+  signal: AbortSignal | undefined,
+): Promise<string[]> {
+  const checked = files.slice(0, CHECKED_FILES_LIMIT);
+  const lines: (string | undefined)[] = [];
+  for (const file of checked) lines.push(await checkLine(current, cwd, file, signal));
+  const skipped = files.length - checked.length;
+  if (skipped > 0) lines.push(`hl-lsp: ${skipped} more changed files were not checked for errors`);
+  return lines.filter((line) => line !== undefined);
 }
 
 // Silence means the file was checked and has no new error, so an unfinished check must say so.
@@ -655,10 +685,16 @@ export default function hlLsp(pi: ExtensionAPI): void {
           signal,
         );
         if (result.outcome !== "completed") return toolResult(header, result);
-        return toolResult(header, {
-          ...result,
-          text: renameLines(result.changed, ctx.cwd),
-        });
+        return toolResult(
+          header,
+          { ...result, text: renameLines(result.changed, ctx.cwd) },
+          await changedFileLines(
+            controller,
+            ctx.cwd,
+            result.changed.map(({ file }) => file),
+            signal,
+          ),
+        );
       } catch (error) {
         return toolResult(header, failureDetails(error, signal?.aborted === true));
       }
@@ -680,10 +716,12 @@ export default function hlLsp(pi: ExtensionAPI): void {
         const result = await controller.renameFile(params.old_path, params.new_path, signal);
         if (result.outcome !== "completed") return toolResult(header, result);
         const moved = `moved ${displayPath(ctx.cwd, result.move.from)} -> ${displayPath(ctx.cwd, result.move.to)}`;
-        return toolResult(header, {
-          ...result,
-          text: renameLines(result.changed, ctx.cwd, moved),
-        });
+        const files = [...result.changed.map(({ file }) => file), result.move.to];
+        return toolResult(
+          header,
+          { ...result, text: renameLines(result.changed, ctx.cwd, moved) },
+          await changedFileLines(controller, ctx.cwd, files, signal),
+        );
       } catch (error) {
         return toolResult(header, failureDetails(error, signal?.aborted === true));
       }
@@ -738,10 +776,16 @@ export default function hlLsp(pi: ExtensionAPI): void {
           signal,
         );
         if (result.outcome !== "completed") return toolResult(header, result);
-        return toolResult(header, {
-          ...result,
-          text: renameLines(result.changed, ctx.cwd),
-        });
+        return toolResult(
+          header,
+          { ...result, text: renameLines(result.changed, ctx.cwd) },
+          await changedFileLines(
+            controller,
+            ctx.cwd,
+            result.changed.map(({ file }) => file),
+            signal,
+          ),
+        );
       } catch (error) {
         return toolResult(header, failureDetails(error, signal?.aborted === true));
       }

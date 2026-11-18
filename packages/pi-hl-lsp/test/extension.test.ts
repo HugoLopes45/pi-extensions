@@ -929,6 +929,40 @@ it.each(["rename-changes", "rename-versioned"])(
   },
 );
 
+it("checks every file a rename changed for errors", async () => {
+  const state = await renameSession("rename-errors");
+  const note = (file: string) =>
+    `hl-lsp: 1 error in ${file}; no check ran before this edit, so it may be older\n1:1 error 2322 Untrusted diagnostic prose`;
+  expect(
+    await tool(state, "hl_lsp_rename", {
+      file: "index.ts",
+      line: 1,
+      symbol: "value",
+      new_name: "ERROR",
+    }),
+  ).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp rename index.ts: completed\nindex.ts: 1 edits\nother.ts: 1 edits\ntotal: 2 edits in 2 files",
+      },
+      { type: "text", text: note("index.ts") },
+      { type: "text", text: note("other.ts") },
+    ],
+  });
+});
+
+it("checks at most ten changed files and counts the rest", async () => {
+  const state = await renameSession("rename-many");
+  for (let index = 0; index < 11; index += 1)
+    await writeFile(join(state.cwd, `other${index}.ts`), 'import { value } from "./index";\n');
+  const result = await rename(state);
+  expect(result).toMatchObject({ details: { outcome: "completed" } });
+  expect(JSON.stringify(result)).toContain(
+    "hl-lsp: 2 more changed files were not checked for errors",
+  );
+});
+
 it.each([
   ["rename-prepare-null", "Rename is not available at this position"],
   ["rename-stale", "is stale"],
@@ -1030,6 +1064,23 @@ it("moves the file and updates the imports that name it", async () => {
   expect(await readFile(join(state.cwd, "util.ts"), "utf8")).toBe("export const value = 1;\n");
   await expect(readFile(join(state.cwd, "lib.ts"), "utf8")).rejects.toMatchObject({
     code: "ENOENT",
+  });
+});
+
+it("checks the moved file for errors", async () => {
+  const state = await renameFileSession("rename-file-errors");
+  await writeFile(join(state.cwd, "lib.ts"), "export const ERROR = 1;\n");
+  expect(await renameFile(state, "lib.ts", "util.ts")).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: stringMatching(/^hl-lsp rename_file lib\.ts -> util\.ts: completed\n/u),
+      },
+      {
+        type: "text",
+        text: "hl-lsp: 1 error in util.ts; no check ran before this edit, so it may be older\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
   });
 });
 
@@ -1161,6 +1212,23 @@ it("applies the edit of the listed action when its title matches", async () => {
     ],
   });
   expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("let value = 1;\n");
+});
+
+it("checks the files a code action edited for errors", async () => {
+  const state = await session(true, "code-actions");
+  await writeFile(join(state.cwd, "index.ts"), "const value = 1; // ERROR\n");
+  expect(await applyCodeAction(state, 1, "Fix 1 diagnostics")).toMatchObject({
+    content: [
+      {
+        type: "text",
+        text: stringMatching(/^hl-lsp apply_code_action index\.ts: completed\n/u),
+      },
+      {
+        type: "text",
+        text: "hl-lsp: 1 error in index.ts; no check ran before this edit, so it may be older\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
+  });
 });
 
 it("refuses a stale index whose listed title differs and writes no file", async () => {
@@ -1638,7 +1706,9 @@ it("does not call errors new when no check ran before the edit", async () => {
 });
 
 it("says an edit was not checked while the server is still busy", async () => {
-  const state = await session(true, "pull-progress-forever", { timeoutMs: 1500 });
+  const state = await session(true, "pull-progress-forever", {
+    timeoutMs: 1500,
+  });
   expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
     content: [
       { type: "text", text: "Wrote index.ts" },

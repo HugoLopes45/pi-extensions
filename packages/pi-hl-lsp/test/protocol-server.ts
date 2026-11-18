@@ -156,9 +156,15 @@ const renameModes = new Set<string | undefined>([
   "rename-resource",
   "rename-outside",
   "rename-prepare-null",
+  "rename-errors",
+  "rename-many",
 ]);
 const formattingModes = new Set<string | undefined>(["format", "format-race", "format-errors"]);
-const renameFileModes = new Set<string | undefined>(["rename-file", "rename-file-null"]);
+const renameFileModes = new Set<string | undefined>([
+  "rename-file",
+  "rename-file-null",
+  "rename-file-errors",
+]);
 const codeActionModes = new Set<string | undefined>([
   "code-actions",
   "code-actions-outside",
@@ -394,6 +400,13 @@ connection.onRequest("textDocument/rename", (params: unknown): object => {
     return {
       documentChanges: [{ textDocument: { uri, version: 7 }, edits: [local] }],
     };
+  // index.ts and eleven importers, other0.ts to other10.ts, hold the symbol.
+  if (mode === "rename-many") {
+    const changes: Record<string, object[]> = { [uri]: [local] };
+    for (let index = 0; index < 11; index += 1)
+      changes[new URL(`./other${index}.ts`, uri).href] = [imported];
+    return { changes };
+  }
   if (mode === "rename-resource") return { documentChanges: [{ kind: "create", uri: sibling }] };
   if (mode === "rename-outside")
     return {
@@ -551,6 +564,8 @@ function reportedFindings(value: unknown): object[] {
     mode === "error-lines" ||
     mode === "slow-error-lines" ||
     mode === "format-errors" ||
+    mode === "rename-errors" ||
+    mode === "rename-file-errors" ||
     codeActionModes.has(mode)
   )
     return errorLines(value);
@@ -560,6 +575,8 @@ function reportedFindings(value: unknown): object[] {
 // Modes whose publication carries the document version, and the code each mode reports.
 const versionedModes = new Set<string | undefined>([
   "versioned",
+  "rename-errors",
+  "rename-file-errors",
   "pull-empty-reopen-versioned",
   "error-lines",
   "format-errors",
