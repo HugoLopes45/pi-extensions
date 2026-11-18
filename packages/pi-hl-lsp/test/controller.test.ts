@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { closeSync, constants, openSync, readFileSync } from "node:fs";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -574,6 +574,37 @@ it("reports a publication made for a file before it was opened", async () => {
     diagnostics: [{ code: 2322 }],
   });
 });
+
+// A reader blocked in open() on a pipe holds a thread-pool thread until a writer opens the pipe.
+function unblockReaders(fifo: string) {
+  try {
+    closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+  } catch (error) {
+    // ENXIO: no reader has the pipe open.
+    if (!(error instanceof Error && "code" in error && error.code === "ENXIO")) throw error;
+  }
+}
+
+it.skipIf(process.platform === "win32")(
+  "does not open named pipes that a publication names",
+  async () => {
+    const { instance, file } = await controller("publish-fifos", true, true, {
+      timeoutMs: 3000,
+    });
+    const fifos = Array.from({ length: 8 }, (_, index) => join(file, "..", `fifo${index}.ts`));
+    for (const fifo of fifos) execFileSync("mkfifo", [fifo]);
+    onTestFinished(() => {
+      for (const fifo of fifos) unblockReaders(fifo);
+    });
+    const other = join(file, "..", "other.ts");
+    await writeFile(other, "const other = 1;\n");
+    const answered = instance
+      .query("diagnostics", file)
+      .then(() => instance.query("diagnostics", other))
+      .then(({ outcome }) => outcome);
+    expect(await Promise.race([answered, delay(5000, "stalled")])).toBe("completed");
+  },
+);
 
 it("ignores a publication made for a file whose text changed before it was opened", async () => {
   const { instance, file } = await controller("publish-other-file", true, true, {

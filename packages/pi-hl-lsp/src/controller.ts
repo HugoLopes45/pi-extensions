@@ -361,27 +361,33 @@ function retainUnopened(
   }
   const edits = editsOf(state, file);
   state.pending.set(file, value);
-  snapshot(file, signal).then(
-    (text) => {
-      if (state.pending.get(file) !== value) return;
-      state.pending.delete(file);
-      if (editsOf(state, file) !== edits) return;
-      state.published.delete(file);
-      state.published.set(file, {
-        text,
-        edits,
-        observation: settledObservation(report),
-      });
-      // The oldest entry goes first; a file without one falls back to its own pull.
-      const oldest = state.published.keys().next();
-      if (state.published.size > RETAINED_LIMIT && !oldest.done)
-        state.published.delete(oldest.value);
-    },
-    // An unreadable file has no text to tie the publication to, so the publication is not kept.
-    () => {
-      if (state.pending.get(file) === value) state.pending.delete(file);
-    },
-  );
+  // Opening a named pipe blocks a thread-pool thread until a writer appears.
+  stat(file)
+    .then((stats) => {
+      if (!stats.isFile()) throw new Error("Not a regular file");
+      return snapshot(file, signal);
+    })
+    .then(
+      (text) => {
+        if (state.pending.get(file) !== value) return;
+        state.pending.delete(file);
+        if (editsOf(state, file) !== edits) return;
+        state.published.delete(file);
+        state.published.set(file, {
+          text,
+          edits,
+          observation: settledObservation(report),
+        });
+        // The oldest entry goes first; a file without one falls back to its own pull.
+        const oldest = state.published.keys().next();
+        if (state.published.size > RETAINED_LIMIT && !oldest.done)
+          state.published.delete(oldest.value);
+      },
+      // An unreadable file has no text to tie the publication to, so the publication is not kept.
+      () => {
+        if (state.pending.get(file) === value) state.pending.delete(file);
+      },
+    );
 }
 
 // A pull answers for this document version; a push already settled for it joins the answer.

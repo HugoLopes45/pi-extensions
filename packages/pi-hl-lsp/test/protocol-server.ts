@@ -131,6 +131,7 @@ const staticPullModes = new Set<string | undefined>([
   "pull-refresh-findings-then-push",
   "pull-progress-chatter",
   "publish-other-file",
+  "publish-fifos",
   "pull-empty-reopen",
   "pull-empty-reopen-versioned",
 ]);
@@ -626,6 +627,7 @@ const silentModes = new Set<string | undefined>([
   "pull-refresh-findings-then-push",
   "pull-progress-chatter",
   "publish-other-file",
+  "publish-fifos",
   "pull-static",
   "pull-dynamic",
   "pull-late-registration",
@@ -822,6 +824,15 @@ function publishAfterLoad(uri: string, version: number) {
       uri: new URL("other.ts", uri).href,
       diagnostics: [finding(2322)],
     });
+  }
+  // Publishes, once, for fifo0.ts to fifo7.ts, which the test creates as named pipes.
+  if (mode === "publish-fifos" && !publishedUris.has("fifos")) {
+    publishedUris.add("fifos");
+    for (let index = 0; index < 8; index += 1)
+      void connection.sendNotification("textDocument/publishDiagnostics", {
+        uri: new URL(`fifo${index}.ts`, uri).href,
+        diagnostics: [finding(2322)],
+      });
   }
   // Progress reports without a begin keep arriving, so the server is never quiet and holds no token.
   if (mode === "pull-progress-chatter")
