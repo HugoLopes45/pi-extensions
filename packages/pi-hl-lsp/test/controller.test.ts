@@ -19,6 +19,7 @@ import { directory } from "./fixtures.js";
 const reads = vi.hoisted(() => ({
   queried: undefined as string | undefined,
   paths: [] as string[],
+  streams: new Map<string, PassThrough>(),
 }));
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof fs>();
@@ -28,7 +29,9 @@ vi.mock("node:fs", async (importOriginal) => {
       if (reads.queried === undefined || path === reads.queried)
         return actual.createReadStream(path, options);
       reads.paths.push(path);
-      return new PassThrough({ signal: options.signal });
+      const stream = new PassThrough({ signal: options.signal });
+      reads.streams.set(path, stream);
+      return stream;
     },
   };
 });
@@ -645,14 +648,17 @@ async function publishMany(mode = "publish-many") {
   await symlink(target, join(file, "..", "outside.ts"));
   for (let index = 0; index < 200; index += 1)
     await writeFile(join(file, "..", `many${index}.ts`), "const many = 1;\n");
+  await writeFile(join(file, "..", "other.ts"), "const other = 1;\n");
   reads.queried = file;
   onTestFinished(() => {
     reads.queried = undefined;
     reads.paths = [];
+    reads.streams.clear();
   });
   await instance.query("diagnostics", file);
   await vi.waitFor(() => expect(reads.paths.length).toBeGreaterThanOrEqual(128));
   await delay(300);
+  return { instance, file };
 }
 
 it("does not read a file outside the root that a publication names", async () => {
@@ -663,6 +669,21 @@ it("does not read a file outside the root that a publication names", async () =>
 it("reads at most 128 files named by publications at a time", async () => {
   await publishMany();
   expect(reads.paths).toHaveLength(128);
+});
+
+it("does not keep an older read of a file whose newer publication was dropped", async () => {
+  // The read of other.ts and 127 others fill the limit, so the second publication of other.ts is dropped.
+  const { instance, file } = await publishMany("publish-past-limit");
+  const other = join(file, "..", "other.ts");
+  const stream = [...reads.streams].find(([read]) => read.endsWith("other.ts"))?.[1];
+  if (stream === undefined) throw new Error("other.ts was not read");
+  stream.end("const other = 1;\n");
+  await delay(100);
+  reads.queried = other;
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
 });
 
 it("reads a file at most 128 times at once for repeated publications", async () => {

@@ -134,6 +134,7 @@ const staticPullModes = new Set<string | undefined>([
   "publish-fifos",
   "publish-many",
   "publish-repeat",
+  "publish-past-limit",
   "pull-empty-reopen",
   "pull-empty-reopen-versioned",
 ]);
@@ -632,6 +633,7 @@ const silentModes = new Set<string | undefined>([
   "publish-fifos",
   "publish-many",
   "publish-repeat",
+  "publish-past-limit",
   "pull-static",
   "pull-dynamic",
   "pull-late-registration",
@@ -813,6 +815,10 @@ const unopenedNames = new Map<string | undefined, string[]>([
   ["publish-fifos", Array.from({ length: 8 }, (_, index) => `fifo${index}.ts`)],
   ["publish-many", ["outside.ts", ...Array.from({ length: 200 }, (_, index) => `many${index}.ts`)]],
   ["publish-repeat", Array.from({ length: 200 }, () => "many0.ts")],
+  [
+    "publish-past-limit",
+    ["other.ts", ...Array.from({ length: 128 }, (_, index) => `many${index}.ts`), "other.ts"],
+  ],
 ]);
 function publishUnopened(uri: string) {
   const names = unopenedNames.get(mode);
