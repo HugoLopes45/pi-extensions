@@ -37,8 +37,7 @@ function change(key: MenuKey, text: string, scope: LayeredSettingScope): LspChan
 }
 
 const descriptions = {
-  enabled:
-    "Enable read-only language tools. Project trust and global execution consent remain required.",
+  enabled: "Enable the language tools. Project trust and global execution consent remain required.",
   name: "Display name, at most 80 characters without control characters or surrounding whitespace.",
   timeoutMs: "Request timeout in milliseconds, from 100 to 60000.",
   allowProjectExecution:

@@ -1,28 +1,31 @@
 # pi-hl-lsp
 
-Private, disabled-by-default read-only LSP extension for Pi. Requires Pi 1.5.2 or newer and Node.js 22.19.0 or newer. This package is not installed in the live agent.
+Private, disabled-by-default LSP extension for Pi. Requires Pi 1.5.2 or newer and Node.js 22.19.0 or newer. This package is not installed in the live agent.
 
 ## Scope
 
-The extension provides ten read-only tools: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_type_definition`, `hl_lsp_implementation`, `hl_lsp_references`, `hl_lsp_incoming_calls`, `hl_lsp_outgoing_calls`, `hl_lsp_symbols`, `hl_lsp_workspace_symbols`, and `hl_lsp_diagnostics`. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column. Call tools use the first item that the server prepares for the position, and name it when the server prepares several. `hl_lsp_workspace_symbols` takes a query and finds matching symbols across the project of any file you pass.
+The extension provides 16 tools. Ten tools read: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_type_definition`, `hl_lsp_implementation`, `hl_lsp_references`, `hl_lsp_incoming_calls`, `hl_lsp_outgoing_calls`, `hl_lsp_symbols`, `hl_lsp_workspace_symbols`, and `hl_lsp_diagnostics`. `hl_lsp_code_actions` lists the code actions at a position. Three tools edit files on disk: `hl_lsp_rename`, `hl_lsp_rename_file`, and `hl_lsp_apply_code_action`. `hl_lsp_status` and `hl_lsp_reload` manage servers. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column. Call tools use the first item that the server prepares for the position, and name it when the server prepares several. `hl_lsp_workspace_symbols` takes a query and finds matching symbols across the project of any file you pass. `hl_lsp_diagnostics` takes one file, or up to 20 paths checked one after another.
+
+The three edit tools apply the server's edits all or none, after a check that each file still has the text the server saw. If a write fails, the written files are restored; a file that cannot be restored is named in `Could not restore: <files>.`. `hl_lsp_rename_file` moves the file with a hard link and an unlink, so it never replaces an existing file; a file system that refuses the link fails with `The file system refuses the hard link that moving the file needs (<code>)`. `hl_lsp_apply_code_action` takes the index and title from a fresh `hl_lsp_code_actions` list; it never runs a server command. If the files changed but the server could not be told, the result ends with `the server was not updated: <reason>`.
 
 `hl_lsp_status` lists each configured server key with its state, root, open document count and supported tools. It starts no server. `hl_lsp_reload` takes one configured server key and stops its running instances; the next request starts a fresh one. Both tools obey the same enablement, trust and consent gate as the others.
 
 Each session owns its server processes. Servers start only when a tool needs them. Pi runs the tools sequentially through its native execution mechanism.
 
-Diagnostics use push publications, or pull requests when the server offers them. A pull answer is provisional: for one quiet window of 1 second, a publication or a refresh request replaces it. Results carry one of three `evidence` values. Matching versions never certify the whole project.
+Diagnostics use push publications, and pull requests when the server offers them. A pull answer is provisional: for one quiet window of 1 second, a publication joins it, and a refresh request makes the extension pull again. The answer joins the pull result with the publications settled for the same document version, errors first. A publication for a file that is not open is kept with the file's text on disk, and joins the answer when the file opens with the same text. Results carry one of four `evidence` values. Matching versions never certify the whole project.
 
 | `evidence`            | Meaning                                                                   | `outcome`   |
 | --------------------- | ------------------------------------------------------------------------- | ----------- |
 | `revision_correlated` | The publication carries the document version.                             | `completed` |
 | `settled_unversioned` | An unversioned publication, with no newer one for 500 ms.                 | `partial`   |
 | `unchanged_empty`     | After an edit, no publication for 1 s, and the previous result was empty. | `partial`   |
+| `server_busy`         | A progress token is still open at the end of the wait; nothing settled.   | `partial`   |
 
 If no result settles before the request deadline, the tool fails with `No settled diagnostics before the timeout`.
 
 Natural model requests can receive one transient summary of the latest settled observation. The summary includes its `evidence`. The extension rereads the file first. Automatic summaries exclude diagnostic prose.
 
-Files synchronize on explicit semantic requests. After a successful edit or write, the extension checks the edited file once, for at most 3 seconds, and appends the errors that the change introduced to the tool result. Errors are compared with the last settled observation of the same file. Edits trigger no other analysis. The extension does not apply server edits or execute server-requested commands.
+Files synchronize on explicit semantic requests. After a successful `edit` or `write` tool call, the extension checks the edited file once, for at most 3 seconds, and appends the errors that the change introduced to the tool result. Files changed through `bash` are not checked. After an edit tool of this extension, each changed file is checked in turn, at most 10 files; a note counts the others. Errors are compared with the last settled observation of the same file. Without one, the note says that the errors may be older. A check that does not finish says `<file> was not checked for errors: <reason>`, for example `the server reported more errors than are compared` or `the server is still busy`. Edits trigger no other analysis. The extension never executes server-requested commands.
 
 ## Output
 
@@ -38,7 +41,7 @@ Output is capped. Hover is limited to 8 KiB and 100 lines. Other bodies are limi
 
 ## Configuration
 
-The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `allowProjectExecution`, `timeoutMs`, and `formatOnWrite` are global-only. Trusted project settings and session overrides may change `enabled` and `name`. Untrusted project settings are ignored.
+The `hl-lsp` namespace uses shared layered settings backed by Pi. `servers`, `allowProjectExecution`, `timeoutMs`, `formatOnWrite`, and `ignoredLanguages` are global-only. Trusted project settings and session overrides may change `enabled` and `name`. Untrusted project settings are ignored.
 
 LSP runs only when all three conditions hold. A refusal names each failed condition and its fix.
 
@@ -65,7 +68,9 @@ Example global settings fragment:
 }
 ```
 
-Commands must be absolute paths. Built-in keys are `typescript`, `python`, `rust`, and `swift`. Other keys configure custom servers; see Servers. No server is downloaded or selected automatically.
+Commands must be absolute paths. Built-in keys are `typescript`, `python`, `rust`, and `swift`. Other keys configure custom servers; see Servers. No server is downloaded.
+
+`/hl-lsp-setup` detects the project's languages that have no server, and offers the server found in the project or on `PATH`, with an install hint when none is found. It needs a trusted project and the interactive terminal. A chosen server is started once as a check; a server that starts is saved to the global `servers`, and a failed one stays offered. In a trusted project and the interactive terminal, the same dialog opens at startup. The languages dismissed there are saved to `ignoredLanguages` and not offered again at startup; `/hl-lsp-setup` still offers them. Control characters in the dialog's paths and errors are shown escaped.
 
 `set servers` replaces the whole `servers` map, so include every server in the same JSON value.
 
@@ -75,7 +80,7 @@ Servers receive only `HOME` and `PATH` from the environment.
 
 `formatOnWrite` (default `false`) formats the file after a successful edit or write, when its server offers formatting. The server's edits apply all or none, after the same version check as rename. The tool result names the formatted file. Indentation is two spaces, or tabs when the file's first indented line starts with a tab. Formatting can rewrite lines that the model did not change.
 
-`/hl-lsp` opens the shared settings menu. It shows `enabled` and `name`, plus `timeoutMs`, `allowProjectExecution`, and `formatOnWrite` in global scope. Configure servers through JSON commands, not the menu.
+`/hl-lsp` opens the shared settings menu. It shows `enabled` and `name`, plus `timeoutMs`, `allowProjectExecution`, and `formatOnWrite` in global scope. Configure servers through `/hl-lsp-setup` or JSON commands, not the menu.
 
 ```text
 /hl-lsp status
@@ -167,7 +172,9 @@ The matrix lists the probes that ran. Each probe ran the built `dist` on the loc
 - Virtual documents and unmarked files are unsupported.
 - Each file snapshot is limited to 1 MiB. Each session keeps at most eight server/root pairs running. A ninth pair stops the least recently used one first; a request still running on the stopped server fails with "LSP instance is closed".
 - Incoming server data that is not yet handled is limited to 8 MiB per instance. Bytes are released when the connection takes their message off its queue. Total traffic over a session is not limited.
-- Explicit output includes at most 20 diagnostics, with bounded messages and omission counts. Only numeric diagnostic codes are retained.
+- Explicit output includes at most 20 diagnostics, errors first, with bounded messages and omission counts. Diagnostic codes are kept as strings or safe integers.
+- A publication for a file that is not open is kept only for a regular file inside the server root. At most 128 such files are read at once, and at most 128 publications are kept per instance.
+- Each server instance gets its root as its only workspace folder.
 - Output is bounded as described under Output. It remains untrusted server data.
 - Transport requests and notification writes have cancellation deadlines. A request timeout, a cancel or an LSP error response leaves the server running. Server start has its own 60-second budget; a request that arrives while the server is still starting fails with "LSP server is still starting; retry the request", and the start continues.
 - On POSIX, each server runs in its own process group. Disposal first sends `shutdown` and then `exit` to a healthy initialized server. It then sends SIGTERM to the group, and SIGKILL if a member remains two seconds after disposal started. If SIGKILL is refused, disposal fails with "LSP process group did not stop". A descendant that leaves the group, for example by starting a new session, is not stopped. On Windows, only the server process is stopped, and process cleanup is not certified.
@@ -192,7 +199,7 @@ Real-server checks must run against the packed artifact. Spike results are not a
 
 Full TypeScript project-reference routing, Python interpreter binding, and virtual documents remain unimplemented.
 
-Post-edit background analysis, guarded mutations, configuration migration, automatic server discovery, and whole-project diagnostic coverage remain unimplemented.
+Post-edit background analysis, configuration migration, and whole-project diagnostic coverage remain unimplemented.
 
 Global resource bounds and real-agent effectiveness remain unverified. No live activation or publication is part of this package.
 
