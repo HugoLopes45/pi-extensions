@@ -261,7 +261,10 @@ function instanceLine({ state, reason, root, openDocuments, tools }: InstanceSta
 
 // One line per changed file, the move if any, then the total; a refused or failed rename changes nothing.
 function renameLines(
-  changed: { file: string; edits: number }[],
+  {
+    changed,
+    unsynced,
+  }: { changed: { file: string; edits: number }[]; unsynced: string | undefined },
   cwd: string,
   moved?: string,
 ): string {
@@ -270,6 +273,11 @@ function renameLines(
     ...changed.map(({ file, edits }) => `${displayPath(cwd, file)}: ${edits} edits`),
     ...(moved === undefined ? [] : [moved]),
     `total: ${total} edits in ${changed.length} files`,
+    ...(unsynced === undefined
+      ? []
+      : [
+          `the server was not updated: ${bounded(unsynced, { maxBytes: 512, maxLines: 1 }).content}`,
+        ]),
   ].join("\n");
 }
 
@@ -688,7 +696,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
         const root = await controller.root();
         return toolResult(
           header,
-          { ...result, text: renameLines(result.changed, root) },
+          { ...result, text: renameLines(result, root) },
           await changedFileLines(
             controller,
             root,
@@ -721,7 +729,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
         const files = [...result.changed.map(({ file }) => file), result.move.to];
         return toolResult(
           header,
-          { ...result, text: renameLines(result.changed, root, moved) },
+          { ...result, text: renameLines(result, root, moved) },
           await changedFileLines(controller, root, files, signal),
         );
       } catch (error) {
@@ -781,7 +789,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
         const root = await controller.root();
         return toolResult(
           header,
-          { ...result, text: renameLines(result.changed, root) },
+          { ...result, text: renameLines(result, root) },
           await changedFileLines(
             controller,
             root,

@@ -769,6 +769,16 @@ async function disposeAll(instances: Instance[]): Promise<void> {
   if (failure) throw failure.reason;
 }
 
+// The files are already written, so a failure to update the server is reported with the result, not as it.
+async function unsynced(step: () => Promise<void>): Promise<string | undefined> {
+  try {
+    await step();
+    return undefined;
+  } catch (error) {
+    return errorText(error);
+  }
+}
+
 type Diagnostic = Observation["diagnostics"][number];
 
 // Errors are compared by code and message, so an error that moved still matches its earlier copy.
@@ -1113,7 +1123,10 @@ export class LspController {
     if (result.evidence === "server_busy")
       return { outcome: "unchecked", reason: "the server is still busy" };
     if (result.evidence === "unchanged_empty")
-      return { outcome: "unchecked", reason: "the server reported nothing after the edit" };
+      return {
+        outcome: "unchecked",
+        reason: "the server reported nothing after the edit",
+      };
     if (result.omitted > 0)
       return {
         outcome: "unchecked",
@@ -1173,11 +1186,13 @@ export class LspController {
     );
     const applied = await applyWorkspaceEdit(edit, await this.root(), document);
     if (applied.outcome !== "written") return { ...route, ...applied };
-    await this.resync(instance, route, applied.changed, supportsChange(capabilities), deadline);
     return {
       ...route,
       outcome: "completed" as const,
       changed: applied.changed,
+      unsynced: await unsynced(() =>
+        this.resync(instance, route, applied.changed, supportsChange(capabilities), deadline),
+      ),
     };
   }
 
@@ -1264,19 +1279,22 @@ export class LspController {
       moveFile(move),
     );
     if (applied.outcome !== "written") return { ...route, ...applied };
-    if (capabilities.workspace?.fileOperations?.didRename)
-      await instance.client.notify("workspace/didRenameFiles", { files }, deadline);
-    if (document)
-      await synchronize(
-        instance,
-        { ...route, file: move.to },
-        await snapshot(move.to, deadline),
-        deadline,
-        false,
-      );
+    const reason = await unsynced(async () => {
+      if (capabilities.workspace?.fileOperations?.didRename)
+        await instance.client.notify("workspace/didRenameFiles", { files }, deadline);
+      if (document)
+        await synchronize(
+          instance,
+          { ...route, file: move.to },
+          await snapshot(move.to, deadline),
+          deadline,
+          false,
+        );
+    });
     return {
       ...route,
       outcome: "completed" as const,
+      unsynced: reason,
       move,
       changed: applied.changed.map((change) =>
         change.file === move.from ? { ...change, file: move.to } : change,
@@ -1398,11 +1416,13 @@ export class LspController {
     if (edit === undefined) return refuse(`Code action ${index} has no edit; commands are not run`);
     const applied = await applyWorkspaceEdit(edit, await this.root(), listed.document);
     if (applied.outcome !== "written") return { ...listed.route, ...applied };
-    await this.resync(listed.instance, listed.route, applied.changed, listed.canChange, deadline);
     return {
       ...listed.route,
       outcome: "completed" as const,
       changed: applied.changed,
+      unsynced: await unsynced(() =>
+        this.resync(listed.instance, listed.route, applied.changed, listed.canChange, deadline),
+      ),
     };
   }
 

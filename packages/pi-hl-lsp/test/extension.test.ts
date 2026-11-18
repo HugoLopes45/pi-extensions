@@ -973,6 +973,24 @@ it("checks every file a rename changed for errors", async () => {
   });
 });
 
+it("reports a written rename as completed when the server cannot be updated", async () => {
+  const state = await renameSession("rename-huge");
+  expect(await rename(state)).toMatchObject({
+    isError: false,
+    details: { outcome: "completed" },
+    content: [
+      {
+        type: "text",
+        text: "hl-lsp rename index.ts: completed\nindex.ts: 1 edits\ntotal: 1 edits in 1 files\nthe server was not updated: File exceeds the 1 MiB snapshot limit",
+      },
+      {
+        type: "text",
+        text: "hl-lsp: index.ts was not checked for errors: File exceeds the 1 MiB snapshot limit",
+      },
+    ],
+  });
+});
+
 it("checks at most ten changed files and counts the rest", async () => {
   const state = await renameSession("rename-many");
   for (let index = 0; index < 11; index += 1)

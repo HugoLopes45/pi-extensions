@@ -158,6 +158,7 @@ const renameModes = new Set<string | undefined>([
   "rename-prepare-null",
   "rename-errors",
   "rename-many",
+  "rename-huge",
 ]);
 const formattingModes = new Set<string | undefined>(["format", "format-race", "format-errors"]);
 const renameFileModes = new Set<string | undefined>([
@@ -417,6 +418,11 @@ connection.onRequest("textDocument/rename", (params: unknown): object => {
       changes[new URL(`./other${index}.ts`, uri).href] = [imported];
     return { changes };
   }
+  // Past the 1 MiB snapshot limit, so the file is written but cannot be read back.
+  if (mode === "rename-huge")
+    return {
+      changes: { [uri]: [replaceAt(0, 6, 11, "x".repeat(1024 * 1024))] },
+    };
   if (mode === "rename-resource") return { documentChanges: [{ kind: "create", uri: sibling }] };
   if (mode === "rename-outside")
     return {
