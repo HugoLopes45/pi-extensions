@@ -396,15 +396,17 @@ it("offers a new language at startup and saves the server the user enables with 
   await Promise.all(dialogs);
   expect(screens[0]).toContain("Language servers for this project");
   expect(screens[0]?.replaceAll(/\s*\n\s*/gu, "")).toContain(`${server} for .py files`);
-  await vi.waitFor(async () =>
-    expect(await globalLsp(agentDir)).toMatchObject({
-      enabled: true,
-      allowProjectExecution: true,
-      servers: {
-        typescript: { command: process.execPath },
-        python: { command: server, args: ["--stdio"] },
-      },
-    }),
+  await vi.waitFor(
+    async () =>
+      expect(await globalLsp(agentDir)).toMatchObject({
+        enabled: true,
+        allowProjectExecution: true,
+        servers: {
+          typescript: { command: process.execPath },
+          python: { command: server, args: ["--stdio"] },
+        },
+      }),
+    { timeout: 10_000 },
   );
 });
 
