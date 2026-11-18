@@ -100,7 +100,7 @@ const schema = Type.Object(
         Type.String({
           minLength: 1,
           maxLength: 80,
-          pattern: "^[^\\u0000-\\u001f\\u007f]+$",
+          pattern: "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
         }),
         (name) => name.trim() === name,
         () => "Display name must not start or end with whitespace",

@@ -266,4 +266,5 @@ it("rejects relative executables and control characters in names", () => {
     readSettings({ servers: { python: { command: "./server", args: [] } } }, undefined, false),
   ).toThrow(/absolute/);
   expect(() => readSettings({ name: "Bad\nname" }, undefined, false)).toThrow(/global/);
+  expect(() => readSettings({ name: "Bad\u009bname" }, undefined, false)).toThrow(/global/);
 });
