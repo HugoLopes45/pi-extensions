@@ -113,6 +113,9 @@ export type ServerStatus = {
   // How to set up a detected language that has no server configured.
   setup?: string | undefined;
 };
+export type EditCheck =
+  | { outcome: "checked"; compared: boolean; errors: Diagnostic[] }
+  | { outcome: "unchecked"; reason: string };
 export type FormatOutcome =
   | { outcome: "unchanged" }
   | { outcome: "formatted"; edits: number }
@@ -1087,21 +1090,32 @@ export class LspController {
     return result;
   }
 
-  // Errors of the file that the previous settled observation did not have; undefined when no check finished.
-  async newErrors(file: string, signal: AbortSignal): Promise<Diagnostic[] | undefined> {
+  /**
+   * The file's errors after an edit. A compared check keeps only the errors the previous check did
+   * not have; without one every error is kept. Undefined when no server is expected to check the file.
+   */
+  async newErrors(file: string, signal: AbortSignal): Promise<EditCheck | undefined> {
+    if (this.gate()) return undefined;
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return undefined;
-    const before = this.baseline.get(route.file) ?? new Map<string, number>();
+    const before = this.baseline.get(route.file);
     const result = await this.query("diagnostics", file, undefined, signal);
-    if (!("diagnostics" in result)) return undefined;
+    if (!("diagnostics" in result))
+      return {
+        outcome: "unchecked",
+        reason: "reason" in result ? result.reason : "no diagnostics returned",
+      };
+    if (result.evidence === "server_busy")
+      return { outcome: "unchecked", reason: "the server is still busy" };
     const seen = new Map<string, number>();
-    return result.diagnostics.filter((item) => {
+    const errors = result.diagnostics.filter((item) => {
       if (item.severity !== 1) return false;
       const key = errorKey(item);
       const count = (seen.get(key) ?? 0) + 1;
       seen.set(key, count);
-      return count > (before.get(key) ?? 0);
+      return count > (before?.get(key) ?? 0);
     });
+    return { outcome: "checked", compared: before !== undefined, errors };
   }
 
   // The server computes the edit; rename.ts checks it, and only then does any file change.

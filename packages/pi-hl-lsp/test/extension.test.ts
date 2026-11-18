@@ -1611,6 +1611,7 @@ it("keeps a valid session enable blocked without global project-execution consen
 
 it("appends an error that an edit introduces", async () => {
   const state = await session(true, "error-lines");
+  await tool(state, "hl_lsp_diagnostics", { paths: ["index.ts"] });
   expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
     isError: false,
     content: [
@@ -1618,6 +1619,32 @@ it("appends an error that an edit introduces", async () => {
       {
         type: "text",
         text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
+  });
+});
+
+it("does not call errors new when no check ran before the edit", async () => {
+  const state = await session(true, "error-lines");
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\nERROR\n" })).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: "hl-lsp: 2 errors in index.ts; no check ran before this edit, so some may be older\n1:1 error 2322 Untrusted diagnostic prose\n1:1 error 2322 Untrusted diagnostic prose",
+      },
+    ],
+  });
+});
+
+it("says an edit was not checked while the server is still busy", async () => {
+  const state = await session(true, "pull-progress-forever", { timeoutMs: 1500 });
+  expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: stringMatching(/^hl-lsp: index\.ts was not checked for errors: .*busy/u),
       },
     ],
   });
@@ -1688,11 +1715,17 @@ it("leaves an edit's result unchanged while project execution is blocked", async
   });
 });
 
-it("returns an edit unchanged when the server never answers, within the post-edit deadline", async () => {
+it("says an edit was not checked when the server never answers, within the post-edit deadline", async () => {
   const state = await session(true, "silent");
   const started = performance.now();
   expect(await tool(state, "edit", { path: "index.ts", text: "ERROR\n" })).toMatchObject({
-    content: [{ type: "text", text: "Wrote index.ts" }],
+    content: [
+      { type: "text", text: "Wrote index.ts" },
+      {
+        type: "text",
+        text: stringMatching(/^hl-lsp: index\.ts was not checked for errors: \S/u),
+      },
+    ],
   });
   expect(performance.now() - started).toBeLessThan(3500);
 });
@@ -1704,7 +1737,7 @@ it("appends new errors after a write too", async () => {
       { type: "text", text: "Wrote index.ts" },
       {
         type: "text",
-        text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+        text: "hl-lsp: 1 error in index.ts; no check ran before this edit, so it may be older\n1:1 error 2322 Untrusted diagnostic prose",
       },
     ],
   });
@@ -1795,7 +1828,7 @@ it("reports the format line before new errors", async () => {
       { type: "text", text: "hl-lsp: formatted index.ts (1 edits)" },
       {
         type: "text",
-        text: "hl-lsp: 1 new error in index.ts\n1:1 error 2322 Untrusted diagnostic prose",
+        text: "hl-lsp: 1 error in index.ts; no check ran before this edit, so it may be older\n1:1 error 2322 Untrusted diagnostic prose",
       },
     ],
   });

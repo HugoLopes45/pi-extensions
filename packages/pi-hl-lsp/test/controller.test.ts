@@ -57,10 +57,18 @@ it("evicts the least recently used baseline once 128 files have one", async () =
   for (const path of paths) await writeFile(path, "ERROR\n");
   const signal = new AbortController().signal;
   for (const path of paths) await instance.newErrors(path, signal);
-  // The 129th file pushed out the first file's baseline, so its error reads as new again.
-  expect(await instance.newErrors(first, signal)).toHaveLength(1);
+  // The 129th file pushed out the first file's baseline, so its error is reported uncompared.
+  expect(await instance.newErrors(first, signal)).toMatchObject({
+    outcome: "checked",
+    compared: false,
+    errors: [{ severity: 1 }],
+  });
   // The newest file keeps its baseline, so its error is no longer new.
-  expect(await instance.newErrors(last, signal)).toEqual([]);
+  expect(await instance.newErrors(last, signal)).toEqual({
+    outcome: "checked",
+    compared: true,
+    errors: [],
+  });
 }, 60_000);
 
 it("requires separate global project-execution consent before launch", async () => {

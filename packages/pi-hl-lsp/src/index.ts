@@ -15,6 +15,7 @@ import { Value } from "typebox/value";
 import { formatCodeActions } from "./code-actions.js";
 import {
   LspController,
+  type EditCheck,
   type FormatOutcome,
   type InstanceStatus,
   type NavigationTarget,
@@ -300,11 +301,24 @@ async function postEditNotes(
 ): Promise<string[]> {
   const formatted = await formatLine(current, cwd, file, signal);
   const notes = formatted === undefined ? [] : [formatted];
-  const errors = await current.newErrors(file, postEditDeadline(signal)).catch(() => undefined);
-  if (!errors || errors.length === 0) return notes;
-  const noun = errors.length === 1 ? "error" : "errors";
-  const header = `hl-lsp: ${errors.length} new ${noun} in ${displayPath(cwd, file)}`;
-  return [...notes, `${header}\n${formatNewErrors(errors).text}`];
+  const check = await current
+    .newErrors(file, postEditDeadline(signal))
+    .catch((error: unknown): EditCheck => ({ outcome: "unchecked", reason: errorText(error) }));
+  const line = check && editCheckLine(check, displayPath(cwd, file));
+  return line === undefined ? notes : [...notes, line];
+}
+
+// Silence means the file was checked and has no new error, so an unfinished check must say so.
+function editCheckLine(check: EditCheck, path: string): string | undefined {
+  if (check.outcome === "unchecked")
+    return `hl-lsp: ${path} was not checked for errors: ${bounded(check.reason, { maxBytes: 512, maxLines: 1 }).content}`;
+  const { errors } = check;
+  if (errors.length === 0) return undefined;
+  const one = errors.length === 1;
+  const header = check.compared
+    ? `hl-lsp: ${errors.length} new ${one ? "error" : "errors"} in ${path}`
+    : `hl-lsp: ${errors.length} ${one ? "error" : "errors"} in ${path}; no check ran before this edit, so ${one ? "it" : "some"} may be older`;
+  return `${header}\n${formatNewErrors(errors).text}`;
 }
 
 export default function hlLsp(pi: ExtensionAPI): void {
