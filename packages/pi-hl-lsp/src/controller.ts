@@ -97,6 +97,7 @@ type Instance = {
     edits: Map<string, number>;
     published: Map<string, { text: string; edits: number; observation: Observation }>;
     pending: Map<string, unknown>;
+    reads: number;
   };
 };
 export type InstanceStatus = {
@@ -342,11 +343,21 @@ function knownObservation(state: Instance["state"], document: Document): Observa
   return current ? retained.observation : undefined;
 }
 
+// Only a regular file inside the root is read: opening a named pipe blocks a thread-pool thread until a
+// writer appears, and a file outside the root never opens in this instance.
+async function unopenedText(file: string, root: string, signal: AbortSignal): Promise<string> {
+  const real = await realpath(file);
+  if (outside(root, real) || !(await stat(real)).isFile())
+    throw new Error("Not a regular file inside the root");
+  return snapshot(real, signal);
+}
+
 // A project check publishes for files that are not open. Such a publication describes the text on disk,
 // so it is kept with that text and joins the answer once the file opens with the same text.
 function retainUnopened(
   state: Instance["state"],
   file: string,
+  root: string,
   value: unknown,
   signal: AbortSignal,
 ): void {
@@ -360,12 +371,18 @@ function retainUnopened(
     return;
   }
   const edits = editsOf(state, file);
+  // Many publications at once would otherwise start as many reads.
+  if (state.reads >= RETAINED_LIMIT) {
+    // An older read for this file must not settle in place of the dropped, newer publication.
+    state.pending.delete(file);
+    state.published.delete(file);
+    return;
+  }
   state.pending.set(file, value);
-  // Opening a named pipe blocks a thread-pool thread until a writer appears.
-  stat(file)
-    .then((stats) => {
-      if (!stats.isFile()) throw new Error("Not a regular file");
-      return snapshot(file, signal);
+  state.reads += 1;
+  unopenedText(file, root, signal)
+    .finally(() => {
+      state.reads -= 1;
     })
     .then(
       (text) => {
@@ -935,6 +952,7 @@ export class LspController {
       edits: new Map(),
       published: new Map(),
       pending: new Map(),
+      reads: 0,
     };
     const client = new LanguageServer(
       config,
@@ -945,7 +963,7 @@ export class LspController {
         if (!Value.Check(publication, value)) return;
         const file = fileOf(value.uri);
         if (file !== undefined && file !== document?.file)
-          retainUnopened(state, file, value, this.lifetime.signal);
+          retainUnopened(state, file, route.root, value, this.lifetime.signal);
         if (!document || file !== document.file) return;
         const report = diagnosticResult(value, document.version);
         if (report.outcome === "superseded") return;

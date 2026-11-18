@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import type * as fs from "node:fs";
 import { closeSync, constants, openSync, readFileSync } from "node:fs";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +13,25 @@ import { LspController } from "../src/controller.js";
 import { LanguageServer } from "../src/server.js";
 import type { LspSettings } from "../src/settings.js";
 import { directory } from "./fixtures.js";
+
+// While held, streams of files other than the queried one record their path and never end,
+// so the reads in flight can be counted.
+const reads = vi.hoisted(() => ({
+  queried: undefined as string | undefined,
+  paths: [] as string[],
+}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return {
+    ...actual,
+    createReadStream: (path: string, options: { signal: AbortSignal }) => {
+      if (reads.queried === undefined || path === reads.queried)
+        return actual.createReadStream(path, options);
+      reads.paths.push(path);
+      return new PassThrough({ signal: options.signal });
+    },
+  };
+});
 
 const fixture = fileURLToPath(new URL("./protocol-server.ts", import.meta.url));
 // Protocol events the fixture logged after its launch line.
@@ -605,6 +626,40 @@ it.skipIf(process.platform === "win32")(
     expect(await Promise.race([answered, delay(5000, "stalled")])).toBe("completed");
   },
 );
+
+async function publishMany(mode = "publish-many") {
+  const { instance, file } = await controller(mode, true, true, {
+    timeoutMs: 3000,
+  });
+  const target = join(await directory(), "outside.ts");
+  await writeFile(target, "const outside = 1;\n");
+  await symlink(target, join(file, "..", "outside.ts"));
+  for (let index = 0; index < 200; index += 1)
+    await writeFile(join(file, "..", `many${index}.ts`), "const many = 1;\n");
+  reads.queried = file;
+  onTestFinished(() => {
+    reads.queried = undefined;
+    reads.paths = [];
+  });
+  await instance.query("diagnostics", file);
+  await vi.waitFor(() => expect(reads.paths.length).toBeGreaterThanOrEqual(128));
+  await delay(300);
+}
+
+it("does not read a file outside the root that a publication names", async () => {
+  await publishMany();
+  expect(reads.paths.filter((path) => path.endsWith("outside.ts"))).toEqual([]);
+});
+
+it("reads at most 128 files named by publications at a time", async () => {
+  await publishMany();
+  expect(reads.paths).toHaveLength(128);
+});
+
+it("reads a file at most 128 times at once for repeated publications", async () => {
+  await publishMany("publish-repeat");
+  expect(reads.paths).toHaveLength(128);
+});
 
 it("ignores a publication made for a file whose text changed before it was opened", async () => {
   const { instance, file } = await controller("publish-other-file", true, true, {

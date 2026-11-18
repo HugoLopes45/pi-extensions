@@ -132,6 +132,8 @@ const staticPullModes = new Set<string | undefined>([
   "pull-progress-chatter",
   "publish-other-file",
   "publish-fifos",
+  "publish-many",
+  "publish-repeat",
   "pull-empty-reopen",
   "pull-empty-reopen-versioned",
 ]);
@@ -628,6 +630,8 @@ const silentModes = new Set<string | undefined>([
   "pull-progress-chatter",
   "publish-other-file",
   "publish-fifos",
+  "publish-many",
+  "publish-repeat",
   "pull-static",
   "pull-dynamic",
   "pull-late-registration",
@@ -802,6 +806,24 @@ function publishAfterOpen(value: unknown) {
       });
     }, 300);
 }
+// Files that a project check publishes for, without a version, while they are not open.
+// The fifo test creates fifo0.ts to fifo7.ts as named pipes; outside.ts is a link out of the root.
+const unopenedNames = new Map<string | undefined, string[]>([
+  ["publish-other-file", ["other.ts"]],
+  ["publish-fifos", Array.from({ length: 8 }, (_, index) => `fifo${index}.ts`)],
+  ["publish-many", ["outside.ts", ...Array.from({ length: 200 }, (_, index) => `many${index}.ts`)]],
+  ["publish-repeat", Array.from({ length: 200 }, () => "many0.ts")],
+]);
+function publishUnopened(uri: string) {
+  const names = unopenedNames.get(mode);
+  if (names === undefined || publishedUris.has("unopened")) return;
+  publishedUris.add("unopened");
+  for (const name of names)
+    void connection.sendNotification("textDocument/publishDiagnostics", {
+      uri: new URL(name, uri).href,
+      diagnostics: [finding(2322)],
+    });
+}
 // Activity of a server that loads its project after the open, as rust-analyzer does.
 function publishAfterLoad(uri: string, version: number) {
   // A refresh while the server still loads, then the finding as a push.
@@ -817,23 +839,7 @@ function publishAfterLoad(uri: string, version: number) {
       });
     }, 700);
   }
-  // A project check publishes, without a version, for a file that is not open, once.
-  if (mode === "publish-other-file" && !publishedUris.has("other")) {
-    publishedUris.add("other");
-    void connection.sendNotification("textDocument/publishDiagnostics", {
-      uri: new URL("other.ts", uri).href,
-      diagnostics: [finding(2322)],
-    });
-  }
-  // Publishes, once, for fifo0.ts to fifo7.ts, which the test creates as named pipes.
-  if (mode === "publish-fifos" && !publishedUris.has("fifos")) {
-    publishedUris.add("fifos");
-    for (let index = 0; index < 8; index += 1)
-      void connection.sendNotification("textDocument/publishDiagnostics", {
-        uri: new URL(`fifo${index}.ts`, uri).href,
-        diagnostics: [finding(2322)],
-      });
-  }
+  publishUnopened(uri);
   // Progress reports without a begin keep arriving, so the server is never quiet and holds no token.
   if (mode === "pull-progress-chatter")
     setInterval(() => {
