@@ -1107,6 +1107,8 @@ export class LspController {
       };
     if (result.evidence === "server_busy")
       return { outcome: "unchecked", reason: "the server is still busy" };
+    if (result.evidence === "unchanged_empty")
+      return { outcome: "unchecked", reason: "the server reported nothing after the edit" };
     const seen = new Map<string, number>();
     const errors = result.diagnostics.filter((item) => {
       if (item.severity !== 1) return false;

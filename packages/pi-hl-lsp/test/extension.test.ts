@@ -1650,6 +1650,22 @@ it("says an edit was not checked while the server is still busy", async () => {
   });
 });
 
+it("says an edit was not checked when the server stays silent after it", async () => {
+  const state = await session(true, "dedupe-empty");
+  await tool(state, "hl_lsp_diagnostics", { paths: ["index.ts"] });
+  expect(await tool(state, "edit", { path: "index.ts", text: "const value = 2;\n" })).toMatchObject(
+    {
+      content: [
+        { type: "text", text: "Wrote index.ts" },
+        {
+          type: "text",
+          text: "hl-lsp: index.ts was not checked for errors: the server reported nothing after the edit",
+        },
+      ],
+    },
+  );
+});
+
 it("appends nothing for a later edit that keeps the same error", async () => {
   const state = await session(true, "error-lines");
   await tool(state, "edit", { path: "index.ts", text: "ERROR\n" });
