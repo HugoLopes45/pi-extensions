@@ -739,6 +739,8 @@ const operations: readonly Operation[] = [
   "implementation",
   "references",
   "symbols",
+  "incoming_calls",
+  "outgoing_calls",
   "workspace_symbols",
   "diagnostics",
 ];

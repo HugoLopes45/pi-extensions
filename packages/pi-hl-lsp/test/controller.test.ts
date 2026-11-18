@@ -911,6 +911,18 @@ it("queries incoming and outgoing calls of the prepared item", async () => {
   });
 });
 
+it("lists the call tools in status for a server with call hierarchy", async () => {
+  const { instance, file } = await controller("call-hierarchy");
+  await instance.query("incoming_calls", file, { line: 1, column: 7 });
+  const status = await instance.serverStatus();
+  const tools =
+    "servers" in status
+      ? status.servers.flatMap((server) => server.instances.flatMap((item) => item.tools ?? []))
+      : [];
+  expect(tools).toContain("incoming_calls");
+  expect(tools).toContain("outgoing_calls");
+});
+
 it("says which prepared item the calls belong to when prepare returns several", async () => {
   const { instance, file } = await controller("call-hierarchy-several");
   expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
