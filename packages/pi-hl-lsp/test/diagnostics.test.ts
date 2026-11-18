@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { diagnosticResult, pullResult } from "../src/diagnostics.js";
+import { diagnosticResult, pullResult, unionObservation } from "../src/diagnostics.js";
 
 const finding = {
   message: "Wrong type",
@@ -76,6 +76,17 @@ it("bounds output and discloses omissions", () => {
   );
   expect(result).toMatchObject({ reportedCount: 30, omitted: 10 });
   expect(JSON.stringify(result).length).toBeLessThan(16000);
+});
+
+it("counts each error once when pull and push report it", () => {
+  const other = { ...finding, message: "Other error" };
+  const warnings = Array.from({ length: 20 }, () => ({
+    ...finding,
+    severity: 2,
+  }));
+  const pulled = pullResult({ kind: "full", items: [...warnings, finding] });
+  const pushed = pullResult({ kind: "full", items: [finding, other] });
+  expect(unionObservation(pulled, pushed)).toMatchObject({ reportedErrors: 2 });
 });
 
 it("keeps a bounded leading part of an oversized single-line message", () => {

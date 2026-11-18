@@ -1151,14 +1151,14 @@ export class LspController {
         outcome: "unchecked",
         reason: "the server reported nothing after the edit",
       };
-    if (result.omitted > 0)
+    const shown = result.diagnostics.filter((item) => item.severity === 1);
+    if (result.reportedErrors > shown.length)
       return {
         outcome: "unchecked",
-        reason: "the server reported more diagnostics than are compared",
+        reason: "the server reported more errors than are compared",
       };
     const seen = new Map<string, number>();
-    const errors = result.diagnostics.filter((item) => {
-      if (item.severity !== 1) return false;
+    const errors = shown.filter((item) => {
       const key = errorKey(item);
       const count = (seen.get(key) ?? 0) + 1;
       seen.set(key, count);

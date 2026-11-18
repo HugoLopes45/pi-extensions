@@ -35,6 +35,8 @@ const pullSchema = Type.Object({
   items: diagnosticList,
 });
 const shownLimit = 20;
+const errorCount = (list: readonly { severity?: number | undefined }[]) =>
+  list.filter((item) => item.severity === 1).length;
 
 // Codes such as E0308 and reportMissingImports are short; other strings are dropped.
 const stringCode = /^[\w.-]{1,64}$/u;
@@ -54,7 +56,9 @@ export function pullResult(report: unknown) {
 }
 
 function observationOf(list: Static<typeof diagnosticList>, unversioned: boolean) {
-  const diagnostics = list.slice(0, shownLimit).map((item) => {
+  // Errors go first, so the shown part, which the post-edit check compares, keeps as many as it can.
+  const ordered = list.toSorted((a, b) => Number(b.severity === 1) - Number(a.severity === 1));
+  const diagnostics = ordered.slice(0, shownLimit).map((item) => {
     const { start, end } = item.range;
     if (end.line < start.line || (end.line === start.line && end.character < start.character)) {
       throw new Error("Invalid diagnostic range");
@@ -79,6 +83,7 @@ function observationOf(list: Static<typeof diagnosticList>, unversioned: boolean
     projectComplete: false,
     receivedAt: Date.now(),
     reportedCount: list.length,
+    reportedErrors: errorCount(list),
     omitted: list.length - diagnostics.length,
     diagnostics,
   };
@@ -108,10 +113,13 @@ export function unionObservation(pulled: Observation, pushed: Observation): Obse
   // A duplicate beyond the shown part of both lists is not seen, so reportedCount can be high.
   const shared = pulled.diagnostics.length + pushed.diagnostics.length - unique.length;
   const reportedCount = pulled.reportedCount + pushed.reportedCount - shared;
+  const sharedErrors =
+    errorCount(pulled.diagnostics) + errorCount(pushed.diagnostics) - errorCount(unique);
   const diagnostics = unique.slice(0, shownLimit);
   return {
     ...pulled,
     reportedCount,
+    reportedErrors: pulled.reportedErrors + pushed.reportedErrors - sharedErrors,
     omitted: reportedCount - diagnostics.length,
     diagnostics,
   };
@@ -127,6 +135,7 @@ export function busyObservation(): Observation {
     projectComplete: false,
     receivedAt: Date.now(),
     reportedCount: 0,
+    reportedErrors: 0,
     omitted: 0,
     diagnostics: [],
   };
@@ -142,6 +151,7 @@ export function unchangedObservation(): Observation {
     projectComplete: false,
     receivedAt: Date.now(),
     reportedCount: 0,
+    reportedErrors: 0,
     omitted: 0,
     diagnostics: [],
   };

@@ -94,10 +94,19 @@ it("evicts the least recently used baseline once 128 files have one", async () =
 
 it("does not call a file checked when its errors may be among the omitted diagnostics", async () => {
   const { instance, file } = await controller("error-lines");
-  await writeFile(file, `${"WARN\n".repeat(20)}ERROR\n`);
+  await writeFile(file, "ERROR\n".repeat(21));
   expect(await instance.newErrors(file, new AbortController().signal)).toEqual({
     outcome: "unchecked",
-    reason: "the server reported more diagnostics than are compared",
+    reason: "the server reported more errors than are compared",
+  });
+});
+
+it("reports a new error after more warnings than are shown", async () => {
+  const { instance, file } = await controller("error-lines");
+  await writeFile(file, `${"WARN\n".repeat(25)}ERROR\n`);
+  expect(await instance.newErrors(file, new AbortController().signal)).toMatchObject({
+    outcome: "checked",
+    errors: [{ severity: 1 }],
   });
 });
 
