@@ -280,12 +280,22 @@ async function startStatus() {
 }
 const initializeRequest = Type.Object({
   initializationOptions: Type.Optional(Type.Unknown()),
+  workspaceFolders: Type.Optional(Type.Unknown()),
+  capabilities: Type.Object({
+    workspace: Type.Optional(Type.Object({ workspaceFolders: Type.Optional(Type.Unknown()) })),
+  }),
 });
 // What the client sent for the wire check; test/wire reports it back.
 let initializationOptions: unknown;
+let workspaceFolders: unknown;
+let workspaceFoldersSupport: unknown;
 const received: { method: string; params?: unknown }[] = [];
 connection.onRequest("initialize", async (params: unknown) => {
-  if (Value.Check(initializeRequest, params)) initializationOptions = params.initializationOptions;
+  if (Value.Check(initializeRequest, params)) {
+    initializationOptions = params.initializationOptions;
+    workspaceFolders = params.workspaceFolders;
+    workspaceFoldersSupport = params.capabilities.workspace?.workspaceFolders;
+  }
   if (mode === "slow-init") await delay(600);
   if (mode === "tab-length")
     process.stdout.write(
@@ -930,7 +940,13 @@ connection.onNotification("test/wire", async () => {
   await connection.sendNotification("textDocument/publishDiagnostics", {
     uri: "file:///wire",
     diagnostics: [],
-    wire: { initializationOptions, received, configuration },
+    wire: {
+      initializationOptions,
+      workspaceFolders,
+      workspaceFoldersSupport,
+      received,
+      configuration,
+    },
   });
 });
 connection.onNotification("test/unregister", async () => {

@@ -289,9 +289,7 @@ export class LanguageServer {
         return this.reject("Invalid workspace/configuration payload");
       return configurationReplies(value, this.config.settings);
     });
-    this.connection.onRequest("workspace/workspaceFolders", () => [
-      { uri: pathToFileURL(this.root).href, name: basename(this.root) },
-    ]);
+    this.connection.onRequest("workspace/workspaceFolders", () => [this.workspaceFolder()]);
     this.connection.onNotification("$/progress", (value: unknown) => {
       if (!Value.Check(progressParams, value))
         return this.fail(new Error("Invalid progress notification"));
@@ -426,12 +424,18 @@ export class LanguageServer {
     }
   }
 
+  // Some servers search other files of the project only when initialize names a workspace folder.
+  private workspaceFolder() {
+    return { uri: pathToFileURL(this.root).href, name: basename(this.root) };
+  }
+
   private async handshake(signal?: AbortSignal): Promise<Initialization> {
     const result = await this.request(
       "initialize",
       {
         processId: process.pid,
         rootUri: pathToFileURL(this.root).href,
+        workspaceFolders: [this.workspaceFolder()],
         capabilities: {
           general: { positionEncodings: ["utf-16"] },
           textDocument: {
@@ -450,6 +454,7 @@ export class LanguageServer {
           },
           workspace: {
             fileOperations: { willRename: true, didRename: true },
+            workspaceFolders: true,
             diagnostics: { refreshSupport: true },
           },
           window: { workDoneProgress: true },

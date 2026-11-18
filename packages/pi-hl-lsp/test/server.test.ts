@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { stringMatching } from "pi-hl-utils/testing/matchers";
 import { expect, it, onTestFinished, vi } from "vitest";
 
 import { LanguageServer } from "../src/server.js";
@@ -149,7 +150,7 @@ it("answers each standard server request with its LSP 3.17 reply", async () => {
   );
 });
 
-it("sends initializationOptions in initialize and no settings after initialized", async () => {
+it("sends initializationOptions and the workspace folder in initialize and no settings after initialized", async () => {
   const published = Promise.withResolvers<unknown>();
   const client = await server("normal", 1000, published.resolve, undefined, {
     initializationOptions: { checkOnSave: true },
@@ -161,6 +162,10 @@ it("sends initializationOptions in initialize and no settings after initialized"
     diagnostics: [],
     wire: {
       initializationOptions: { checkOnSave: true },
+      workspaceFolders: [
+        { uri: stringMatching(/^file:\/\/\/.+\/[^/]+$/u), name: stringMatching(/^[^/]+$/u) },
+      ],
+      workspaceFoldersSupport: true,
       received: [{ method: "initialized" }],
       configuration: [null, null, null, null],
     },
@@ -179,6 +184,10 @@ it("answers workspace/configuration by section path and sends settings after ini
     uri: "file:///wire",
     diagnostics: [],
     wire: {
+      workspaceFolders: [
+        { uri: stringMatching(/^file:\/\/\/.+\/[^/]+$/u), name: stringMatching(/^[^/]+$/u) },
+      ],
+      workspaceFoldersSupport: true,
       received: [
         { method: "initialized" },
         { method: "workspace/didChangeConfiguration", params: { settings } },
