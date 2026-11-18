@@ -187,6 +187,19 @@ it("refuses to enable before consent, then enables only the chosen servers", asy
   expect(spec.rows(spec.read(), "session")).toEqual([]);
 });
 
+it("escapes terminal controls in a project path and a server error", async () => {
+  const spec = setupSpec(
+    [{ ...rust, root: "/repo\x1b]8;;x\x07" }],
+    false,
+    async () => new Map([["rust", "spawn \x1b[31mfailed"]]),
+  );
+  const [row] = spec.rows(spec.read(), "session");
+  if (row?.kind !== "cycle") throw new Error("no cycle row");
+  expect(row.description).toContain("/repo\\u001b]8;;x\\u0007");
+  await action(spec).run();
+  expect(spec.read().headline).toEqual(["rust: failed: spawn \\u001b[31mfailed (not saved)"]);
+});
+
 it("enables once when the action is chosen again while servers start", async () => {
   let calls = 0;
   const spec = setupSpec([rust], false, async () => {

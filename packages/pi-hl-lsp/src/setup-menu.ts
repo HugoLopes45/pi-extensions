@@ -1,3 +1,4 @@
+import { escapeControls } from "pi-hl-utils/layered-settings";
 import type { SettingRow, SettingsMenuSpec, SettingsMenuView } from "pi-hl-utils/settings-menu";
 
 import type { FoundOffer, Offer, SetupResults } from "./setup.js";
@@ -32,7 +33,9 @@ function choiceRow(
 }
 
 function resultLine(language: string, error: string | undefined): string {
-  return error === undefined ? `${language}: ready` : `${language}: failed: ${error} (not saved)`;
+  return error === undefined
+    ? `${language}: ready`
+    : `${language}: failed: ${escapeControls(error)} (not saved)`;
 }
 
 /**
@@ -81,7 +84,9 @@ export function setupSpec(
         choiceRow(
           offer.language,
           offer.language,
-          `${offer.server.command} for ${offer.fileTypes.join(" ")} files under ${offer.root}`,
+          escapeControls(
+            `${offer.server.command} for ${offer.fileTypes.join(" ")} files under ${offer.root}`,
+          ),
           ["enable", "skip"],
           choices.get(offer.language) ?? "enable",
         ),
