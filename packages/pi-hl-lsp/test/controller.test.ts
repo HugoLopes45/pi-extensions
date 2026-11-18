@@ -34,6 +34,7 @@ async function controller(
     allowProjectExecution: consent,
     timeoutMs: 5000,
     formatOnWrite: false,
+    ignoredLanguages: [],
     servers: {
       typescript: {
         command: process.execPath,
@@ -128,6 +129,7 @@ it("routes a custom server end to end by its name, file type and root marker", a
       allowProjectExecution: true,
       timeoutMs: 5000,
       formatOnWrite: false,
+      ignoredLanguages: [],
       servers: {
         mylsp: {
           command: process.execPath,

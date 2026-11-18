@@ -122,6 +122,7 @@ it("starts disabled without executable approval", () => {
     timeoutMs: 5000,
     formatOnWrite: false,
     servers: {},
+    ignoredLanguages: [],
   });
 });
 
@@ -150,6 +151,7 @@ it("accepts explicit global launch policy and trusted presentation overrides", (
     timeoutMs: 5000,
     formatOnWrite: true,
     servers,
+    ignoredLanguages: [],
   });
 });
 
@@ -206,6 +208,16 @@ it("accepts dependency directory names and refuses paths or patterns", () => {
     expect(() =>
       readSettings({ servers: { vue: { ...server, dependencyDirs: [name] } } }, undefined, false),
     ).toThrow(/global/);
+});
+
+it("accepts ignored language names only in global settings", () => {
+  expect(readSettings({ ignoredLanguages: ["swift"] }, undefined, false).ignoredLanguages).toEqual([
+    "swift",
+  ]);
+  expect(() => readSettings({}, { ignoredLanguages: ["swift"] }, true)).toThrow(/project/);
+  expect(() => readSettings({ ignoredLanguages: ["Bad Name"] }, undefined, false)).toThrow(
+    /global/,
+  );
 });
 
 it("refuses a custom server that omits its file types or root markers", () => {

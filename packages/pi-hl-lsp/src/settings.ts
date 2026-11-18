@@ -83,8 +83,9 @@ function serverProblem(servers: Record<string, ServerConfig>): string | undefine
   return undeclaredCustom(servers) ?? sharedFileType(servers);
 }
 
+const serverName = Type.String({ pattern: "^[a-z][a-z0-9-]{0,39}$" });
 const serversSchema = Type.Refine(
-  Type.Record(Type.String({ pattern: "^[a-z][a-z0-9-]{0,39}$" }), serverSchema, {
+  Type.Record(serverName, serverSchema, {
     additionalProperties: false,
     maxProperties: 32,
   }),
@@ -109,6 +110,13 @@ const schema = Type.Object(
     timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 60000 })),
     formatOnWrite: Type.Optional(Type.Boolean()),
     servers: Type.Optional(serversSchema),
+    // Detected languages the setup dialog no longer offers at startup.
+    ignoredLanguages: Type.Optional(
+      Type.Array(serverName, {
+        maxItems: 64,
+        uniqueItems: true,
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -124,6 +132,7 @@ const defaults: LspSettings = {
   timeoutMs: 5000,
   formatOnWrite: false,
   servers: {},
+  ignoredLanguages: [],
 };
 
 export const lspSettings = defineLayeredSettings({
@@ -132,7 +141,13 @@ export const lspSettings = defineLayeredSettings({
   schema,
   defaults,
   sessionEntryType: "hl-lsp-settings",
-  globalOnlyKeys: ["servers", "allowProjectExecution", "timeoutMs", "formatOnWrite"],
+  globalOnlyKeys: [
+    "servers",
+    "allowProjectExecution",
+    "timeoutMs",
+    "formatOnWrite",
+    "ignoredLanguages",
+  ],
 });
 
 export function readSettings(session: LayeredSettingsSession) {
