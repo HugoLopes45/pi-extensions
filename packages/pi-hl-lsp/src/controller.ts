@@ -1096,11 +1096,7 @@ export class LspController {
   ) {
     const refusal = this.gate();
     if (refusal) return refusal;
-    const deadline = AbortSignal.any([
-      this.lifetime.signal,
-      AbortSignal.timeout(this.settings.timeoutMs),
-      ...(signal ? [signal] : []),
-    ]);
+    const deadline = this.deadlineFor(signal);
     deadline.throwIfAborted();
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
@@ -1172,11 +1168,7 @@ export class LspController {
   async rename(file: string, target: NavigationTarget, newName: string, signal?: AbortSignal) {
     const refusal = this.gate();
     if (refusal) return refusal;
-    const deadline = AbortSignal.any([
-      this.lifetime.signal,
-      AbortSignal.timeout(this.settings.timeoutMs),
-      ...(signal ? [signal] : []),
-    ]);
+    const deadline = this.deadlineFor(signal);
     deadline.throwIfAborted();
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
@@ -1477,10 +1469,7 @@ export class LspController {
       route.server !== instance.server
     )
       return false;
-    const text = await snapshot(
-      document.file,
-      AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.settings.timeoutMs)]),
-    );
+    const text = await snapshot(document.file, this.deadlineFor());
     return text === document.text;
   }
 
