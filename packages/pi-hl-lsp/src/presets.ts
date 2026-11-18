@@ -12,11 +12,23 @@ export type RootHook = (
   markers: readonly string[],
 ) => Promise<string | Refusal | undefined>;
 
+// How setup finds a language in a project and a server for it.
+export type Discovery = {
+  // Tried in order; the first one found wins.
+  candidates: readonly { command: string; args: readonly string[] }[];
+  // Project directories searched before PATH, only in a trusted project.
+  localBins: readonly string[];
+  // Files that mark the language without being root markers.
+  detectMarkers: readonly string[];
+  install: string;
+};
+
 export type Preset = {
   fileTypes: readonly string[];
   rootMarkers: readonly string[];
   languageIds: Readonly<Partial<Record<string, string>>>;
   rootHook?: RootHook;
+  discovery?: Discovery;
 };
 
 const workspaceHeader = /^\s*\[workspace\]\s*$/mu;
@@ -94,18 +106,40 @@ export const presets: Readonly<Record<string, Preset>> = {
       ".mjs": "javascript",
       ".cjs": "javascript",
     },
+    discovery: {
+      candidates: [{ command: "typescript-language-server", args: ["--stdio"] }],
+      localBins: ["node_modules/.bin"],
+      detectMarkers: [],
+      install: "npm install --global typescript-language-server typescript",
+    },
   },
   python: {
     fileTypes: [".py"],
     rootMarkers: ["pyproject.toml", "pyrightconfig.json", "setup.py", "setup.cfg"],
     languageIds: {},
     rootHook: pythonRoot,
+    discovery: {
+      candidates: [
+        { command: "basedpyright-langserver", args: ["--stdio"] },
+        { command: "pyright-langserver", args: ["--stdio"] },
+        { command: "pylsp", args: [] },
+      ],
+      localBins: [".venv/bin", "venv/bin"],
+      detectMarkers: ["requirements.txt"],
+      install: "pipx install basedpyright",
+    },
   },
   rust: {
     fileTypes: [".rs"],
     rootMarkers: ["Cargo.toml", "rust-project.json"],
     languageIds: {},
     rootHook: cargoRoot,
+    discovery: {
+      candidates: [{ command: "rust-analyzer", args: [] }],
+      localBins: [],
+      detectMarkers: [],
+      install: "rustup component add rust-analyzer",
+    },
   },
   swift: {
     fileTypes: [".swift"],
@@ -117,6 +151,13 @@ export const presets: Readonly<Record<string, Preset>> = {
       "compile_commands.json",
     ],
     languageIds: {},
+    discovery: {
+      candidates: [{ command: "sourcekit-lsp", args: [] }],
+      localBins: [],
+      detectMarkers: [],
+      install:
+        "install Xcode (then run xcodebuild -runFirstLaunch) or a Swift toolchain from swift.org",
+    },
   },
 };
 

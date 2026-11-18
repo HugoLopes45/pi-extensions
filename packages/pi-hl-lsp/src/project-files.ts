@@ -54,10 +54,13 @@ function insideDependencies(boundary: string, dir: string): boolean {
 }
 
 // A plain marker names a file or a directory; a marker with a leading * matches an entry whose name ends with the rest.
+export function matchesMarker(name: string, marker: string): boolean {
+  return marker.startsWith("*") ? name.endsWith(marker.slice(1)) : name === marker;
+}
+
 async function hasMarker(dir: string, marker: string): Promise<boolean> {
   if (!marker.startsWith("*")) return exists(join(dir, marker));
-  const suffix = marker.slice(1);
-  return (await readdir(dir)).some((name) => name.endsWith(suffix));
+  return (await readdir(dir)).some((name) => matchesMarker(name, marker));
 }
 
 export async function nearestRoot(
