@@ -71,6 +71,15 @@ it("evicts the least recently used baseline once 128 files have one", async () =
   });
 }, 60_000);
 
+it("does not call a file checked when its errors may be among the omitted diagnostics", async () => {
+  const { instance, file } = await controller("error-lines");
+  await writeFile(file, `${"WARN\n".repeat(20)}ERROR\n`);
+  expect(await instance.newErrors(file, new AbortController().signal)).toEqual({
+    outcome: "unchecked",
+    reason: "the server reported more diagnostics than are compared",
+  });
+});
+
 it("requires separate global project-execution consent before launch", async () => {
   const { instance, file } = await controller("normal", false);
   expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({

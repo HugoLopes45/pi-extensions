@@ -1114,6 +1114,11 @@ export class LspController {
       return { outcome: "unchecked", reason: "the server is still busy" };
     if (result.evidence === "unchanged_empty")
       return { outcome: "unchecked", reason: "the server reported nothing after the edit" };
+    if (result.omitted > 0)
+      return {
+        outcome: "unchecked",
+        reason: "the server reported more diagnostics than are compared",
+      };
     const seen = new Map<string, number>();
     const errors = result.diagnostics.filter((item) => {
       if (item.severity !== 1) return false;
