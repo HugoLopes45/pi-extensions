@@ -36,6 +36,16 @@ const serverSchema = Type.Object(
         { minItems: 1, maxItems: 32 },
       ),
     ),
+    dependencyDirs: Type.Optional(
+      Type.Array(
+        Type.String({
+          minLength: 1,
+          maxLength: 255,
+          pattern: "^[^*/\\\\\\u0000-\\u001f\\u007f]+$",
+        }),
+        { minItems: 1, maxItems: 32 },
+      ),
+    ),
     languageId: Type.Optional(
       Type.Record(extensionSchema, Type.String({ minLength: 1, maxLength: 64 })),
     ),

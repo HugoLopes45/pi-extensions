@@ -191,6 +191,23 @@ it("accepts a custom server with its file types and root markers", () => {
   });
 });
 
+it("accepts dependency directory names and refuses paths or patterns", () => {
+  const server = {
+    command: "/usr/local/bin/vue-ls",
+    args: [],
+    fileTypes: [".vue"],
+    rootMarkers: ["package.json"],
+    dependencyDirs: ["node_modules"],
+  };
+  expect(readSettings({ servers: { vue: server } }, undefined, false).servers).toEqual({
+    vue: server,
+  });
+  for (const name of ["a/b", "*.deps", ""])
+    expect(() =>
+      readSettings({ servers: { vue: { ...server, dependencyDirs: [name] } } }, undefined, false),
+    ).toThrow(/global/);
+});
+
 it("refuses a custom server that omits its file types or root markers", () => {
   const command = "/usr/local/bin/mylsp";
   expect(() =>

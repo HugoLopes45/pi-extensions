@@ -50,7 +50,7 @@ function definitionOf(name: string, config?: ServerConfig): ServerDefinition {
     fileTypes: config?.fileTypes ?? preset.fileTypes,
     rootMarkers: config?.rootMarkers ?? preset.rootMarkers,
     languageIds: { ...preset.languageIds, ...config?.languageId },
-    dependencyDirs: preset.dependencyDirs ?? [],
+    dependencyDirs: config?.dependencyDirs ?? preset.dependencyDirs ?? [],
     rootHook: preset.rootHook,
   };
 }

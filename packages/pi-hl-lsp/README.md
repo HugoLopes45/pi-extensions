@@ -107,6 +107,7 @@ Two servers that claim one file type are refused. The error names both servers a
 | `args`                  | yes         | Command-line arguments, at most 32.                                                                                      |
 | `fileTypes`             | custom only | Extensions with a leading dot, 1 to 32. Replaces the built-in list.                                                      |
 | `rootMarkers`           | custom only | File or directory names, 1 to 32. A leading `*` matches a suffix, for example `*.xcodeproj`. Replaces the built-in list. |
+| `dependencyDirs`        | no          | Directory names of installed dependencies, 1 to 32. A root marker inside one is passed over. Replaces the built-in list. |
 | `languageId`            | no          | Map from extension to LSP language id. Default: the built-in table, else the server key.                                 |
 | `initializationOptions` | no          | JSON object sent in `initialize`.                                                                                        |
 | `settings`              | no          | JSON object answered to `workspace/configuration` by section, and sent in `workspace/didChangeConfiguration`.            |

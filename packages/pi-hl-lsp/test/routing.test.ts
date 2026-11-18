@@ -401,6 +401,28 @@ it("skips dependency directories only for the language that declares them", asyn
   });
 });
 
+it("skips the dependency directories that a custom server declares", async () => {
+  const root = await directory();
+  await writeFile(join(root, "package.json"), "{}");
+  const pkg = join(root, "node_modules", "pkg");
+  await mkdir(pkg, { recursive: true });
+  await writeFile(join(pkg, "package.json"), "{}");
+  await writeFile(join(pkg, "App.vue"), "");
+  const definitions = serverDefinitions({
+    vue: {
+      command: "/usr/bin/vue-ls",
+      args: [],
+      fileTypes: [".vue"],
+      rootMarkers: ["package.json"],
+      dependencyDirs: ["node_modules"],
+    },
+  });
+  expect(await resolveRoute(join(pkg, "App.vue"), root, definitions)).toMatchObject({
+    outcome: "completed",
+    root,
+  });
+});
+
 it("ignores node_modules segments above the boundary", async () => {
   const outer = await directory();
   const boundary = join(outer, "node_modules", "app");
