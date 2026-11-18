@@ -1,4 +1,5 @@
-import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readdir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import { isMissingFileError } from "pi-hl-utils/errors";
@@ -29,14 +30,24 @@ async function exists(path: string): Promise<boolean> {
 
 const maxManifestBytes = 64 * 1024;
 
+// One handle is checked and read, so the path cannot turn into a symlink, a FIFO or a larger file in between.
 export async function readManifest(path: string): Promise<string | undefined> {
-  try {
-    const info = await lstat(path);
-    if (!info.isFile() || info.size > maxManifestBytes) return undefined;
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (isMissingFileError(error)) return undefined;
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch((error: unknown) => {
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (isMissingFileError(error) || code === "ELOOP") return undefined;
     throw error;
+  });
+  if (handle === undefined) return undefined;
+  try {
+    if (!(await handle.stat()).isFile()) return undefined;
+    const buffer = Buffer.alloc(maxManifestBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead > maxManifestBytes ? undefined : buffer.toString("utf8", 0, bytesRead);
+  } finally {
+    await handle.close();
   }
 }
 
