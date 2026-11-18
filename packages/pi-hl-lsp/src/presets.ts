@@ -86,7 +86,7 @@ async function pythonEnvironment(root: string, boundary: string): Promise<Refusa
   return undefined;
 }
 
-// requirements.txt marks a Python root only when no projectMarkers entry is found.
+// requirements.txt marks a Python root only when none of the configured root markers is found.
 async function pythonRoot(
   directory: string,
   boundary: string,

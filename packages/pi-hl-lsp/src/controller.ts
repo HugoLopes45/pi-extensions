@@ -144,7 +144,7 @@ const method = {
   incoming_calls: "callHierarchy/incomingCalls",
   outgoing_calls: "callHierarchy/outgoingCalls",
 } as const;
-// Measured on real language servers; see lsp-dev/research/reports/publish-timing.md.
+// No measurement supports 500 ms: one TypeScript sample sent a second publication for one edit 1136 ms after the first, so SETTLE_MS can miss it.
 const SETTLE_MS = 500;
 const QUIET_MS = 1000;
 // Each baseline is a short error-count map. An evicted file reports all its errors as new on its next edit.
@@ -1342,7 +1342,7 @@ export class LspController {
 
   // Lists the code actions at a position, with the cached diagnostics that overlap its range as context.
   private async listedActions(file: string, target: NavigationTarget, deadline: AbortSignal) {
-    // Readiness and diagnostics share half the call timeout, counted from the start of the listing.
+    // The diagnostics wait ends at half the call timeout counted from the start of the listing, so readiness shortens it.
     const budget = AbortSignal.timeout(this.halfTimeoutMs);
     const route = await resolveRoute(file, this.cwd, this.definitions);
     if (route.outcome !== "completed") return route;
