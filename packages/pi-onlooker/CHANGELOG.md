@@ -2,6 +2,12 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 0.1.5
+
+### Patch Changes
+
+- A Review that ends without `onlooker_report` now gets one reminder to report before the Onlooker pauses.
+
 ## 0.1.4
 
 ### Patch Changes
