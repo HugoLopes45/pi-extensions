@@ -311,13 +311,13 @@ it("formats an empty list without a version as no errors seen yet", () => {
   });
 });
 
-it("keeps an empty list with no publication as no result", () => {
+it("says that a silent server after an edit gave no evidence", () => {
   const observation: Observation = {
     ...observe({ diagnostics: [] }),
     evidence: "unchanged_empty",
   };
   expect(formatDiagnostics(observation)).toEqual({
-    text: "no result",
+    text: "no errors seen yet: the server published nothing after the edit, so errors may still arrive",
     truncated: false,
   });
 });

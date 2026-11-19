@@ -214,19 +214,26 @@ export async function formatWorkspaceSymbols(
   );
 }
 
+// Only a revision-correlated empty list proves a clean file; the other empty results say why they do not.
+const unprovenEmpty = new Map<Observation["evidence"], string>([
+  [
+    "server_busy",
+    "server still working: a progress token is open at the deadline, so diagnostics are not settled",
+  ],
+  [
+    "settled_unversioned",
+    "no errors seen yet: the server published an empty list without a version, so errors may still arrive",
+  ],
+  [
+    "unchanged_empty",
+    "no errors seen yet: the server published nothing after the edit, so errors may still arrive",
+  ],
+]);
+
 export function formatDiagnostics(observation: Observation): Formatted {
   if (observation.diagnostics.length === 0) {
-    if (observation.evidence === "server_busy")
-      return {
-        text: "server still working: a progress token is open at the deadline, so diagnostics are not settled",
-        truncated: false,
-      };
-    return observation.evidence === "settled_unversioned"
-      ? {
-          text: "no errors seen yet: the server published an empty list without a version, so errors may still arrive",
-          truncated: false,
-        }
-      : emptyResult();
+    const text = unprovenEmpty.get(observation.evidence);
+    return text === undefined ? emptyResult() : { text, truncated: false };
   }
   const rendered = observation.diagnostics.map(diagnosticLine);
   return renderBody(
