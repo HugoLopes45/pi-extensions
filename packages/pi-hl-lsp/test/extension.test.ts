@@ -1062,15 +1062,15 @@ it("refuses a rename that targets a file outside the project and writes no file"
   expect(await readFile(outside, "utf8")).toBe("keep\n");
 });
 
-it("restores the written files when a later file cannot be written", async () => {
+it("refuses a rename of a read-only file before writing any file", async () => {
   const state = await renameSession("rename-changes");
   await chmod(join(state.cwd, "other.ts"), 0o444);
   const result = await rename(state);
   expect(result).toMatchObject({
     isError: true,
-    details: { outcome: "failed" },
+    details: { outcome: "refused" },
   });
-  expect(JSON.stringify(result)).toContain("other.ts");
+  expect(JSON.stringify(result)).toContain("other.ts is read-only");
   expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe("const value = 1;\n");
   expect(await readFile(join(state.cwd, "other.ts"), "utf8")).toBe(
     'import { value } from "./index";\n',

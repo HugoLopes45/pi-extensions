@@ -44,7 +44,6 @@ import { outside } from "./project-files.js";
 import {
   applyTextEdits,
   applyWorkspaceEdit,
-  moveFile,
   planMove,
   type ChangedFile,
   type FileMove,
@@ -1298,9 +1297,7 @@ export class LspController {
       },
     ];
     const edit = await instance.client.request("workspace/willRenameFiles", { files }, deadline);
-    const applied = await applyWorkspaceEdit(edit === null ? {} : edit, root, document, () =>
-      moveFile(move),
-    );
+    const applied = await applyWorkspaceEdit(edit === null ? {} : edit, root, document, move);
     if (applied.outcome !== "written") return { ...route, ...applied };
     const reason = await unsynced(async () => {
       if (capabilities.workspace?.fileOperations?.didRename)

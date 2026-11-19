@@ -1,24 +1,38 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import type * as fsPromises from "node:fs/promises";
-import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { expect, it, onTestFinished, vi } from "vitest";
 
-import { applyWorkspaceEdit, moveFile } from "../src/rename.js";
+import { applyWorkspaceEdit, moveFile, recoverInterruptedEdits } from "../src/rename.js";
 import { directory } from "./fixtures.js";
 
 // Set to an error code, link fails with it, as on a file system without hard links.
-const links = vi.hoisted(() => ({ failure: undefined as string | undefined }));
+// With breakRenames, each rename after that link failure fails too, so the restore fails.
+const links = vi.hoisted(() => ({
+  failure: undefined as string | undefined,
+  breakRenames: false,
+  renamesBroken: false,
+}));
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof fsPromises>();
   return {
     ...actual,
     link: async (from: string, to: string) => {
       if (links.failure === undefined) return actual.link(from, to);
-      throw Object.assign(new Error(`${links.failure}: link failed`), { code: links.failure });
+      links.renamesBroken = links.breakRenames;
+      throw Object.assign(new Error(`${links.failure}: link failed`), {
+        code: links.failure,
+      });
+    },
+    rename: async (from: string, to: string) => {
+      if (!links.renamesBroken) return actual.rename(from, to);
+      throw Object.assign(new Error("EIO: rename failed"), { code: "EIO" });
     },
   };
 });
@@ -227,12 +241,14 @@ it("leaves no destination behind when the old name cannot be removed", async () 
   expect(await readdir(root)).toEqual(["locked"]);
 });
 
-it("restores the written files when a later file cannot be written", async () => {
-  const root = await directory();
-  await writeFile(join(root, "index.ts"), "const value = 1;\n");
-  await writeFile(join(root, "other.ts"), "import { value } from './index';\n");
-  await chmod(join(root, "other.ts"), 0o444);
-  const response = {
+const originals = ["const value = 1;\n", "import { value } from './index';\n"];
+const renamed = ["let value = 1;\n", "import { renamed } from './index';\n"];
+
+// Writes index.ts and other.ts with the original text; the edit gives them the renamed text.
+async function twoFiles(root: string) {
+  await writeFile(join(root, "index.ts"), originals[0] ?? "");
+  await writeFile(join(root, "other.ts"), originals[1] ?? "");
+  return {
     changes: {
       [uriOf(root, "index.ts")]: [
         { range: { start, end: { line: 0, character: 5 } }, newText: "let" },
@@ -248,11 +264,118 @@ it("restores the written files when a later file cannot be written", async () =>
       ],
     },
   };
-  const outcome = await applyWorkspaceEdit(response, root, undefined);
+}
+
+it("restores the written files when the move after them fails", async () => {
+  const root = await directory();
+  const response = await twoFiles(root);
+  links.failure = "EXDEV";
+  onTestFinished(() => {
+    links.failure = undefined;
+  });
+  const move = { from: join(root, "other.ts"), to: join(root, "moved.ts") };
+  const outcome = await applyWorkspaceEdit(response, root, undefined, move);
   expect(outcome).toMatchObject({ outcome: "failed" });
-  expect(JSON.stringify(outcome)).toContain("other.ts");
+  expect(JSON.stringify(outcome)).toContain("Restored every written file.");
+  expect(await filesIn(root, ["index.ts", "other.ts"])).toEqual(originals);
+});
+
+it("keeps the journal of an edit whose restore failed", async () => {
+  const agentDir = await directory();
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+  const root = await directory();
+  const response = await twoFiles(root);
+  Object.assign(links, { failure: "EXDEV", breakRenames: true });
+  onTestFinished(() => {
+    Object.assign(links, {
+      failure: undefined,
+      breakRenames: false,
+      renamesBroken: false,
+    });
+    vi.unstubAllEnvs();
+  });
+  const move = { from: join(root, "other.ts"), to: join(root, "moved.ts") };
+  const outcome = await applyWorkspaceEdit(response, root, undefined, move);
+  expect(JSON.stringify(outcome)).toContain("Could not restore: other.ts, index.ts.");
+  const journalDir = join(agentDir, "hl-lsp", "journal");
+  const [entry] = await readdir(journalDir);
+  expect(JSON.parse(await readFile(join(journalDir, entry ?? ""), "utf8"))).toMatchObject({
+    files: [{ original: originals[0] }, { original: originals[1] }],
+  });
+});
+
+it("refuses an edit of a read-only file before writing any file", async () => {
+  const root = await directory();
+  const response = await twoFiles(root);
+  await chmod(join(root, "other.ts"), 0o444);
+  const outcome = await applyWorkspaceEdit(response, root, undefined);
+  expect(outcome).toEqual({
+    outcome: "refused",
+    reason: "other.ts is read-only",
+  });
+  expect(await filesIn(root, ["index.ts", "other.ts"])).toEqual(originals);
+});
+
+it("keeps the permissions of an edited file", async () => {
+  const root = await directory();
+  const response = await twoFiles(root);
+  await chmod(join(root, "index.ts"), 0o664);
+  await applyWorkspaceEdit(response, root, undefined);
+  expect((await stat(join(root, "index.ts"))).mode & 0o777).toBe(0o664);
+});
+
+// Starts an apply of the two-file edit with a move in a child process, paused before it removes its journal.
+async function pausedApply(root: string) {
+  vi.stubEnv("PI_CODING_AGENT_DIR", await directory());
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  const response = await twoFiles(root);
+  const fixture = fileURLToPath(new URL("paused-apply.ts", import.meta.url));
+  const from = join(root, "other.ts");
+  const to = join(root, "moved.ts");
+  const child = spawn(process.execPath, [fixture, root, JSON.stringify(response), from, to], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const exited = once(child, "exit");
+  onTestFinished(async () => {
+    child.kill("SIGKILL");
+    await exited;
+  });
+  for await (const chunk of child.stdout)
+    if (String(chunk).includes("paused")) return { child, exited };
+  throw new Error("The child process exited before it paused");
+}
+
+it("leaves an edit alone while the process that applies it runs", async () => {
+  const root = await directory();
+  await pausedApply(root);
+  expect(await recoverInterruptedEdits()).toEqual([]);
+  expect(await filesIn(root, ["index.ts", "moved.ts"])).toEqual(renamed);
+});
+
+it("undoes every file and the move of an edit whose process was killed", async () => {
+  const root = await directory();
+  const { child, exited } = await pausedApply(root);
+  child.kill("SIGKILL");
+  await exited;
+  expect(await recoverInterruptedEdits()).toEqual(["Undid an interrupted LSP edit of 2 files."]);
+  expect(await readdir(root)).toEqual(["index.ts", "other.ts"]);
+  expect(await filesIn(root, ["index.ts", "other.ts"])).toEqual(originals);
+  expect(await recoverInterruptedEdits()).toEqual([]);
+});
+
+it("keeps a file changed after the crash and names it", async () => {
+  const root = await directory();
+  const { child, exited } = await pausedApply(root);
+  child.kill("SIGKILL");
+  await exited;
+  await writeFile(join(root, "index.ts"), "changed by hand\n");
+  const [note] = await recoverInterruptedEdits();
+  expect(note).toContain(`Could not undo an interrupted LSP edit of ${join(root, "index.ts")}`);
   expect(await filesIn(root, ["index.ts", "other.ts"])).toEqual([
-    "const value = 1;\n",
-    "import { value } from './index';\n",
+    "changed by hand\n",
+    originals[1],
   ]);
+  expect(await recoverInterruptedEdits()).toEqual([note]);
 });
