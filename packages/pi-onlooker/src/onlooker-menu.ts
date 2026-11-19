@@ -92,6 +92,27 @@ function parseOnlookerMenuValue(
   return { action: "set", key, patch: onlookerSettings.parseOptions(patch, scope) };
 }
 
+function cycleRow(
+  view: OnlookerMenuView,
+  scope: OnlookerSettingScope,
+  key: CycleKey,
+  source: string,
+  change: (value: string, scope: OnlookerSettingScope) => OnlookerChange,
+): SettingRow<OnlookerChange> {
+  const effective = cycleValue(key, view.settings);
+  return {
+    kind: "cycle",
+    id: key,
+    label: key,
+    description: descriptions[key],
+    values: cycleValues[key],
+    own: cycleValue(key, view.authored[scope] ?? {}),
+    inEffect: effective === undefined ? "observed agent" : effectiveWithSource(effective, source),
+    source,
+    change,
+  };
+}
+
 function optionRow(
   view: OnlookerMenuView,
   scope: OnlookerSettingScope,
@@ -104,21 +125,8 @@ function optionRow(
   switch (key) {
     case "enabled":
     case "correct":
-    case "thinkingLevel": {
-      const effective = cycleValue(key, view.settings);
-      return {
-        kind: "cycle",
-        id: key,
-        label: key,
-        description: descriptions[key],
-        values: cycleValues[key],
-        own: cycleValue(key, view.authored[scope] ?? {}),
-        inEffect:
-          effective === undefined ? "observed agent" : effectiveWithSource(effective, source),
-        source,
-        change,
-      };
-    }
+    case "thinkingLevel":
+      return cycleRow(view, scope, key, source, change);
     case "model":
       return {
         kind: "pick",

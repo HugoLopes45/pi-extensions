@@ -404,6 +404,8 @@ describe("onlooker_ask rendering", () => {
 describe("untrusted text", () => {
   // A title change, a screen clear, a C1 CSI, and a lone bell and escape.
   const hostile = "ok\x1b]0;pwned\x07\x1b[2J\x9b2J\x07\x1b done\r\nnext";
+  const isTerminalControl = (code: number) =>
+    code !== 0x0a && code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f));
   // Style sequences are the renderer's own; anything else reached the text from outside.
   const controls = (rendered: readonly string[]) => {
     const text = rendered.join("\n");
@@ -418,8 +420,7 @@ describe("untrusted text", () => {
         }
       }
       const code = text.charCodeAt(index);
-      if (code !== 0x0a && code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f)))
-        found.push(text.charAt(index));
+      if (isTerminalControl(code)) found.push(text.charAt(index));
     }
     return found;
   };

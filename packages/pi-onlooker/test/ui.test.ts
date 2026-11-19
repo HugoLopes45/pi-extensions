@@ -81,6 +81,29 @@ function themeFromRunner(session: Awaited<ReturnType<typeof createSdkHarness>>["
   return ui.theme;
 }
 
+function interventionText(
+  session: Awaited<ReturnType<typeof createSdkHarness>>["session"],
+): string {
+  const entry = session.sessionManager
+    .getBranch()
+    .find((item) => item.type === "custom_message" && item.customType === "pi-onlooker");
+  if (entry?.type !== "custom_message") throw new Error("Expected a delivered Intervention");
+  const renderer = session.extensionRunner?.getMessageRenderer("pi-onlooker");
+  const rendered = renderer?.(
+    {
+      role: "custom",
+      customType: entry.customType,
+      content: entry.content,
+      display: true,
+      details: entry.details,
+      timestamp: 0,
+    },
+    { ...keybindingHints, expanded: false, outputPad: 0 },
+    themeFromRunner(session),
+  );
+  return stripVTControlCharacters(rendered?.render(120).join("\n") ?? "");
+}
+
 describe("Onlooker footer", () => {
   it("tracks review activity while enabled and clears when disabled", async () => {
     const statuses: Array<string | undefined> = [];
@@ -192,24 +215,7 @@ describe("Interventions", () => {
       },
       { role: "user", content: [{ type: "text", text: "Second task" }] },
     ]);
-    const entry = session.sessionManager
-      .getBranch()
-      .find((item) => item.type === "custom_message" && item.customType === "pi-onlooker");
-    if (entry?.type !== "custom_message") throw new Error("Expected a delivered Intervention");
-    const renderer = session.extensionRunner?.getMessageRenderer("pi-onlooker");
-    const rendered = renderer?.(
-      {
-        role: "custom",
-        customType: entry.customType,
-        content: entry.content,
-        display: true,
-        details: entry.details,
-        timestamp: 0,
-      },
-      { ...keybindingHints, expanded: false, outputPad: 0 },
-      themeFromRunner(session),
-    );
-    const text = stripVTControlCharacters(rendered?.render(120).join("\n") ?? "");
+    const text = interventionText(session);
     expect(text).toContain("[Onlooker] concern");
     expect(text).not.toContain("▲");
     expect(text).toContain("Re-run the failing test");

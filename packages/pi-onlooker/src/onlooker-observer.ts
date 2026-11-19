@@ -267,6 +267,30 @@ function priced(runtime: AgentSessionRuntime): boolean {
   );
 }
 
+function sessionAccounting(runtime: AgentSessionRuntime | undefined) {
+  const stats = runtime?.session.getSessionStats();
+  return {
+    cost:
+      runtime && stats && (stats.cost > 0 || (stats.tokens.total > 0 && priced(runtime)))
+        ? stats.cost
+        : null,
+    usage: stats?.assistantMessages ? stats.tokens : null,
+  };
+}
+
+function consultationAnswer(runtime: AgentSessionRuntime, before: number): string {
+  const last = runtime.session.messages
+    .slice(before)
+    .findLast((entry) => entry.role === "assistant");
+  if (!last || last.role !== "assistant")
+    throw new Error("Onlooker consultation did not return an answer");
+  if (last.stopReason === "error" || last.stopReason === "aborted")
+    throw new Error(last.errorMessage ?? "Onlooker consultation did not complete");
+  const answer = piAi.contentText(last.content).trim();
+  if (!answer) throw new Error("Onlooker consultation did not return a text answer");
+  return answer;
+}
+
 /** Pi declines without a model call when the recent history it keeps is the whole session. */
 function declinedCompaction(cause: unknown): boolean {
   const message = errorText(cause);
@@ -381,37 +405,47 @@ export class OnlookerObserver {
       this.retractInvalidFindings();
       if (signal.aborted) this.unsafeEnding = true;
       if (event.type !== "turn_end" || !this.config.enabled || this.closed || this.error) return;
-      // Enabling or branch replacement may happen after this model request began.
-      // Wait for a captured request rather than inventing context or pausing permanently.
-      if (!this.snapshot) return;
-      const appended = piSdk.convertToLlm([event.message, ...event.toolResults]);
-      this.snapshot = {
-        ...this.snapshot,
-        messages: [...this.snapshot.messages, ...appended],
-        origins: [...this.snapshot.origins, ...appended.map((message) => message.role)],
-      };
-      if (
-        event.message.role === "assistant" &&
-        (event.message.stopReason === "aborted" || event.message.stopReason === "error")
-      )
-        this.unsafeEnding = true;
-      this.completed++;
-      // `request` waits for agent_end; a failed tool call is reviewed at once under any cadence.
-      // Under `turn`, a turn that only read joins the backlog for the next Review to cover.
-      const cadence = this.config.reviewEvery;
-      const every = cadence === "turn" ? 1 : cadence === "request" ? Infinity : cadence;
-      if (
-        event.toolResults.some((result) => result.isError) ||
-        (!(cadence === "turn" && this.onlyRead(event)) &&
-          this.completed - Math.max(this.dueThrough, this.reviewed) >= every)
-      )
-        this.markDue();
-      this.changed();
-      await this.wait(this.limits.catchUpThreshold, signal);
-      // Selection/branch changes may occur during that awaited barrier.
-      this.retractInvalidFindings();
-      if (signal.aborted) this.unsafeEnding = true;
+      await this.observeTurn(event, signal);
     });
+  }
+
+  private async observeTurn(
+    event: Extract<AgentEvent, { type: "turn_end" }>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // Enabling or branch replacement may happen after this model request began.
+    // Wait for a captured request rather than inventing context or pausing permanently.
+    if (!this.snapshot) return;
+    const appended = piSdk.convertToLlm([event.message, ...event.toolResults]);
+    this.snapshot = {
+      ...this.snapshot,
+      messages: [...this.snapshot.messages, ...appended],
+      origins: [...this.snapshot.origins, ...appended.map((message) => message.role)],
+    };
+    if (
+      event.message.role === "assistant" &&
+      (event.message.stopReason === "aborted" || event.message.stopReason === "error")
+    )
+      this.unsafeEnding = true;
+    this.completed++;
+    // `request` waits for agent_end; a failed tool call is reviewed at once under any cadence.
+    // Under `turn`, a turn that only read joins the backlog for the next Review to cover.
+    if (this.turnNeedsReview(event)) this.markDue();
+    this.changed();
+    await this.wait(this.limits.catchUpThreshold, signal);
+    // Selection/branch changes may occur during that awaited barrier.
+    this.retractInvalidFindings();
+    if (signal.aborted) this.unsafeEnding = true;
+  }
+
+  private turnNeedsReview(event: Extract<AgentEvent, { type: "turn_end" }>): boolean {
+    const cadence = this.config.reviewEvery;
+    const every = cadence === "turn" ? 1 : cadence === "request" ? Infinity : cadence;
+    return (
+      event.toolResults.some((result) => result.isError) ||
+      (!(cadence === "turn" && this.onlyRead(event)) &&
+        this.completed - Math.max(this.dueThrough, this.reviewed) >= every)
+    );
   }
 
   private state(): OnlookerObserverState {
@@ -423,7 +457,7 @@ export class OnlookerObserver {
 
   get status() {
     const runtime = this.runtime;
-    const stats = runtime?.session.getSessionStats();
+    const accounting = sessionAccounting(runtime);
     const actualModel = this.runtime?.session.model;
     const observedModel = this.observed.model;
     const inheritedModel = observedModel ? `${observedModel.provider}/${observedModel.id}` : null;
@@ -436,13 +470,10 @@ export class OnlookerObserver {
       backlog: this.completed - this.reviewed,
       effectiveModel,
       effectiveThinkingLevel: this.runtime?.session.thinkingLevel ?? this.config.thinkingLevel,
-      cost:
-        runtime && stats && (stats.cost > 0 || (stats.tokens.total > 0 && priced(runtime)))
-          ? stats.cost
-          : null,
+      cost: accounting.cost,
       spend: structuredClone(this.spend),
       droppedFindings: { ...this.dropped },
-      usage: stats?.assistantMessages ? stats.tokens : null,
+      usage: accounting.usage,
       lastError: this.error ?? null,
     };
   }
@@ -703,6 +734,11 @@ export class OnlookerObserver {
         },
         { additionalProperties: false },
       );
+      function reportProblem(arguments_: unknown, prepared: boolean): string {
+        if (prepared) return "Each Onlooker finding requires an actionable message";
+        const issue = Value.Errors(reportSchema, arguments_)[0];
+        return `Invalid Onlooker report${issue ? ` at ${issue.instancePath || "/"}: ${issue.message}` : ""}`;
+      }
       const adviceTool = piSdk.defineTool({
         name: "onlooker_report",
         label: "Onlooker report",
@@ -728,10 +764,7 @@ export class OnlookerObserver {
             };
           })();
           if (prepared?.findings.every((finding) => finding.message.trim())) return prepared;
-          const issue = prepared ? undefined : Value.Errors(reportSchema, arguments_)[0];
-          const problem = prepared
-            ? "Each Onlooker finding requires an actionable message"
-            : `Invalid Onlooker report${issue ? ` at ${issue.instancePath || "/"}: ${issue.message}` : ""}`;
+          const problem = reportProblem(arguments_, prepared !== undefined);
           const active = this.active;
           if (!active || active.kind !== "review" || active.epoch !== runtimeEpoch)
             throw new Error(problem);
@@ -1050,6 +1083,22 @@ export class OnlookerObserver {
     });
   }
 
+  private consultationFailed(
+    consultation: Consultation,
+    callerCancelled: boolean,
+    cause: unknown,
+  ): void {
+    if (
+      !callerCancelled &&
+      !consultation.toolLimitExceeded &&
+      consultation.epoch === this.epoch &&
+      !this.closed &&
+      this.config.enabled &&
+      this.sameObservation(consultation)
+    )
+      this.fail(errorText(cause));
+  }
+
   private async runConsultation(message: string, callerSignal?: AbortSignal): Promise<string> {
     const consultation: Consultation = {
       kind: "consultation",
@@ -1085,15 +1134,7 @@ export class OnlookerObserver {
         cancelled.promise,
       ]);
     } catch (cause) {
-      if (
-        !callerCancelled &&
-        !consultation.toolLimitExceeded &&
-        consultation.epoch === this.epoch &&
-        !this.closed &&
-        this.config.enabled &&
-        this.sameObservation(consultation)
-      )
-        this.fail(errorText(cause));
+      this.consultationFailed(consultation, callerCancelled, cause);
       throw cause;
     } finally {
       clearTimeout(timer);
@@ -1132,15 +1173,7 @@ export class OnlookerObserver {
       if (!this.current(consultation)) throw new Error("Onlooker consultation was invalidated");
       const failure = operationFailure(runtime, before);
       if (failure) throw new Error(failure);
-      const last = runtime.session.messages
-        .slice(before)
-        .findLast((entry) => entry.role === "assistant");
-      if (!last || last.role !== "assistant")
-        throw new Error("Onlooker consultation did not return an answer");
-      if (last.stopReason === "error" || last.stopReason === "aborted")
-        throw new Error(last.errorMessage ?? "Onlooker consultation did not complete");
-      const answer = piAi.contentText(last.content).trim();
-      if (!answer) throw new Error("Onlooker consultation did not return a text answer");
+      const answer = consultationAnswer(runtime, before);
       this.supplied = snapshot;
       this.suppliedBoundary = consultation.boundary;
       return answer;

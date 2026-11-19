@@ -317,15 +317,8 @@ export function onlookerStatusHeadline(
   ];
 }
 
-/** The status entry's body below its `[onlooker] ● on · model` label line. */
-function summaryLines(entry: OnlookerStatusEntry, theme: OnlookerRenderTheme): string[] {
-  const paint = messagePaint(theme);
+function activityLines(entry: OnlookerStatusEntry, theme: OnlookerRenderTheme): string[] {
   const lines: string[] = [];
-  for (const { scope, key, options } of entry.changes ?? []) {
-    lines.push(
-      `${statusMark(theme, "done")} ${paint(`${key} → ${formatOnlookerOption(options, key)}`)} ${theme.fg("dim", `[${scope}]`)}`,
-    );
-  }
   const activity = joinDefined(
     [
       entry.usage ? `tokens ${formatTokens(entry.usage.total)}` : undefined,
@@ -339,6 +332,19 @@ function summaryLines(entry: OnlookerStatusEntry, theme: OnlookerRenderTheme): s
     lines.push(theme.fg("muted", line));
   const counts = findingCounts(entry);
   if (counts.length) lines.push(theme.fg("muted", counts.join(" · ")));
+  return lines;
+}
+
+/** The status entry's body below its `[onlooker] ● on · model` label line. */
+function summaryLines(entry: OnlookerStatusEntry, theme: OnlookerRenderTheme): string[] {
+  const paint = messagePaint(theme);
+  const lines: string[] = [];
+  for (const { scope, key, options } of entry.changes ?? []) {
+    lines.push(
+      `${statusMark(theme, "done")} ${paint(`${key} → ${formatOnlookerOption(options, key)}`)} ${theme.fg("dim", `[${scope}]`)}`,
+    );
+  }
+  lines.push(...activityLines(entry, theme));
   const error = entry.error ?? entry.lastError;
   if (error) lines.push(errorLine(theme, error));
   return lines;
