@@ -224,6 +224,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      # npm install rejects pnpm's workspace: protocol; the exact version is satisfied by the bundled copy.
+      - name: Pin workspace dependencies
+        run: |
+          for dep in $(jq -r '.dependencies // {} | to_entries[] | select(.value | startswith("workspace:")) | .key' package.json); do
+            version=$(jq -er .version "../$dep/package.json")
+            npm pkg set "dependencies.$dep=$version"
+          done
       # Skipped when the version is already on npm, so a failed release step can be re-run.
       - name: Publish to npm
         run: |
