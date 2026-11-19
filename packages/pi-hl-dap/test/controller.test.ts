@@ -172,9 +172,9 @@ async function createSession(
     ]),
     timeouts: {
       executionMs,
-      requestMs: 5_000,
+      requestMs: 1_000,
       shutdownMs: 500,
-      startupMs: 1_000,
+      startupMs: 5_000,
     },
     warnings: [],
   };
@@ -2375,9 +2375,9 @@ async function createProfileSession(profiles: readonly DapLaunchProfile[]): Prom
       profiles: new Map(profiles.map((profile) => [profile.id, profile])),
       timeouts: {
         executionMs: 200,
-        requestMs: 5_000,
+        requestMs: 1_000,
         shutdownMs: 500,
-        startupMs: 1_000,
+        startupMs: 5_000,
       },
       warnings: [],
     },
