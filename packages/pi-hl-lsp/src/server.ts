@@ -108,6 +108,8 @@ const RETRY_PAUSE_MS = 100;
 // Real servers index the project before answering initialize; requests keep the shorter budget.
 export const STARTUP_TIMEOUT_MS = 60_000;
 
+const MAX_HEADER_BYTES = 4096;
+
 class FrameSizes {
   readonly sizes: number[] = [];
   private header: Buffer = Buffer.alloc(0);
@@ -124,6 +126,8 @@ class FrameSizes {
     const data = this.header.length === 0 ? chunk : Buffer.concat([this.header, chunk]);
     const end = data.indexOf("\r\n\r\n");
     if (end < 0) {
+      // Real headers hold one or two short fields; a growing header would be rescanned on every chunk.
+      if (data.length > MAX_HEADER_BYTES) throw new Error("LSP frame header exceeds 4 KiB");
       this.header = data;
       return Buffer.alloc(0);
     }
