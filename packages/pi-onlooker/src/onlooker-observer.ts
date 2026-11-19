@@ -247,6 +247,15 @@ function operationFailure(
   );
 }
 
+/** Throws the failure of a Review's response: an error diagnostic, a failed tool, or no completion. */
+function validateReviewResponse(runtime: AgentSessionRuntime, before: number): void {
+  const failure = operationFailure(runtime, before, { allowRejectedReports: true });
+  if (failure) throw new Error(failure);
+  const last = runtime.session.messages.findLast((message) => message.role === "assistant");
+  if (last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted"))
+    throw new Error(last.errorMessage ?? "Onlooker inference did not complete");
+}
+
 /** Native catalogs normalize missing prices to zero; do not claim that means free. */
 function priced(runtime: AgentSessionRuntime): boolean {
   const pricing = runtime.session.model?.cost;
@@ -875,6 +884,24 @@ export class OnlookerObserver {
     };
   }
 
+  /**
+   * Pi cannot force a tool call, so a model may end a Review without its report: remind it once.
+   * False when the Review stopped being current meanwhile.
+   */
+  private async remindToReport(
+    review: Review,
+    runtime: AgentSessionRuntime,
+    before: number,
+  ): Promise<boolean> {
+    if (review.findings) return true;
+    await runtime.session.prompt(
+      "Your Review ended without onlooker_report. Call onlooker_report now with the evidence you have.",
+    );
+    if (!this.current(review)) return false;
+    validateReviewResponse(runtime, before);
+    return true;
+  }
+
   private async performReview(review: Review): Promise<void> {
     const { through } = review;
     const snapshot = this.snapshot;
@@ -902,14 +929,8 @@ export class OnlookerObserver {
       );
       this.calibrate(runtime, before, contextBefore);
       if (!this.current(review)) return;
-      const failure = operationFailure(runtime, before, { allowRejectedReports: true });
-      if (failure) throw new Error(failure);
-      const last = runtime.session.messages.findLast((message) => message.role === "assistant");
-      if (
-        last?.role === "assistant" &&
-        (last.stopReason === "error" || last.stopReason === "aborted")
-      )
-        throw new Error(last.errorMessage ?? "Onlooker inference did not complete");
+      validateReviewResponse(runtime, before);
+      if (!(await this.remindToReport(review, runtime, before))) return;
       this.supplied = snapshot;
       this.suppliedBoundary = review.boundary;
       if (!review.findings) throw new Error("Onlooker Review did not call onlooker_report");
