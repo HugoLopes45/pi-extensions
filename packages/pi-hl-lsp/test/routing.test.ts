@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { expect, it } from "vitest";
 
@@ -276,6 +278,21 @@ it("does not read a directory named Cargo.toml as a manifest", async () => {
   await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
   await writeFile(join(crate, "lib.rs"), "");
   expect(await resolveRoute(join(crate, "lib.rs"), root)).toMatchObject({
+    outcome: "completed",
+    root: crate,
+  });
+});
+
+// Opening a FIFO for reading blocks until a writer appears, so a hang here means the open lost O_NONBLOCK.
+it("does not wait on a FIFO named Cargo.toml", async () => {
+  const root = await directory();
+  execFileSync("mkfifo", [join(root, "Cargo.toml")]);
+  const crate = join(root, "crate");
+  await mkdir(crate);
+  await writeFile(join(crate, "Cargo.toml"), '[package]\nname = "crate"\n');
+  await writeFile(join(crate, "lib.rs"), "");
+  const blocked = delay(2000, "blocked");
+  expect(await Promise.race([resolveRoute(join(crate, "lib.rs"), root), blocked])).toMatchObject({
     outcome: "completed",
     root: crate,
   });
