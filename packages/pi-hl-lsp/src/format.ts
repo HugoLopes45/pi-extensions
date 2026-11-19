@@ -223,7 +223,7 @@ export function formatDiagnostics(observation: Observation): Formatted {
       };
     return observation.evidence === "settled_unversioned"
       ? {
-          text: "no diagnostics (server published an empty list without a version)",
+          text: "no errors seen yet: the server published an empty list without a version, so errors may still arrive",
           truncated: false,
         }
       : emptyResult();

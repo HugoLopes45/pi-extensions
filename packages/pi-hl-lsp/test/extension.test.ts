@@ -1529,7 +1529,7 @@ it("gives each file of a batch its own deadline when the batch takes longer than
   });
 });
 
-it("lists clean files that the server published as empty without a version", async () => {
+it("does not count files published as empty without a version as clean", async () => {
   const state = await session(true);
   await writeFile(join(state.cwd, "a.ts"), "const a = 1;\n");
   await writeFile(join(state.cwd, "b.ts"), "const b = 1;\n");
@@ -1538,13 +1538,13 @@ it("lists clean files that the server published as empty without a version", asy
     content: [
       {
         type: "text",
-        text: "hl-lsp diagnostics: 2 files, 0 with diagnostics, 2 clean, 0 not settled, 0 not checked\nclean (server gave no version): a.ts, b.ts",
+        text: "hl-lsp diagnostics: 2 files, 0 with diagnostics, 0 clean, 2 not settled, 0 not checked\nno errors seen (not settled): a.ts, b.ts",
       },
     ],
   });
 });
 
-it("reports a clean file that the server published as empty without a version in single-file mode", async () => {
+it("does not call a file clean from an empty list without a version in single-file mode", async () => {
   const state = await session(true);
   await writeFile(join(state.cwd, "a.ts"), "const a = 1;\n");
   expect(await tool(state, "hl_lsp_diagnostics", { file: "a.ts" })).toMatchObject({
@@ -1552,7 +1552,7 @@ it("reports a clean file that the server published as empty without a version in
     content: [
       {
         type: "text",
-        text: "hl-lsp diagnostics a.ts: partial\nno diagnostics (server published an empty list without a version)",
+        text: "hl-lsp diagnostics a.ts: partial\nno errors seen yet: the server published an empty list without a version, so errors may still arrive",
       },
     ],
   });

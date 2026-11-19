@@ -300,13 +300,13 @@ it("keeps a multi-line diagnostic message on one line", () => {
   });
 });
 
-it("formats an empty list the server published without a version as published", () => {
+it("formats an empty list without a version as no errors seen yet", () => {
   const observation: Observation = {
     ...observe({ diagnostics: [] }),
     evidence: "settled_unversioned",
   };
   expect(formatDiagnostics(observation)).toEqual({
-    text: "no diagnostics (server published an empty list without a version)",
+    text: "no errors seen yet: the server published an empty list without a version, so errors may still arrive",
     truncated: false,
   });
 });

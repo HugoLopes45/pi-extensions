@@ -21,7 +21,7 @@ Diagnostics use push publications, and pull requests when the server offers them
 | `unchanged_empty`     | After an edit, no publication for 1 s, and the previous result was empty. | `partial`   |
 | `server_busy`         | A progress token is still open at the end of the wait; nothing settled.   | `partial`   |
 
-If no result settles before the request deadline, the tool fails with `No settled diagnostics before the timeout`.
+If no result settles before the request deadline, the tool fails with `No settled diagnostics before the timeout`. An empty `partial` result is never counted as clean: a server without versions can send errors after an empty list.
 
 Natural model requests can receive one transient summary of the latest settled observation. The summary includes its `evidence`. The extension rereads the file first. Automatic summaries exclude diagnostic prose.
 
