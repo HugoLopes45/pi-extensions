@@ -1,6 +1,6 @@
 {
   "name": "pi-hl-lsp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Qualified language-server observations and file-aware navigation for Pi.",
   "keywords": [
