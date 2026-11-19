@@ -238,6 +238,40 @@ importers:
         specifier: ^5.0.3
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.0))
 
+  packages/pi-hl-dap:
+    dependencies:
+      pi-hl-utils:
+        specifier: workspace:*
+        version: link:../pi-hl-utils
+    devDependencies:
+      '@earendil-works/pi-ai':
+        specifier: ^1.5.2
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(undici@8.12.3)(ws@8.23.0)
+      '@earendil-works/pi-coding-agent':
+        specifier: ^1.5.2
+        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.97)(@smithy/signature-v4@5.7.5)(ws@8.23.0)
+      '@earendil-works/pi-tui':
+        specifier: ^1.5.2
+        version: 1.5.2
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      '@vscode/debugprotocol':
+        specifier: ^1.68.0
+        version: 1.68.0
+      fast-check:
+        specifier: ^4.8.0
+        version: 4.10.3
+      typebox:
+        specifier: ^1.4.3
+        version: 1.4.7
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.3
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.8(@types/node@26.6.6)(jiti@2.7.0)(yaml@2.9.0))
+
   packages/pi-hl-lsp:
     devDependencies:
       '@earendil-works/pi-ai':
@@ -1172,6 +1206,9 @@ packages:
   '@vitest/spy@5.1.0':
     resolution: {integrity: sha512-2DPO5OMHWKrBngC+fCmTQqemNF0gidRhp3lxbBmRhW+M1XJrfgPpqNqWVevXtn2f2ufD5ZaR1B6B641aAlcX5A==}
 
+  '@vscode/debugprotocol@1.68.0':
+    resolution: {integrity: sha512-2J27dysaXmvnfuhFGhfeuxfHRXunqNPxtBoR3koiTOA9rdxWNDTa1zIFLCFMSHJ9MPTPKFcBeblsyaCJCIlQxg==}
+
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
@@ -1256,6 +1293,10 @@ packages:
 
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
+
+  fast-check@4.10.3:
+    resolution: {integrity: sha512-SBaU6nhh+sXxb05r2IHAKfxnR/1Pu6MqtHYaewM1BY6V5xzOxOk+4yoWO7WfeeyZG1iArFE6/DO/7iLYMUuOJg==}
+    engines: {node: '>=12.17.0'}
 
   fast-sha256@1.3.0:
     resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
@@ -1594,6 +1635,9 @@ packages:
     peerDependenciesMeta:
       kerberos:
         optional: true
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   quickjs-wasi@3.6.2:
     resolution: {integrity: sha512-FCqGtGOrMgzUiIrMNMA2YnsOxCNwo31dzqXvclXUC6xeT35NJLKXQJsvbeCTjvoFAwZgEAPg8U6+KAPDGXn8Mg==}
@@ -2615,6 +2659,8 @@ snapshots:
 
   '@vitest/spy@5.1.0': {}
 
+  '@vscode/debugprotocol@1.68.0': {}
+
   agent-base@7.1.4: {}
 
   agent-base@9.0.0: {}
@@ -2670,6 +2716,10 @@ snapshots:
   expect-type@1.4.0: {}
 
   extend@3.0.2: {}
+
+  fast-check@4.10.3:
+    dependencies:
+      pure-rand: 8.4.2
 
   fast-sha256@1.3.0: {}
 
@@ -2991,6 +3041,8 @@ snapshots:
       long: 5.3.2
 
   proxy-agent-negotiate@1.1.0: {}
+
+  pure-rand@8.4.2: {}
 
   quickjs-wasi@3.6.2: {}
 

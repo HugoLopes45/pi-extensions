@@ -4,11 +4,12 @@ Small, focused contributions are welcome. Discuss a large behavior change in an 
 
 ## Setup
 
-You need Node.js 22.19 or later. Corepack installs the pnpm version of `package.json`.
+You need Node.js 22.19 or later. Corepack installs the pnpm version of `package.json`. The `fetch-vscode-js-debug.mjs` script downloads the pinned vscode-js-debug release that the pi-hl-dap tests use, and checks its hash.
 
 ```bash
 corepack enable pnpm
 pnpm install
+node packages/pi-hl-dap/scripts/fetch-vscode-js-debug.mjs
 pnpm run verify
 ```
 

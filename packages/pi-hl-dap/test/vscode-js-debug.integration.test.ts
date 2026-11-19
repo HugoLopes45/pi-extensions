@@ -1,0 +1,697 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { promisify } from "node:util";
+
+import type { DebugProtocol } from "@vscode/debugprotocol";
+import { objectContaining } from "pi-hl-utils/testing/matchers";
+import { afterEach, expect, test } from "vitest";
+
+import { createDapArtifacts, type DapArtifacts } from "../src/artifacts.js";
+import { DapController, type DapResult, type DapSnapshot } from "../src/controller.js";
+import { DAP_ADAPTER_PRESETS } from "../src/presets.js";
+import type { ResolvedDapSettings } from "../src/settings.js";
+import { createDapTools } from "../src/tools.js";
+import { createToolContext } from "./tool-context.js";
+
+const temporaryDirectories: string[] = [];
+const sessionFileStores: DapArtifacts[] = [];
+const openSessions: DapController[] = [];
+
+const execFileText = promisify(execFile);
+
+interface RunningProcess {
+  id: number;
+  parentId: number;
+  commandLine: string;
+}
+
+/** Every running process: from /proc on Linux, else from `ps` (macOS). */
+async function runningProcesses(): Promise<ReadonlyArray<RunningProcess>> {
+  if (process.platform !== "linux") {
+    const { stdout } = await execFileText("ps", ["-A", "-ww", "-o", "pid=,ppid=,command="], {
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return stdout.split("\n").flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s(.*)$/u.exec(line);
+      return match
+        ? [
+            {
+              id: Number(match[1]),
+              parentId: Number(match[2]),
+              commandLine: match[3] ?? "",
+            },
+          ]
+        : [];
+    });
+  }
+  const found: RunningProcess[] = [];
+  for (const entry of await readdir("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+    try {
+      const commandLine = (await readFile(`/proc/${entry.name}/cmdline`)).toString("utf8");
+      // `pid (comm) state ppid ...`; comm can hold spaces and parentheses, so read past the last `)`.
+      const stat = await readFile(`/proc/${entry.name}/stat`, "utf8");
+      const parentId = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+      found.push({ id: Number(entry.name), parentId, commandLine });
+    } catch {
+      // Processes can exit while /proc is scanned.
+    }
+  }
+  return found;
+}
+
+async function processIdsContaining(fragment: string): Promise<ReadonlySet<number>> {
+  return new Set(
+    (await runningProcesses())
+      .filter(({ commandLine }) => commandLine.includes(fragment))
+      .map(({ id }) => id),
+  );
+}
+
+/**
+ * The processes running `programName` that descend from one of `adapterProcesses`: the debuggees
+ * this test's adapter launched, not other tests' programs of the same name. Lineage rather than
+ * the working directory, because macOS reports another process's working directory only through
+ * `lsof`, which `vp run --cache`'s injected file-tracking library kills.
+ */
+async function debuggeeProcessIds(
+  adapterProcesses: ReadonlySet<number>,
+  programName: string,
+): Promise<ReadonlySet<number>> {
+  const processes = await runningProcesses();
+  const parents = new Map(processes.map(({ id, parentId }) => [id, parentId]));
+  const descendsFromAdapter = (processId: number): boolean => {
+    const seen = new Set<number>();
+    for (let ancestor = parents.get(processId); ancestor !== undefined && ancestor > 1;) {
+      if (adapterProcesses.has(ancestor)) return true;
+      if (seen.has(ancestor)) return false;
+      seen.add(ancestor);
+      ancestor = parents.get(ancestor);
+    }
+    return false;
+  };
+  const processIds = new Set<number>();
+  for (const { id, commandLine } of processes) {
+    if (commandLine.includes(programName) && descendsFromAdapter(id)) processIds.add(id);
+  }
+  return processIds;
+}
+
+async function waitForProcessesToExit(processIds: ReadonlySet<number>): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const remaining = [...processIds].filter((processId) => {
+      try {
+        process.kill(processId, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (remaining.length === 0) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  throw new Error(`HL DAP integration: processes did not exit: ${[...processIds].join(", ")}`);
+}
+
+const JS_DEBUG_PRESET = DAP_ADAPTER_PRESETS["vscode-js-debug"] ?? {};
+
+const ADAPTER_PATH = resolve(
+  import.meta.dirname,
+  "../tools/vscode-js-debug/js-debug/src/dapDebugServer.js",
+);
+
+/** Settings for the Supported vscode-js-debug adapter with one `node` Launch Profile. */
+function jsDebugSettings(
+  profileArguments: Record<string, string | boolean>,
+  executionMs = 10_000,
+): ResolvedDapSettings {
+  return {
+    adapters: new Map([
+      [
+        "node",
+        {
+          id: "node",
+          command: process.execPath,
+          args: [ADAPTER_PATH, "$PORT", "127.0.0.1"],
+          environment: { ...process.env, PI_DEBUG_SUPPORTED_ADAPTER_TEST: "1" },
+          ...JS_DEBUG_PRESET,
+          transport: { type: "tcp", host: "127.0.0.1", port: 0 },
+        },
+      ],
+    ]),
+    profiles: new Map([["node", { id: "node", adapterId: "node", arguments: profileArguments }]]),
+    timeouts: {
+      startupMs: 10_000,
+      requestMs: 10_000,
+      executionMs,
+      shutdownMs: 3_000,
+    },
+    warnings: [],
+  };
+}
+
+afterEach(async () => {
+  await Promise.all(openSessions.splice(0).map((session) => session.dispose()));
+  await Promise.all(sessionFileStores.splice(0).map((files) => files.dispose()));
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { force: true, recursive: true })),
+  );
+});
+
+async function expectVariablesToolText(
+  toolDefinitions: ReturnType<typeof createDapTools>,
+  topStackFrame: DebugProtocol.StackFrame | undefined,
+  projectDirectory: string,
+): Promise<void> {
+  const variablesTool = toolDefinitions.find(({ name }) => name === "hl_dap_variables");
+  const variablesResult = await variablesTool?.execute(
+    "variables",
+    { frame_id: topStackFrame?.id ?? -1 },
+    undefined,
+    undefined,
+    await createToolContext(projectDirectory),
+  );
+  const variablesText = variablesResult?.content
+    .map((item) => (item.type === "text" ? item.text : ""))
+    .join("");
+  expect(variablesText).toMatch(/^\s{2}answer(: number)? = 42$/mu);
+  expect(variablesText).toContain("expensive, not expanded");
+  expect(variablesText).not.toContain("Result Spill");
+}
+
+async function expectStoppedToolRendering(
+  session: DapController,
+  files: DapArtifacts,
+  projectDirectory: string,
+  stack: DapResult,
+  topStackFrame: DebugProtocol.StackFrame | undefined,
+): Promise<void> {
+  // The model sees the locals in the visible text, with no Result Spill to read.
+  const toolDefinitions = createDapTools(() => ({
+    controller: session,
+    artifacts: files,
+  }));
+  // js-debug hints Node's module loader frames, so the stack text collapses them into one line.
+  const stackResult = await toolDefinitions
+    .find(({ name }) => name === "hl_dap_stack")
+    ?.execute("stack", {}, undefined, undefined, await createToolContext(projectDirectory));
+  const stackText = stackResult?.content
+    .map((item) => (item.type === "text" ? item.text : ""))
+    .join("");
+  expect(stackText).toMatch(/^ {2}frame \d+: .* at program\.ts:3:\d+$/mu);
+  expect(stackText).toMatch(/^ {2}\u2026 \d+ deemphasized frames \(ids [\d\u2013, ]+\)$/mu);
+  expect(stackResult?.structuredContent).toMatchObject({
+    stack_frames: stack.stackFrames?.map(({ id }) => objectContaining({ id })),
+  });
+  await expectVariablesToolText(toolDefinitions, topStackFrame, projectDirectory);
+}
+
+async function expectStoppedInspection(
+  session: DapController,
+  files: DapArtifacts,
+  projectDirectory: string,
+  programPath: string,
+): Promise<void> {
+  const stack = await session.stack();
+  const topStackFrame = stack.stackFrames?.at(0);
+  expect(topStackFrame?.source?.path).toBe(programPath);
+  const variables = await session.variables({
+    frameId: topStackFrame?.id ?? -1,
+  });
+  expect(variables.variableGroups?.flatMap((group) => group.variables ?? [])).toContainEqual(
+    objectContaining({ name: "answer", value: "42" }),
+  );
+  // js-debug marks Global expensive: it is listed with its reference but never expanded here.
+  const expensiveGroups = variables.variableGroups?.filter((group) => group.scope.expensive) ?? [];
+  expect(expensiveGroups.length).toBeGreaterThan(0);
+  for (const group of expensiveGroups) expect(group.variables).toBeUndefined();
+  await expectStoppedToolRendering(session, files, projectDirectory, stack, topStackFrame);
+}
+
+test("debugs TypeScript through the Supported vscode-js-debug adapter and cleans up both exit paths", async () => {
+  const projectDirectory = await mkdtemp(resolve(tmpdir(), "pi-hl-dap-js-debug-project-"));
+  const piSessionDirectory = await mkdtemp(resolve(tmpdir(), "pi-hl-dap-js-debug-session-"));
+  temporaryDirectories.push(projectDirectory, piSessionDirectory);
+  const programPath = resolve(projectDirectory, "program.ts");
+  await writeFile(
+    programPath,
+    [
+      "const base: number = 41;",
+      "const answer: number = base + 1;",
+      "console.log(`answer=${answer}`);",
+    ].join("\n"),
+  );
+
+  const adapterPath = ADAPTER_PATH;
+  const baselineAdapterProcesses = await processIdsContaining(adapterPath);
+  const files = await createDapArtifacts(piSessionDirectory);
+  sessionFileStores.push(files);
+  const settings = jsDebugSettings({
+    type: "pwa-node",
+    request: "launch",
+    name: "HL DAP Supported Adapter test",
+    console: "internalConsole",
+    stopOnEntry: true,
+  });
+  const observerSnapshots: DapSnapshot[] = [];
+  const session = new DapController({
+    cwd: projectDirectory,
+    settings,
+    artifacts: files,
+    onSnapshotChange: (snapshot) => observerSnapshots.push(snapshot),
+  });
+  await session.setBreakpoints({
+    filePath: programPath,
+    breakpoints: [{ line: 3 }],
+  });
+
+  const launch = await session.launch({
+    profile: "node",
+    program: programPath,
+    cwd: projectDirectory,
+  });
+  expect(launch.snapshot).toMatchObject({
+    state: "stopped",
+    stopReason: "entry",
+  });
+  expect(observerSnapshots).toContainEqual(
+    objectContaining({ state: "stopped", stopReason: "entry" }),
+  );
+  const breakpointStop = await session.continue();
+  expect(breakpointStop.snapshot).toMatchObject({
+    state: "stopped",
+    stopReason: "breakpoint",
+  });
+  expect(breakpointStop.stop?.topFrame).toMatchObject({
+    line: 3,
+    source: { path: programPath },
+  });
+  expect(observerSnapshots).toContainEqual(
+    objectContaining({ state: "stopped", stopReason: "breakpoint" }),
+  );
+  await expectStoppedInspection(session, files, projectDirectory, programPath);
+  const evaluation = await session.evaluate({ expression: "answer" });
+  expect(evaluation.evaluation?.result).toBe("42");
+  await expect(session.evaluate({ expression: "undefinedName" })).rejects.toThrow(
+    /undefinedName is not defined/,
+  );
+
+  const adapterProcesses = new Set(
+    [...(await processIdsContaining(adapterPath))].filter(
+      (processId) => !baselineAdapterProcesses.has(processId),
+    ),
+  );
+  const debuggeeProcesses = await debuggeeProcessIds(adapterProcesses, "program.ts");
+  expect(adapterProcesses.size).toBeGreaterThan(0);
+  expect(debuggeeProcesses.size).toBeGreaterThan(0);
+
+  const continued = await session.continue();
+  expect(continued.snapshot.state).toBe("terminated");
+  expect(observerSnapshots.at(-1)).toMatchObject({ state: "terminated" });
+  expect(continued.output).toContain("answer=42");
+  expect(session.status().snapshot.state).toBe("terminated");
+  await waitForProcessesToExit(new Set([...adapterProcesses, ...debuggeeProcesses]));
+
+  await session.launch({
+    profile: "node",
+    program: programPath,
+    cwd: projectDirectory,
+  });
+  const secondAdapterProcesses = new Set(
+    [...(await processIdsContaining(adapterPath))].filter(
+      (processId) => !baselineAdapterProcesses.has(processId),
+    ),
+  );
+  const secondDebuggeeProcesses = await debuggeeProcessIds(secondAdapterProcesses, "program.ts");
+  await session.stop();
+  await waitForProcessesToExit(new Set([...secondAdapterProcesses, ...secondDebuggeeProcesses]));
+}, 30_000);
+
+const FUNCTION_FIRST_PROGRAM = [
+  "function add(a, b) {",
+  "  const sum = a + b;",
+  "  return sum;",
+  "}",
+  "let total = 0;",
+  "for (let i = 0; i < 3; i++) total = add(total, i);",
+  "console.log(`total=${total}`);",
+].join("\n");
+
+/** A Supported vscode-js-debug Debug Session whose program starts with a function declaration. */
+async function startFunctionFirstSession(
+  profileArguments: Record<string, string | boolean>,
+  executionMs?: number,
+) {
+  const projectDirectory = await mkdtemp(resolve(tmpdir(), "pi-hl-dap-js-debug-function-"));
+  const piSessionDirectory = await mkdtemp(
+    resolve(tmpdir(), "pi-hl-dap-js-debug-function-session-"),
+  );
+  temporaryDirectories.push(projectDirectory, piSessionDirectory);
+  const programPath = resolve(projectDirectory, "program.js");
+  await writeFile(programPath, FUNCTION_FIRST_PROGRAM);
+  const files = await createDapArtifacts(piSessionDirectory);
+  sessionFileStores.push(files);
+  const settings = jsDebugSettings(profileArguments, executionMs);
+  const session = new DapController({
+    cwd: projectDirectory,
+    settings,
+    artifacts: files,
+  });
+  // Closed by afterEach even when an assertion fails, so no adapter or Debuggee leaks.
+  openSessions.push(session);
+  return { programPath, projectDirectory, session };
+}
+
+test("with the documented node profile, a breakpoint inside a function stops as a breakpoint every call, never as an entry stop", async () => {
+  const repoProfile = { type: "pwa-node", console: "internalConsole" };
+  // js-debug's entry breakpoint (stopOnEntry) would re-stop inside add() on every call.
+  expect(repoProfile).not.toHaveProperty("stopOnEntry");
+  const { programPath, projectDirectory, session } = await startFunctionFirstSession({
+    request: "launch",
+    name: "HL DAP function-first test",
+    ...repoProfile,
+  });
+  await session.setBreakpoints({
+    filePath: programPath,
+    breakpoints: [{ line: 3 }],
+  });
+
+  const stops = [
+    await session.launch({
+      profile: "node",
+      program: programPath,
+      cwd: projectDirectory,
+    }),
+  ];
+  for (let call = 1; call < 3; call++) stops.push(await session.continue());
+
+  for (const stop of stops) {
+    expect(stop.snapshot).toMatchObject({
+      state: "stopped",
+      stopReason: "breakpoint",
+    });
+    expect(stop.stop?.hitBreakpointIds?.length).toBeGreaterThan(0);
+    expect(stop.stop?.topFrame).toMatchObject({ name: "global.add", line: 3 });
+  }
+  const finished = await session.continue();
+  expect(finished.snapshot.state).toBe("terminated");
+  expect(finished.output).toContain("total=3");
+}, 30_000);
+
+/** Launch a throwaway program to completion through the Supported adapter and return the final result. */
+async function runToTermination(
+  source: string,
+  profile: Record<string, string> = { console: "internalConsole" },
+) {
+  const { programPath, projectDirectory, session } = await startFunctionFirstSession({
+    type: "pwa-node",
+    request: "launch",
+    name: "HL DAP exit code test",
+    ...profile,
+  });
+  await writeFile(programPath, source);
+  return session.launch({
+    profile: "node",
+    program: programPath,
+    cwd: projectDirectory,
+  });
+}
+
+test.each([["process.exit(3)", "process.exit(3);", 3]])(
+  "reports the Debuggee exit code for %s",
+  async (_name, source, exitCode) => {
+    const result = await runToTermination(source);
+    expect(result.snapshot).toMatchObject({ state: "terminated", exitCode });
+  },
+  30_000,
+);
+
+test.each([["process.exit(3)", "process.exit(3);", 3]])(
+  "with console integratedTerminal, reports the exit code of the Debuggee Pi ran for %s",
+  async (_name, source, exitCode) => {
+    const result = await runToTermination(source, {
+      console: "integratedTerminal",
+    });
+    expect(result.snapshot).toMatchObject({ state: "terminated", exitCode });
+  },
+  30_000,
+);
+
+test.each([
+  [
+    "Debuggee stderr that imitates the adapter's report",
+    "process.stderr.write('Process exited with code 7\\n'); process.exit(3);",
+  ],
+])(
+  "with outputCapture std, never guesses or takes an exit code from output for %s",
+  async (_name, source) => {
+    const result = await runToTermination(source, {
+      console: "internalConsole",
+      outputCapture: "std",
+    });
+    expect(result.snapshot.state).toBe("terminated");
+    expect(Object.hasOwn(result.snapshot, "exitCode")).toBe(false);
+  },
+  30_000,
+);
+
+test("a Debuggee that cannot load its program reports a non-zero exit code", async () => {
+  const { projectDirectory, session } = await startFunctionFirstSession({
+    type: "pwa-node",
+    request: "launch",
+    name: "HL DAP missing program test",
+    console: "internalConsole",
+  });
+  const result = await session.launch({
+    profile: "node",
+    program: resolve(projectDirectory, "does-not-exist.js"),
+    cwd: projectDirectory,
+  });
+  expect(result.snapshot).toMatchObject({ state: "terminated" });
+  expect(result.snapshot).toHaveProperty("exitCode", 1);
+}, 30_000);
+
+const WORKER_SOURCE = [
+  "const { writeFileSync } = require('node:fs');",
+  "writeFileSync(process.env.MARKER_PATH, 'worker ran');",
+  "const value = 1;",
+  "console.log('worker value', value);",
+].join("\n");
+
+/** Debuggee that starts a worker thread and prints once the worker exits. */
+const WORKER_PARENT_SOURCE = [
+  "const { Worker } = require('node:worker_threads');",
+  "const path = require('node:path');",
+  "const worker = new Worker(path.join(__dirname, 'worker.js'));",
+  "worker.on('exit', (code) => console.log(`worker exited ${code}`));",
+].join("\n");
+
+/** Debuggee that forks a child process and prints once the child exits, as vitest's forks pool does. */
+const FORK_PARENT_SOURCE = [
+  "const { fork } = require('node:child_process');",
+  "const path = require('node:path');",
+  "const child = fork(path.join(__dirname, 'worker.js'), { env: process.env });",
+  "child.on('exit', (code) => console.log(`child exited ${code}`));",
+].join("\n");
+
+/** A child left paused would hold an operation this long and then report the Debuggee running. */
+const CHILD_SESSION_EXECUTION_MS = 20_000;
+
+/** A Debug Session over a program that spawns `worker.js`, with one breakpoint inside the worker. */
+async function startChildSessionProgram(
+  parentSource: string,
+  profileArguments: Record<string, string | boolean> = {},
+) {
+  const { programPath, projectDirectory, session } = await startFunctionFirstSession(
+    {
+      type: "pwa-node",
+      request: "launch",
+      name: "HL DAP child session test",
+      console: "internalConsole",
+      ...profileArguments,
+    },
+    CHILD_SESSION_EXECUTION_MS,
+  );
+  const workerPath = resolve(projectDirectory, "worker.js");
+  const markerPath = resolve(projectDirectory, "marker.txt");
+  await writeFile(programPath, parentSource);
+  await writeFile(workerPath, WORKER_SOURCE);
+  await session.setBreakpoints({
+    filePath: workerPath,
+    breakpoints: [{ line: 3 }],
+  });
+  return { programPath, projectDirectory, markerPath, session };
+}
+
+test.each([
+  ["a worker thread", WORKER_PARENT_SOURCE, /^\[worker 1\](?: WorkerThread)?$/u, "worker exited 0"],
+  ["a child process", FORK_PARENT_SOURCE, /^worker\.js \[\d+\]$/u, "child exited 0"],
+])(
+  "stops at a breakpoint in %s, inspects it, and runs it to the end",
+  async (_name, parentSource, nameMatcher, exitLine) => {
+    const { programPath, projectDirectory, markerPath, session } =
+      await startChildSessionProgram(parentSource);
+    const workerPath = resolve(projectDirectory, "worker.js");
+    const stopped = await session.launch({
+      profile: "node",
+      program: programPath,
+      cwd: projectDirectory,
+      launchArguments: { env: { MARKER_PATH: markerPath } },
+    });
+
+    expect(stopped.snapshot).toMatchObject({
+      state: "stopped",
+      stopReason: "breakpoint",
+    });
+    expect(stopped.stop?.childSession).toMatch(nameMatcher);
+    expect(stopped.stop?.topFrame).toMatchObject({
+      line: 3,
+      source: { path: workerPath },
+    });
+    expect(stopped.stop?.hitBreakpointIds?.length).toBeGreaterThan(0);
+    expect(stopped.rejectedChildSessions).toBeUndefined();
+    const stack = await session.stack();
+    expect(stack.stackFrames?.at(0)?.source?.path).toBe(workerPath);
+    expect(
+      (await session.evaluate({ expression: "process.env.MARKER_PATH" })).evaluation,
+    ).toMatchObject({ result: `'${markerPath}'` });
+
+    const finished = await session.continue();
+    expect(finished.snapshot).toMatchObject({
+      state: "terminated",
+      exitCode: 0,
+    });
+    expect(finished.output).toContain("worker value 1");
+    expect(finished.output).toContain(exitLine);
+    expect(await readFile(markerPath, "utf8")).toBe("worker ran");
+  },
+  40_000,
+);
+
+test("debugs worker threads a child process starts, early and late, one stop at a time", async () => {
+  const { programPath, projectDirectory, markerPath, session } =
+    await startChildSessionProgram(FORK_PARENT_SOURCE);
+  // The late worker starts after the child process attached: its session arrives on the child's
+  // channel, and must be debugged too, or js-debug holds it for a debugger and the launch hangs.
+  await writeFile(
+    resolve(projectDirectory, "worker.js"),
+    [
+      "const { Worker } = require('node:worker_threads');",
+      "const path = require('node:path');",
+      "new Worker(path.join(__dirname, 'inner.js'));",
+      "setTimeout(() => new Worker(path.join(__dirname, 'inner.js')), 1500);",
+    ].join("\n"),
+  );
+  const innerPath = resolve(projectDirectory, "inner.js");
+  await writeFile(
+    innerPath,
+    [
+      "const fs = require('node:fs');",
+      "fs.appendFileSync(process.env.MARKER_PATH + '.inner', 'x');",
+      "debugger;",
+    ].join("\n"),
+  );
+  const stops = [
+    await session.launch({
+      profile: "node",
+      program: programPath,
+      cwd: projectDirectory,
+      launchArguments: { env: { MARKER_PATH: markerPath } },
+    }),
+  ];
+  stops.push(await session.continue(), await session.continue());
+
+  // The fixture's breakpoint on worker.js line 3 binds in the child process before its workers.
+  const [childStop, ...workerStops] = stops;
+  expect(childStop?.snapshot).toMatchObject({
+    state: "stopped",
+    stopReason: "breakpoint",
+  });
+  expect(childStop?.stop?.childSession).toMatch(/^worker\.js \[\d+\]$/u);
+  for (const stop of workerStops) {
+    expect(stop.snapshot).toMatchObject({ state: "stopped" });
+    expect(stop.stop?.childSession).toMatch(/^\[worker \d+\](?: WorkerThread)?$/u);
+    expect(stop.stop?.topFrame).toMatchObject({
+      line: 3,
+      source: { path: innerPath },
+    });
+  }
+  // Each worker is its own target with its own threads; Pi's thread ids tell them apart.
+  const threadIds = stops.map(({ snapshot }) => ("threadId" in snapshot ? snapshot.threadId : 0));
+  expect(new Set(threadIds).size).toBe(3);
+  const finished = await session.continue();
+  expect(finished.snapshot).toMatchObject({ state: "terminated", exitCode: 0 });
+  expect(finished.output).toContain("child exited 0");
+  expect(await readFile(`${markerPath}.inner`, "utf8")).toBe("xx");
+}, 40_000);
+
+const VITEST_CLI = resolve(
+  dirname(createRequire(import.meta.url).resolve("vitest/package.json")),
+  "vitest.mjs",
+);
+
+test.each([
+  ["forks", /^forks\.js \[\d+\]$/u],
+  ["threads", /^\[worker \d+\](?: WorkerThread)?$/u],
+])(
+  "vitest run with the %s pool stops at a breakpoint in code a test imports",
+  async (pool, childSessionName) => {
+    const { projectDirectory, session } = await startFunctionFirstSession(
+      {
+        type: "pwa-node",
+        request: "launch",
+        name: "HL DAP vitest test",
+        console: "internalConsole",
+      },
+      CHILD_SESSION_EXECUTION_MS,
+    );
+    const sourcePath = resolve(projectDirectory, "math.js");
+    await writeFile(
+      sourcePath,
+      ["export function add(a, b) {", "  const sum = a + b;", "  return sum;", "}"].join("\n"),
+    );
+    await writeFile(
+      resolve(projectDirectory, "math.test.js"),
+      [
+        "import { add } from './math.js';",
+        "test('adds', () => {",
+        "  expect(add(2, 3)).toBe(5);",
+        "});",
+      ].join("\n"),
+    );
+    await session.setBreakpoints({
+      filePath: sourcePath,
+      breakpoints: [{ line: 3 }],
+    });
+
+    const stopped = await session.launch({
+      profile: "node",
+      program: VITEST_CLI,
+      args: ["run", `--pool=${pool}`, "--globals", "--root", projectDirectory],
+      cwd: projectDirectory,
+    });
+
+    expect(stopped.snapshot).toMatchObject({
+      state: "stopped",
+      stopReason: "breakpoint",
+    });
+    expect(stopped.stop?.childSession).toMatch(childSessionName);
+    expect(stopped.stop?.topFrame).toMatchObject({
+      line: 3,
+      source: { path: sourcePath },
+    });
+    expect((await session.evaluate({ expression: "sum" })).evaluation?.result).toBe("5");
+    const finished = await session.continue();
+    expect(finished.snapshot).toMatchObject({
+      state: "terminated",
+      exitCode: 0,
+    });
+  },
+  60_000,
+);
