@@ -1405,6 +1405,23 @@ it("keeps fifty edited revisions out of persistent diagnostic context", async ()
   ).toHaveLength(0);
 });
 
+it("sends no summary to the model while the open file has no diagnostics", async () => {
+  const state = await session(true, "error-lines");
+  await writeFile(join(state.cwd, "index.ts"), "const value = 1;\n");
+  expect(await hover(state)).toMatchObject({
+    details: { outcome: "completed" },
+  });
+  await writeFile(join(state.cwd, "index.ts"), "const ERROR = 1;\n");
+  expect(await hover(state)).toMatchObject({
+    details: { outcome: "completed" },
+  });
+  expect(
+    state.requests.map(
+      (request) => request.filter((text) => text.includes('"source":"hl-lsp"')).length,
+    ),
+  ).toEqual([0, 0, 0, 1]);
+});
+
 it("adds one bounded transient summary per natural request without raw diagnostic prose", async () => {
   const { runtime, faux, requests } = await session(true, "versioned");
   faux.setResponses([
@@ -1448,6 +1465,7 @@ it("adds one bounded transient summary per natural request without raw diagnosti
         projectComplete: false,
       });
       expect(text).not.toContain("Untrusted diagnostic prose");
+      expect(text).not.toMatch(/generation|documentVersion|receivedAt|checkedAt/u);
       expect(text.length).toBeLessThan(4096);
     }
   }
