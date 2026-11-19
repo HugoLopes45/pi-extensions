@@ -2,6 +2,12 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 1.4.5
+
+### Patch Changes
+
+- The settings menu accepts a Claude Code version that reads as a decimal number, such as 2.1.
+
 ## 1.4.4
 
 ### Patch Changes

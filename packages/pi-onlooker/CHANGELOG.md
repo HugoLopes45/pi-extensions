@@ -2,6 +2,13 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 0.1.3
+
+### Patch Changes
+
+- A Review that passes its 120 s deadline no longer pauses the Onlooker. The next turn's Review covers its turns instead, and the Onlooker pauses only after 3 late Reviews in a row.
+- Text from the reviewer model, provider errors and settings now shows without terminal control sequences, so it can no longer change the window title, clear the screen or add hidden links. Line breaks and tabs stay.
+
 ## 0.1.2
 
 ### Patch Changes
