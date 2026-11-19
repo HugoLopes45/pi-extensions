@@ -25,6 +25,7 @@ import {
 import { formatNewErrors } from "./format.js";
 import type { LspChange } from "./menu.js";
 import { outside } from "./project-files.js";
+import { recoverInterruptedEdits } from "./rename.js";
 import { commandSpec, lspSettings, readSettings } from "./settings.js";
 import { checkOffers, findOffers, setupChanges, type Offer, type SetupResults } from "./setup.js";
 import { bounded } from "./text.js";
@@ -249,7 +250,10 @@ function renameLines(
   {
     changed,
     unsynced,
-  }: { changed: { file: string; edits: number }[]; unsynced: string | undefined },
+  }: {
+    changed: { file: string; edits: number }[];
+    unsynced: string | undefined;
+  },
   cwd: string,
   moved?: string,
 ): string {
@@ -382,6 +386,10 @@ export default function hlLsp(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     await reset(ctx);
+    const notes = await recoverInterruptedEdits();
+    // Pi logs a thrown extension error in every mode, so headless runs still see what recovery did.
+    if (!ctx.hasUI && notes.length > 0) throw new Error(notes.join(" "));
+    for (const note of notes) ctx.ui.notify(note, "warning");
     if (ctx.mode === "tui" && !issue) await setup(ctx, true);
   });
   pi.on("session_tree", async (_event, ctx) => reset(ctx));

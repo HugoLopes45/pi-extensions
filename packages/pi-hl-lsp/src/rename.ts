@@ -1,8 +1,23 @@
-import { link, mkdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import {
+  access,
+  chmod,
+  constants,
+  link,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { errorText } from "pi-hl-utils/errors";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
@@ -54,25 +69,40 @@ type Target = {
   version: number | null | undefined;
   edits: Edit[];
 };
-type Planned = Target & { original: string; text: string };
+type Planned = Target & { original: string; text: string; mode: number };
+
+// Written before the first file changes and removed after the last step, so a killed apply can be undone.
+const journal = Type.Object({
+  pid: Type.Integer(),
+  files: Type.Array(
+    Type.Object({
+      file: Type.String(),
+      original: Type.String(),
+      text: Type.String(),
+    }),
+  ),
+  move: Type.Optional(Type.Object({ from: Type.String(), to: Type.String() })),
+});
+type Journal = Static<typeof journal>;
 type Group = { uri: string; version: number | null | undefined; edits: Edit[] };
 
 // Thrown before any write; it becomes a refusal of the whole edit.
 class Refusal extends Error {}
 
-// Validates the edit, then plans and writes each file under its queue; afterWrite runs once all files are written.
-// A refusal, write error or afterWrite error leaves files as they were.
+// Validates the edit, then plans and writes each file under its queue; the move runs once all files are written.
+// A refusal, write error or move error leaves files as they were; a killed process leaves a journal for
+// recoverInterruptedEdits.
 export async function applyWorkspaceEdit(
   response: unknown,
   root: string,
   synced: SyncedDocument | undefined,
-  afterWrite?: () => Promise<void>,
+  move?: FileMove,
 ): Promise<ApplyOutcome> {
   try {
     const targets = await targetsOf(response, root);
     return await queued(targets.map((target) => target.file).toSorted(), async () => {
       const planned = await planAll(targets, root, synced);
-      return writeAll(planned, root, afterWrite);
+      return writeAll(planned, root, move);
     });
   } catch (error) {
     if (error instanceof Refusal) return { outcome: "refused", reason: error.message };
@@ -178,10 +208,15 @@ async function planAll(
     const name = relative(root, target.file);
     const original = await readOriginal(target.file, name);
     checkSynced(target, original, synced, name);
+    // The new text replaces the file by rename, which a read-only file would not stop.
+    await access(target.file, constants.W_OK).catch(() => {
+      throw new Refusal(`${name} is read-only`);
+    });
     planned.push({
       ...target,
       original,
       text: applyEdits(original, target.edits, name),
+      mode: (await stat(target.file)).mode,
     });
   }
   return planned;
@@ -315,29 +350,70 @@ async function nearestRealpath(path: string): Promise<string> {
   );
 }
 
-// Writes every planned file and then runs afterWrite, or restores the written files when either fails.
+function journalDir(): string {
+  return join(getAgentDir(), "hl-lsp", "journal");
+}
+
+// Replaces the file in one step, so a killed process leaves either the old or the new text, never a part.
+async function replaceFile(file: string, text: string, mode?: number): Promise<void> {
+  const temporary = `${file}.hl-lsp-${randomUUID()}`;
+  try {
+    await writeFile(temporary, text);
+    // Set after the write: a mode given to writeFile is reduced by the umask.
+    if (mode !== undefined) await chmod(temporary, mode);
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+// Writes every planned file and then moves the file, or restores the written files when either fails.
 async function writeAll(
   planned: Planned[],
   root: string,
-  afterWrite: (() => Promise<void>) | undefined,
+  move: FileMove | undefined,
+): Promise<ApplyOutcome> {
+  const record: Journal = {
+    pid: process.pid,
+    files: planned.map(({ file, original, text }) => ({
+      file,
+      original,
+      text,
+    })),
+    ...(move && { move }),
+  };
+  await mkdir(journalDir(), { recursive: true });
+  const entry = join(journalDir(), `${randomUUID()}.json`);
+  await replaceFile(entry, JSON.stringify(record));
+  const outcome = await writeJournaled(planned, root, move, entry);
+  if (outcome.outcome === "written") await unlink(entry);
+  return outcome;
+}
+
+async function writeJournaled(
+  planned: Planned[],
+  root: string,
+  move: FileMove | undefined,
+  entry: string,
 ): Promise<ApplyOutcome> {
   const attempted: Planned[] = [];
   for (const target of planned) {
     attempted.push(target);
     try {
-      await writeFile(target.file, target.text);
+      await replaceFile(target.file, target.text, target.mode);
     } catch (error) {
       return failed(
         `Could not write ${relative(root, target.file)}: ${errorText(error)}.`,
         attempted,
         root,
+        entry,
       );
     }
   }
   try {
-    await afterWrite?.();
+    if (move) await moveFile(move);
   } catch (error) {
-    return failed(`${errorText(error)}.`, attempted, root);
+    return failed(`${errorText(error)}.`, attempted, root, entry);
   }
   return {
     outcome: "written",
@@ -345,13 +421,25 @@ async function writeAll(
   };
 }
 
-async function failed(reason: string, attempted: Planned[], root: string): Promise<ApplyOutcome> {
+async function failed(
+  reason: string,
+  attempted: Planned[],
+  root: string,
+  entry: string,
+): Promise<ApplyOutcome> {
   const unrestored = await restore(attempted, root);
-  const state =
-    unrestored.length === 0
-      ? "Restored every written file."
-      : `Could not restore: ${unrestored.join(", ")}.`;
-  return { outcome: "failed", reason: `${reason} ${state}` };
+  if (unrestored.length === 0) {
+    await unlink(entry);
+    return {
+      outcome: "failed",
+      reason: `${reason} Restored every written file.`,
+    };
+  }
+  // The journal stays, so the next Pi start can still undo the files left changed.
+  return {
+    outcome: "failed",
+    reason: `${reason} Could not restore: ${unrestored.join(", ")}. The next Pi start retries.`,
+  };
 }
 
 // Rewrites the original text of each attempted file, newest first; returns the names still changed.
@@ -359,10 +447,60 @@ async function restore(attempted: Planned[], root: string): Promise<string[]> {
   const unrestored: string[] = [];
   for (const target of attempted.toReversed()) {
     try {
-      await writeFile(target.file, target.original);
+      await replaceFile(target.file, target.original, target.mode);
     } catch {
       unrestored.push(relative(root, target.file));
     }
   }
   return unrestored;
+}
+
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ESRCH");
+  }
+}
+
+// Undoes the edits that a killed process left in the journal. A file changed since then is kept and named,
+// and its journal stays so the original text is not lost. Returns one note per journal it acted on.
+export async function recoverInterruptedEdits(): Promise<string[]> {
+  const names = await readdir(journalDir()).catch((error: unknown) => {
+    if (isMissingPath(error)) return [];
+    throw error;
+  });
+  const notes: string[] = [];
+  for (const name of names.filter((entry) => entry.endsWith(".json"))) {
+    const note = await recoverJournal(join(journalDir(), name));
+    if (note !== undefined) notes.push(note);
+  }
+  return notes;
+}
+
+async function recoverJournal(entry: string): Promise<string | undefined> {
+  const record: unknown = JSON.parse(await readFile(entry, "utf8"));
+  if (!Value.Check(journal, record))
+    return `The LSP edit journal ${entry} is invalid; it was kept.`;
+  if (running(record.pid)) return undefined;
+  if (record.move) await undoMove(record.move);
+  const kept: string[] = [];
+  for (const { file, original, text } of record.files) {
+    const current = await readFile(file, "utf8").catch((error: unknown) => {
+      if (isMissingPath(error)) return undefined;
+      throw error;
+    });
+    if (current === text) await replaceFile(file, original, (await stat(file)).mode);
+    else if (current !== original) kept.push(file);
+  }
+  if (kept.length > 0)
+    return `Could not undo an interrupted LSP edit of ${kept.join(", ")}: the files changed since. ${entry} keeps their original text.`;
+  await unlink(entry);
+  return `Undid an interrupted LSP edit of ${record.files.length} files.`;
+}
+
+async function undoMove({ from, to }: FileMove): Promise<void> {
+  if ((await realpathOrMissing(from)) === undefined && (await realpathOrMissing(to)) !== undefined)
+    await moveFile({ from: to, to: from });
 }
