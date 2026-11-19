@@ -389,7 +389,9 @@ export default function hlLsp(pi: ExtensionAPI): void {
   pi.on("context", async (event) => {
     const current = controller;
     const summary = await current?.summary();
-    if (!summary || controller !== current) return { messages: event.messages };
+    // A clean file needs no tokens: the model learns of errors only when there are some.
+    if (!summary || summary.reportedCount === 0 || controller !== current)
+      return { messages: event.messages };
     return {
       messages: [
         ...event.messages,
