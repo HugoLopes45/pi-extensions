@@ -1200,8 +1200,15 @@ it("warm: keeps the server after the caller cancels", async () => {
 it("warm: keeps the server after an LSP error response", async () => {
   const { instance, file, spawnLog } = await controller("error-hover");
   for (let attempt = 0; attempt < 2; attempt++)
-    await expect(instance.query("hover", file, position)).rejects.toThrow("content modified");
+    await expect(instance.query("hover", file, position)).rejects.toThrow("hover failed");
   expect(await launches(spawnLog)).toBe(1);
+});
+
+it("sends a request again when the server says the content was modified", async () => {
+  const { instance, file } = await controller("content-modified-once");
+  await expect(instance.query("hover", file, position)).resolves.toMatchObject({
+    outcome: "completed",
+  });
 });
 
 it("warm: lets a slow server finish starting after the request deadline", async () => {

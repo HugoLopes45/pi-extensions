@@ -320,6 +320,16 @@ connection.onRequest("initialize", async (params: unknown) => {
   if (mode === "server-status") await startStatus();
   return { capabilities: capabilities() };
 });
+let hovers = 0;
+// Error answers of the hover modes.
+function hoverError(): rpc.ResponseError | undefined {
+  if (mode === "error-hover") return new rpc.ResponseError(-32603, "hover failed");
+  if (mode === "long-error") return new rpc.ResponseError(-32603, "z".repeat(5000));
+  hovers += 1;
+  if (mode === "content-modified-once" && hovers === 1)
+    return new rpc.ResponseError(-32801, "content modified");
+  return undefined;
+}
 connection.onRequest(
   "textDocument/hover",
   async (params: unknown, token: rpc.CancellationToken): Promise<object> => {
@@ -327,8 +337,8 @@ connection.onRequest(
       token.onCancellationRequested(() => log("cancel"));
       return new Promise<never>(() => {});
     }
-    if (mode === "error-hover") throw new rpc.ResponseError(-32801, "content modified");
-    if (mode === "long-error") throw new rpc.ResponseError(-32603, "z".repeat(5000));
+    const error = hoverError();
+    if (error) throw error;
     if (mode === "echo-position") return echoPosition(params);
     if (mode === "publish-kept-past-limit" && unopenedBase)
       publishFindings(unopenedBase, laterUnopenedNames);

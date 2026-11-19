@@ -102,6 +102,9 @@ const READY_GRACE_MS = 1000;
 // The last 100 ms of the two-second disposal budget, kept after SIGKILL: macOS answers EPERM for a
 // group whose only member is an unreaped zombie, so the group is probed again before failing.
 const REAP_RESERVE_MS = 100;
+// LSP ContentModified: the answer was computed for an older state; the spec lets the client send the request again.
+const CONTENT_MODIFIED = -32801;
+const RETRY_PAUSE_MS = 100;
 // Real servers index the project before answering initialize; requests keep the shorter budget.
 export const STARTUP_TIMEOUT_MS = 60_000;
 
@@ -488,6 +491,7 @@ export class LanguageServer {
   }
 
   // An abort or an LSP error response leaves the server running; only a broken transport stops it.
+  // A ContentModified answer is sent again until the deadline.
   async request(
     method: string,
     params: object,
@@ -507,11 +511,12 @@ export class LanguageServer {
     };
     combined.addEventListener("abort", abort, { once: true });
     try {
-      combined.throwIfAborted();
-      const reply = this.connection.sendRequest<unknown>(method, params, cancellation.token);
-      // A reply that lands after the caller gave up has no listener left.
-      reply.catch(() => {});
-      return await Promise.race([reply, aborted.promise]);
+      for (;;) {
+        combined.throwIfAborted();
+        const answer = await this.attempt(method, params, cancellation.token, aborted.promise);
+        if (answer) return answer.result;
+        await delay(RETRY_PAUSE_MS, undefined, { signal: combined });
+      }
     } catch (error) {
       combined.throwIfAborted();
       throw this.failure ?? error;
@@ -519,6 +524,24 @@ export class LanguageServer {
       combined.removeEventListener("abort", abort);
       cancellation.dispose();
       if (this.failure) await this.dispose();
+    }
+  }
+
+  // Undefined when the server answers ContentModified.
+  private async attempt(
+    method: string,
+    params: object,
+    token: rpc.CancellationToken,
+    aborted: Promise<never>,
+  ): Promise<{ result: unknown } | undefined> {
+    const reply = this.connection.sendRequest<unknown>(method, params, token);
+    // A reply that lands after the caller gave up has no listener left.
+    reply.catch(() => {});
+    try {
+      return { result: await Promise.race([reply, aborted]) };
+    } catch (error) {
+      if (error instanceof rpc.ResponseError && error.code === CONTENT_MODIFIED) return undefined;
+      throw error;
     }
   }
 
