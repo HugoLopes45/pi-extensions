@@ -357,18 +357,6 @@ export default function hlLsp(pi: ExtensionAPI): void {
       ...(controller ? controller.status() : { enabled: false, instances: [] }),
     };
   }
-  function footer(ctx: ExtensionContext) {
-    if (!ctx.hasUI) return;
-    const state = controller?.status();
-    const label = issue
-      ? "unavailable"
-      : !state?.enabled
-        ? "off"
-        : !state.trusted || !state.projectExecutionAllowed
-          ? "blocked"
-          : "armed";
-    ctx.ui.setStatus("hl-lsp", `${name}: ${label}`);
-  }
   async function stop() {
     epoch++;
     const previous = controller;
@@ -390,7 +378,6 @@ export default function hlLsp(pi: ExtensionAPI): void {
       issue = error instanceof Error ? error.message : "LSP settings could not be read";
       if (ctx.hasUI) ctx.ui.notify(issue, "error");
     }
-    footer(ctx);
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -398,10 +385,7 @@ export default function hlLsp(pi: ExtensionAPI): void {
     if (ctx.mode === "tui" && !issue) await setup(ctx, true);
   });
   pi.on("session_tree", async (_event, ctx) => reset(ctx));
-  pi.on("session_shutdown", async (_event, ctx) => {
-    await stop();
-    if (ctx.hasUI) ctx.ui.setStatus("hl-lsp", undefined);
-  });
+  pi.on("session_shutdown", async () => stop());
   pi.on("context", async (event) => {
     const current = controller;
     const summary = await current?.summary();

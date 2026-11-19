@@ -256,7 +256,7 @@ it("keeps a server whose total output exceeds 8 MiB across many messages", async
 });
 
 it("fails on a header that never ends", async () => {
-  expect(await hoverWithin("endless-header", 4000)).toMatch(/wire budget/iu);
+  expect(await hoverWithin("endless-header")).toMatch(/header exceeds 4 KiB/u);
 });
 
 it("fails when a burst of small frames exceeds 8 MiB awaiting decode", async () => {
