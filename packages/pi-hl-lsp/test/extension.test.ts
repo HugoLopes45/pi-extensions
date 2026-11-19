@@ -321,6 +321,31 @@ it("shows launch policy only in the global menu scope", async () => {
   for (const screen of screens) expect(screen).not.toContain("servers");
 });
 
+it("never writes to the footer status", async () => {
+  initTheme("dark");
+  const { runtime } = await session(false);
+  const ui = runtime.session.extensionRunner.getUIContext();
+  const statuses: Parameters<typeof ui.setStatus>[] = [];
+  await runtime.session.bindExtensions({
+    mode: "tui",
+    uiContext: {
+      ...ui,
+      setStatus: (...args) => {
+        statuses.push(args);
+      },
+      custom: (factory) =>
+        new Promise((resolve) => {
+          const { tui, keybindings } = createMenuTui();
+          void Promise.resolve(factory(tui, ui.theme, keybindings, resolve)).then((component) =>
+            menuDriver(() => component).press(keys.escape),
+          );
+        }),
+    },
+  });
+  await runtime.session.prompt("/hl-lsp");
+  expect(statuses).toEqual([]);
+});
+
 /** A Python project whose `.venv` holds a server script; `body` is the script after the shebang. */
 async function pythonProject(cwd: string, body: string): Promise<string> {
   await writeFile(join(cwd, "pyproject.toml"), '[project]\nname = "demo"\n');
