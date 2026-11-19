@@ -1,0 +1,1541 @@
+import { execFileSync } from "node:child_process";
+import type * as fs from "node:fs";
+import { closeSync, constants, openSync, readFileSync } from "node:fs";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { PassThrough } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
+
+import { expect, it, onTestFinished, vi } from "vitest";
+
+import { LspController } from "../src/controller.js";
+import { LanguageServer, STARTUP_TIMEOUT_MS } from "../src/server.js";
+import type { LspSettings } from "../src/settings.js";
+import { directory } from "./fixtures.js";
+
+// While held, streams of files other than the queried one record their path and never end,
+// so the reads in flight can be counted.
+const reads = vi.hoisted(() => ({
+  queried: undefined as string | undefined,
+  paths: [] as string[],
+  streams: new Map<string, PassThrough>(),
+}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return {
+    ...actual,
+    createReadStream: (path: string, options: { signal: AbortSignal }) => {
+      if (reads.queried === undefined || path === reads.queried)
+        return actual.createReadStream(path, options);
+      reads.paths.push(path);
+      const stream = new PassThrough({ signal: options.signal });
+      reads.streams.set(path, stream);
+      return stream;
+    },
+  };
+});
+
+const fixture = fileURLToPath(new URL("./protocol-server.ts", import.meta.url));
+// Protocol events the fixture logged after its launch line.
+const events = async (spawnLog: string) =>
+  (await readFile(spawnLog, "utf8")).trim().split("\n").slice(1);
+
+async function controller(
+  mode = "normal",
+  consent = true,
+  trusted = true,
+  overrides: Partial<LspSettings> = {},
+) {
+  const cwd = await directory();
+  await writeFile(join(cwd, "tsconfig.json"), "{}");
+  const file = join(cwd, "index.ts");
+  await writeFile(file, "const value = 1;\n");
+  const spawnLog = join(cwd, "spawns.log");
+  const settings: LspSettings = {
+    enabled: true,
+    name: "HL LSP",
+    allowProjectExecution: consent,
+    timeoutMs: 5000,
+    formatOnWrite: false,
+    ignoredLanguages: [],
+    servers: {
+      typescript: {
+        command: process.execPath,
+        args: [fixture, mode, spawnLog],
+      },
+    },
+    ...overrides,
+  };
+  const instance = new LspController(cwd, settings, trusted);
+  onTestFinished(() => instance.dispose());
+  return { instance, file, spawnLog };
+}
+
+it("evicts the least recently used baseline once 128 files have one", async () => {
+  const { instance, file } = await controller("error-lines");
+  const folder = dirname(file);
+  const paths = Array.from({ length: 129 }, (_, index) => join(folder, `file${index}.ts`));
+  const first = join(folder, "file0.ts");
+  const last = join(folder, "file128.ts");
+  for (const path of paths) await writeFile(path, "ERROR\n");
+  const signal = new AbortController().signal;
+  for (const path of paths) await instance.newErrors(path, signal);
+  // The 129th file pushed out the first file's baseline, so its error is reported uncompared.
+  expect(await instance.newErrors(first, signal)).toMatchObject({
+    outcome: "checked",
+    compared: false,
+    errors: [{ severity: 1 }],
+  });
+  // The newest file keeps its baseline, so its error is no longer new.
+  expect(await instance.newErrors(last, signal)).toEqual({
+    outcome: "checked",
+    compared: true,
+    errors: [],
+  });
+}, 60_000);
+
+it("does not call a file checked when its errors may be among the omitted diagnostics", async () => {
+  const { instance, file } = await controller("error-lines");
+  await writeFile(file, "ERROR\n".repeat(21));
+  expect(await instance.newErrors(file, new AbortController().signal)).toEqual({
+    outcome: "unchecked",
+    reason: "the server reported more errors than are compared",
+  });
+});
+
+// Under load typescript-language-server published the type errors up to 1410 ms after an empty list.
+it("does not call a file checked from an empty list without a version", async () => {
+  const { instance, file } = await controller("normal");
+  expect(await instance.newErrors(file, new AbortController().signal)).toEqual({
+    outcome: "unchecked",
+    reason: "the server gave no version, so its errors may still arrive",
+  });
+});
+
+it("reports a new error after more warnings than are shown", async () => {
+  const { instance, file } = await controller("error-lines");
+  await writeFile(file, `${"WARN\n".repeat(25)}ERROR\n`);
+  expect(await instance.newErrors(file, new AbortController().signal)).toMatchObject({
+    outcome: "checked",
+    errors: [{ severity: 1 }],
+  });
+});
+
+it("answers with a timeout whose half and tenth are not whole milliseconds", async () => {
+  const { instance, file } = await controller("normal", true, true, { timeoutMs: 3001 });
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+  });
+  expect(await instance.codeActions(file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "unsupported",
+  });
+});
+
+// The test timeout exceeds the start budget, so a start that never finishes fails on its own error.
+it(
+  "answers with a timeout shorter than the time kept for the post-read edit check",
+  async () => {
+    const { instance, file } = await controller("normal", true, true, {
+      timeoutMs: 200,
+    });
+    // On a loaded machine 200 ms can be too short: the start continues across retries, and a request deadline is a valid answer.
+    const hover = async (): Promise<string> =>
+      instance.query("hover", file, { line: 1, column: 7 }).then(
+        (result) => result.outcome,
+        (error: unknown) => {
+          if (error instanceof Error && error.message.includes("still starting")) return hover();
+          return error instanceof Error ? error.name : "non-error rejection";
+        },
+      );
+    expect(["completed", "TimeoutError"]).toContain(await hover());
+    // A start that ran out of its budget also rejects with a TimeoutError; only a running server proves a request deadline.
+    const status = await instance.serverStatus();
+    const states =
+      "servers" in status
+        ? status.servers.flatMap((server) => server.instances.map((listed) => listed.state))
+        : [];
+    expect(states).toEqual(["running"]);
+  },
+  STARTUP_TIMEOUT_MS + 10_000,
+);
+
+it("requires separate global project-execution consent before launch", async () => {
+  const { instance, file } = await controller("normal", false);
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "blocked",
+  });
+});
+
+it("requires project trust before launch, even with global consent", async () => {
+  const { instance, file, spawnLog } = await controller("normal", true, false);
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "blocked",
+  });
+  await expect(readFile(spawnLog, "utf8")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it("names only the disabled condition and its fix", async () => {
+  const { instance, file } = await controller("normal", true, true, {
+    enabled: false,
+  });
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toEqual({
+    outcome: "blocked",
+    reason: "LSP is off; run /hl-lsp on",
+  });
+});
+
+it("names the trust and consent fixes, not the enable fix, when both fail", async () => {
+  const { instance, file } = await controller("normal", false, false);
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
+  expect(result).toMatchObject({ outcome: "blocked" });
+  const reason = "reason" in result ? result.reason : undefined;
+  expect(reason).toContain("run /trust, then restart Pi");
+  expect(reason).toContain("allowProjectExecution");
+  expect(reason).not.toContain("/hl-lsp on");
+});
+
+async function unconfiguredPython(bin: string) {
+  vi.stubEnv("PATH", bin);
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  const { instance, file } = await controller();
+  const root = join(file, "..");
+  await writeFile(join(root, "pyproject.toml"), "");
+  await writeFile(join(root, "main.py"), "");
+  return instance.query("hover", join(root, "main.py"), { line: 1, column: 1 });
+}
+
+it("points at /hl-lsp-setup when the language has no server configured but one is installed", async () => {
+  const bin = await directory();
+  const server = join(bin, "pylsp");
+  await writeFile(server, "#!/bin/sh\n", { mode: 0o755 });
+  expect(await unconfiguredPython(bin)).toMatchObject({
+    outcome: "unavailable",
+    reason: `No server configured for "python"; ${server} is installed: ask the user to run /hl-lsp-setup`,
+  });
+});
+
+it("gives the install command when the language has no server configured or installed", async () => {
+  expect(await unconfiguredPython(await directory())).toMatchObject({
+    outcome: "unavailable",
+    reason:
+      'No server configured for "python"; none is installed: install one (pipx install basedpyright), then ask the user to run /hl-lsp-setup',
+  });
+});
+
+it("routes a custom server end to end by its name, file type and root marker", async () => {
+  const cwd = await directory();
+  await writeFile(join(cwd, "project.foo-root"), "");
+  const file = join(cwd, "main.foo");
+  await writeFile(file, "const value = 1;\n");
+  const instance = new LspController(
+    cwd,
+    {
+      enabled: true,
+      name: "HL LSP",
+      allowProjectExecution: true,
+      timeoutMs: 5000,
+      formatOnWrite: false,
+      ignoredLanguages: [],
+      servers: {
+        mylsp: {
+          command: process.execPath,
+          args: [fixture, "normal", join(cwd, "spawns.log")],
+          fileTypes: [".foo"],
+          rootMarkers: ["project.foo-root"],
+        },
+      },
+    },
+    true,
+  );
+  onTestFinished(() => instance.dispose());
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    server: "mylsp",
+    text: "const value: number",
+  });
+});
+
+it("reports the timeout and the configured server commands in status", async () => {
+  const { instance } = await controller();
+  expect(instance.status()).toMatchObject({
+    timeoutMs: 5000,
+    servers: { typescript: process.execPath },
+  });
+});
+
+it("routes, synchronizes, and returns bounded read-only hover output", async () => {
+  const { instance, file } = await controller();
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
+  expect(result).toHaveProperty("text", "const value: number");
+  expect(result).toMatchObject({
+    outcome: "completed",
+    server: "typescript",
+    source: "untrusted_lsp",
+  });
+});
+
+it("resolves a symbol to the 0-based character of its first match on the line", async () => {
+  const { instance, file } = await controller("echo-position");
+  expect(await instance.query("hover", file, { line: 1, symbol: "value" })).toMatchObject({
+    text: "0:6",
+  });
+});
+
+it("resolves a column of 1 to character 0", async () => {
+  const { instance, file } = await controller("echo-position");
+  expect(await instance.query("hover", file, { line: 1, column: 1 })).toMatchObject({
+    text: "0:0",
+  });
+});
+
+it("names the line text when the symbol is missing", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 1, symbol: "absent" })).rejects.toThrow(
+    'Symbol "absent" is not on the line: const value = 1;',
+  );
+});
+
+it("lists the 1-based columns when the symbol occurs twice", async () => {
+  const { instance, file } = await controller("echo-position");
+  await writeFile(file, "value + value;\n");
+  await expect(instance.query("hover", file, { line: 1, symbol: "value" })).rejects.toThrow(
+    "occurs at columns 1, 9; give column instead",
+  );
+});
+
+it("does not match a symbol inside a longer identifier", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 1, symbol: "val" })).rejects.toThrow(
+    'Symbol "val" is not on the line: const value = 1;',
+  );
+});
+
+it("resolves a line in a CR-only file", async () => {
+  const { instance, file } = await controller("echo-position");
+  await writeFile(file, "a\rconst value = 1;");
+  expect(await instance.query("hover", file, { line: 2, symbol: "value" })).toMatchObject({
+    text: "1:6",
+  });
+});
+
+it("rejects line 0 and a line past the end", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 0, column: 1 })).rejects.toThrow(
+    "Line is outside the file snapshot",
+  );
+  await expect(instance.query("hover", file, { line: 3, column: 1 })).rejects.toThrow(
+    "Line is outside the file snapshot",
+  );
+});
+
+it("counts a non-ASCII prefix in UTF-16 code units", async () => {
+  const { instance, file } = await controller("echo-position");
+  await writeFile(file, "const é = value;\n");
+  expect(await instance.query("hover", file, { line: 1, symbol: "value" })).toMatchObject({
+    text: "0:10",
+  });
+});
+
+it("requires exactly one of symbol or column", async () => {
+  const { instance, file } = await controller("echo-position");
+  await expect(instance.query("hover", file, { line: 1 })).rejects.toThrow(
+    "Give exactly one of symbol or column",
+  );
+  await expect(
+    instance.query("hover", file, { line: 1, symbol: "value", column: 1 }),
+  ).rejects.toThrow("Give exactly one of symbol or column");
+});
+
+it("allows the column just past the line end and rejects one further", async () => {
+  const { instance, file } = await controller("echo-position");
+  expect(await instance.query("hover", file, { line: 1, column: 17 })).toMatchObject({
+    text: "0:16",
+  });
+  await expect(instance.query("hover", file, { line: 1, column: 18 })).rejects.toThrow(
+    "Column is beyond the line end",
+  );
+});
+
+it("keeps a bounded leading part of an oversized single-line response", async () => {
+  const { instance, file } = await controller("chatty");
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
+  expect(result).toMatchObject({ outcome: "completed", truncated: true });
+  const text = "text" in result ? result.text : undefined;
+  expect(text).toMatch(/^x{500}/u);
+  expect(Buffer.byteLength(String(text))).toBeLessThanOrEqual(8192);
+});
+
+it("reports unversioned empty diagnostics as partial and omits automatic certification", async () => {
+  const { instance, file } = await controller();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "settled_unversioned",
+    projectComplete: false,
+  });
+  expect(await instance.summary()).toMatchObject({
+    evidence: "settled_unversioned",
+    reportedCount: 0,
+  });
+});
+
+it("settles a staged unversioned publication on its last list", async () => {
+  const { instance, file } = await controller("staged");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "settled_unversioned",
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("returns unchanged_empty after a silent clean edit, then answers the same document at once", async () => {
+  const { instance, file } = await controller("dedupe-empty");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "settled_unversioned",
+    diagnostics: [],
+  });
+  await writeFile(file, "const value = 2;\n");
+  const edited = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "unchanged_empty",
+    diagnostics: [],
+  });
+  expect(performance.now() - edited).toBeLessThan(1500);
+  const again = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "unchanged_empty",
+  });
+  expect(performance.now() - again).toBeLessThan(100);
+});
+
+it("clears the quiet timer of a waiting query when the controller is disposed", async () => {
+  const { instance, file } = await controller("dedupe-empty");
+  await instance.query("diagnostics", file);
+  await writeFile(file, "const value = 2;\n");
+  const setTimer = vi.spyOn(globalThis, "setTimeout");
+  const clearTimer = vi.spyOn(globalThis, "clearTimeout");
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const started = setTimer.mock.calls.length;
+  const pending = instance.query("diagnostics", file);
+  const quietIndex = () =>
+    setTimer.mock.calls.findIndex(([, ms], index) => index >= started && ms === 1000);
+  await vi.waitFor(() => expect(quietIndex()).toBeGreaterThanOrEqual(0));
+  const index = quietIndex();
+  // Attached before dispose, so the rejection that dispose causes has a handler.
+  const outcome = pending.then(
+    () => "resolved",
+    (error: unknown) => (error instanceof Error ? error.message : "not an error"),
+  );
+  await instance.dispose();
+  expect(clearTimer).toHaveBeenCalledWith(setTimer.mock.results[index]?.value);
+  // dispose aborts the query with its own reason, so the wait no longer reads as a settle timeout.
+  expect(await outcome).toBe("Controller is closed");
+});
+
+it("reports the caller's abort reason instead of a settle timeout", async () => {
+  const { instance, file } = await controller("silent");
+  const caller = new AbortController();
+  const query = instance.query("diagnostics", file, undefined, caller.signal);
+  caller.abort(new Error("caller cancelled"));
+  await expect(query).rejects.toThrow("caller cancelled");
+});
+
+it("matches a publication whose URI encodes @ as %40", async () => {
+  const { instance, file } = await controller("encoded-uri");
+  const scoped = join(file, "..", "@scope+x", "index.ts");
+  await mkdir(join(file, "..", "@scope+x"));
+  await writeFile(scoped, "const value = 1;\n");
+  expect(await instance.query("diagnostics", scoped)).toMatchObject({
+    evidence: "settled_unversioned",
+    reportedCount: 1,
+  });
+});
+
+it("keeps a string diagnostic code from the server", async () => {
+  const { instance, file } = await controller("string-code");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "reportMissingImports" }],
+  });
+});
+
+it("resolves a versioned publication without waiting for the settle period", async () => {
+  const { instance, file } = await controller("versioned");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  const started = performance.now();
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    evidence: "revision_correlated",
+    reportedCount: 1,
+  });
+  expect(performance.now() - started).toBeLessThan(100);
+});
+
+it("answers from a pull the server offers, without waiting for a push", async () => {
+  const { instance, file, spawnLog } = await controller("pull-static", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("pulls once the server registers the pull method after initialization", async () => {
+  const { instance, file, spawnLog } = await controller("pull-dynamic", true, true, {
+    timeoutMs: 3000,
+  });
+  await instance.query("hover", file, { line: 1, column: 7 });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("pulls when the server registers the pull method in reply to the first open", async () => {
+  const { instance, file, spawnLog } = await controller("pull-late-registration", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("keeps an empty pull provisional, so a push inside the quiet window is reported", async () => {
+  const { instance, file, spawnLog } = await controller("pull-empty-then-push", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: 2322 }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("pulls again when the server asks for a refresh after an empty pull", async () => {
+  const { instance, file, spawnLog } = await controller("pull-empty-then-refresh", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("waits for an open progress token before settling an empty pull, then reports the push", async () => {
+  const { instance, file, spawnLog } = await controller("pull-progress-then-push", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("reports a server still working, not a clean file, when a progress token stays open", async () => {
+  const { instance, file } = await controller("pull-progress-forever", true, true, {
+    timeoutMs: 1500,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "server_busy",
+    diagnostics: [],
+    text: "server still working: a progress token is open at the deadline, so diagnostics are not settled",
+  });
+});
+
+it("reports a server still working when the pull is cancelled and a progress token stays open", async () => {
+  const { instance, file } = await controller("pull-progress-forever-cancel", true, true, {
+    timeoutMs: 1500,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "server_busy",
+    diagnostics: [],
+  });
+});
+
+it("keeps waiting while progress restarts within the quiet window, then reports the push", async () => {
+  const { instance, file } = await controller("pull-progress-restart", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+});
+
+it("joins a push that follows a non-empty pull made after a refresh", async () => {
+  const { instance, file } = await controller("pull-refresh-findings-then-push", true, true, {
+    timeoutMs: 5000,
+  });
+  const result = await instance.query("diagnostics", file);
+  expect(result).toMatchObject({ outcome: "completed" });
+  expect("diagnostics" in result && result.diagnostics.map((item) => item.code)).toEqual(
+    expect.arrayContaining(["E0308", 2322]),
+  );
+});
+
+it("reports a server still working when activity never pauses for the quiet window", async () => {
+  const { instance, file } = await controller("pull-progress-chatter", true, true, {
+    timeoutMs: 2000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "partial",
+    evidence: "server_busy",
+    diagnostics: [],
+  });
+});
+
+it("keeps an empty pull after a refresh provisional, then reports the push", async () => {
+  const { instance, file, spawnLog } = await controller("pull-refresh-then-push", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("reports a clean file from a server that publishes an empty list after an empty pull", async () => {
+  const { instance, file } = await controller("pull-empty-publish-clean", true, true, {
+    timeoutMs: 5000,
+  });
+  const started = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [],
+  });
+  expect(performance.now() - started).toBeLessThan(2000);
+});
+
+it("keeps a file's publication when a later empty pull follows a reopen after another file", async () => {
+  const { instance, file } = await controller("pull-empty-reopen", true, true, {
+    timeoutMs: 5000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await instance.query("diagnostics", other);
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("reports a publication made for a file before it was opened", async () => {
+  const { instance, file } = await controller("publish-other-file", true, true, {
+    timeoutMs: 5000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other: number = 'x';\n");
+  await instance.query("diagnostics", file);
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+// A reader blocked in open() on a pipe holds a thread-pool thread until a writer opens the pipe.
+function unblockReaders(fifo: string) {
+  try {
+    closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+  } catch (error) {
+    // ENXIO: no reader has the pipe open.
+    if (!(error instanceof Error && "code" in error && error.code === "ENXIO")) throw error;
+  }
+}
+
+it.skipIf(process.platform === "win32")(
+  "does not open named pipes that a publication names",
+  async () => {
+    const { instance, file } = await controller("publish-fifos", true, true, {
+      timeoutMs: 3000,
+    });
+    const fifos = Array.from({ length: 8 }, (_, index) => join(file, "..", `fifo${index}.ts`));
+    for (const fifo of fifos) execFileSync("mkfifo", [fifo]);
+    onTestFinished(() => {
+      for (const fifo of fifos) unblockReaders(fifo);
+    });
+    const other = join(file, "..", "other.ts");
+    await writeFile(other, "const other = 1;\n");
+    const answered = instance
+      .query("diagnostics", file)
+      .then(() => instance.query("diagnostics", other))
+      .then(({ outcome }) => outcome);
+    expect(await Promise.race([answered, delay(5000, "stalled")])).toBe("completed");
+  },
+);
+
+async function publishMany(mode = "publish-many") {
+  const { instance, file } = await controller(mode, true, true, {
+    timeoutMs: 3000,
+  });
+  const target = join(await directory(), "outside.ts");
+  await writeFile(target, "const outside = 1;\n");
+  await symlink(target, join(file, "..", "outside.ts"));
+  for (let index = 0; index < 200; index += 1)
+    await writeFile(join(file, "..", `many${index}.ts`), "const many = 1;\n");
+  await writeFile(join(file, "..", "other.ts"), "const other = 1;\n");
+  reads.queried = file;
+  onTestFinished(() => {
+    reads.queried = undefined;
+    reads.paths = [];
+    reads.streams.clear();
+  });
+  await instance.query("diagnostics", file);
+  await vi.waitFor(() => expect(reads.paths.length).toBeGreaterThanOrEqual(128));
+  await delay(300);
+  return { instance, file };
+}
+
+it("does not read a file outside the root that a publication names", async () => {
+  await publishMany();
+  expect(reads.paths.filter((path) => path.endsWith("outside.ts"))).toEqual([]);
+});
+
+it("reads at most 128 files named by publications at a time", async () => {
+  await publishMany();
+  expect(reads.paths).toHaveLength(128);
+});
+
+it("does not keep an older read of a file whose newer publication was dropped", async () => {
+  // The read of other.ts and 127 others fill the limit, so the second publication of other.ts is dropped.
+  const { instance, file } = await publishMany("publish-past-limit");
+  const other = join(file, "..", "other.ts");
+  const stream = [...reads.streams].find(([read]) => read.endsWith("other.ts"))?.[1];
+  if (stream === undefined) throw new Error("other.ts was not read");
+  stream.end("const other = 1;\n");
+  await delay(100);
+  reads.queried = other;
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("forgets a kept publication of a file whose newer publication was dropped", async () => {
+  const { instance, file } = await controller("publish-kept-past-limit", true, true, {
+    timeoutMs: 3000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  for (let index = 0; index < 128; index += 1)
+    await writeFile(join(file, "..", `many${index}.ts`), "const many = 1;\n");
+  reads.queried = file;
+  onTestFinished(() => {
+    reads.queried = undefined;
+    reads.paths = [];
+    reads.streams.clear();
+  });
+  await instance.query("diagnostics", file);
+  const stream = [...reads.streams].find(([read]) => read.endsWith("other.ts"))?.[1];
+  if (stream === undefined) throw new Error("other.ts was not read");
+  stream.end("const other = 1;\n");
+  await delay(100);
+  // At the hover the server fills the read limit with 128 files, so its second publication of other.ts is dropped.
+  await instance.query("hover", file, { line: 1, column: 7 });
+  reads.queried = other;
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("reads a file at most 128 times at once for repeated publications", async () => {
+  await publishMany("publish-repeat");
+  expect(reads.paths).toHaveLength(128);
+});
+
+it("ignores a publication made for a file whose text changed before it was opened", async () => {
+  const { instance, file } = await controller("publish-other-file", true, true, {
+    timeoutMs: 5000,
+  });
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other: number = 'x';\n");
+  await instance.query("diagnostics", file);
+  await writeFile(other, "const other = 1;\n");
+  expect(await instance.query("diagnostics", other)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("reports clean after an edit fixes a versioned error that was published before the edit", async () => {
+  const { instance, file } = await controller("pull-empty-reopen-versioned", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await writeFile(file, "const value = 2;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("reports clean after an unversioned error is edited away without a new publication", async () => {
+  const { instance, file } = await controller("pull-empty-reopen", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await writeFile(file, "const value = 2;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("ignores a publication from before an edit when the edit is undone", async () => {
+  const { instance, file } = await controller("pull-empty-reopen", true, true, {
+    timeoutMs: 5000,
+  });
+  const original = await readFile(file, "utf8");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [{ code: 2322 }],
+  });
+  await writeFile(file, "const value = 2;\n");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    diagnostics: [],
+  });
+  await writeFile(file, original);
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    diagnostics: [],
+  });
+});
+
+it("does not settle while a progress token opened inside the quiet window stays open", async () => {
+  const { instance, file } = await controller("pull-progress-open-late", true, true, {
+    timeoutMs: 5000,
+  });
+  const started = performance.now();
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    diagnostics: [],
+  });
+  expect(performance.now() - started).toBeGreaterThan(2400);
+});
+
+it("settles a progress-only clean file one quiet window after the last progress end, without a second wait", async () => {
+  const { instance, file } = await controller("pull-progress-clean", true, true, {
+    timeoutMs: 5000,
+  });
+  for (let call = 0; call < 2; call += 1) {
+    const started = performance.now();
+    expect(await instance.query("diagnostics", file)).toMatchObject({
+      outcome: "completed",
+      evidence: "revision_correlated",
+      diagnostics: [],
+    });
+    expect(performance.now() - started).toBeLessThan(2000);
+  }
+});
+
+it("reports a clean file from a pull-only server after the quiet window", async () => {
+  const { instance, file, spawnLog } = await controller("pull-clean", true, true, {
+    timeoutMs: 5000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    outcome: "completed",
+    evidence: "revision_correlated",
+    reportedCount: 0,
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("lists the pulled item and the pushed item for the same version", async () => {
+  const { instance, file } = await controller("pull-and-push", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    reportedCount: 2,
+    diagnostics: [{ code: "E0308" }, { code: 2322 }],
+  });
+});
+
+it("lists an item that the pull and the push both return once", async () => {
+  const { instance, file } = await controller("pull-duplicate", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    reportedCount: 1,
+    diagnostics: [{ code: 2322 }],
+  });
+});
+
+it("falls back to the push path when a pull fails with an error other than cancellation", async () => {
+  const { instance, file, spawnLog } = await controller("pull-error", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: 2322 }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull"]);
+});
+
+it("retries a pull the server cancels, once", async () => {
+  const { instance, file, spawnLog } = await controller("pull-cancel-once", true, true, {
+    timeoutMs: 3000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: "E0308" }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("falls back to the push path when the retried pull is cancelled too", async () => {
+  const { instance, file, spawnLog } = await controller("pull-cancel-always", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    diagnostics: [{ code: 2322 }],
+  });
+  expect(await events(spawnLog)).toEqual(["pull", "pull"]);
+});
+
+it("fails with the timeout error when the server never publishes", async () => {
+  const { instance, file } = await controller("silent", true, true, {
+    timeoutMs: 1000,
+  });
+  await expect(instance.query("diagnostics", file)).rejects.toThrow(
+    "No settled diagnostics before the timeout",
+  );
+});
+
+it("reports an unreadable summary snapshot once, then drops the stale summary", async () => {
+  const { instance, file } = await controller("versioned");
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+  });
+  expect(await instance.summary()).toMatchObject({ reportedCount: 1 });
+  await writeFile(file, "x".repeat(1024 * 1024 + 1));
+  await expect(instance.summary()).rejects.toThrow("1 MiB snapshot limit");
+  expect(await instance.summary()).toBeUndefined();
+});
+
+it("drops the automatic summary when the file's route changes", async () => {
+  const { instance, file } = await controller("versioned");
+  const sub = join(file, "..", "sub");
+  await mkdir(sub);
+  await writeFile(join(sub, "index.ts"), "const value = 1;\n");
+  expect(await instance.query("diagnostics", join(sub, "index.ts"))).toMatchObject({
+    evidence: "revision_correlated",
+  });
+  expect(await instance.summary()).toMatchObject({ reportedCount: 1 });
+  await writeFile(join(sub, "tsconfig.json"), "{}");
+  expect(await instance.summary()).toBeUndefined();
+});
+
+it("does not issue requests for capabilities that the server did not advertise", async () => {
+  const { instance, file } = await controller();
+  expect(await instance.query("definition", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "unsupported",
+  });
+});
+
+it("queries type definition and implementation when the server advertises them", async () => {
+  const { instance, file } = await controller("type-navigation");
+  expect(await instance.query("type_definition", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "index.ts:1:7  const value = 1;",
+  });
+  expect(await instance.query("implementation", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "impl.ts:3:1",
+  });
+});
+
+it("queries incoming and outgoing calls of the prepared item", async () => {
+  const { instance, file } = await controller("call-hierarchy");
+  expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "caller.ts:3:5 caller of value",
+  });
+  expect(await instance.query("outgoing_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "callee.ts:1:1 callee of value",
+  });
+});
+
+it("lists the call tools in status for a server with call hierarchy", async () => {
+  const { instance, file } = await controller("call-hierarchy");
+  await instance.query("incoming_calls", file, { line: 1, column: 7 });
+  const status = await instance.serverStatus();
+  const tools =
+    "servers" in status
+      ? status.servers.flatMap((server) => server.instances.flatMap((item) => item.tools ?? []))
+      : [];
+  expect(tools).toContain("incoming_calls");
+  expect(tools).toContain("outgoing_calls");
+});
+
+it("says which prepared item the calls belong to when prepare returns several", async () => {
+  const { instance, file } = await controller("call-hierarchy-several");
+  expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+    text: "prepare returned 2 items; calls of the first: value\ncaller.ts:3:5 caller of value",
+  });
+});
+
+it("does not issue call hierarchy requests when the server lacks the provider", async () => {
+  const { instance, file } = await controller();
+  expect(await instance.query("incoming_calls", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "unsupported",
+  });
+});
+
+it("fails a malformed call hierarchy response", async () => {
+  const { instance, file } = await controller("call-hierarchy-bogus");
+  await expect(instance.query("incoming_calls", file, { line: 1, column: 7 })).rejects.toThrow(
+    "Unexpected LSP incoming_calls response shape",
+  );
+});
+
+it("finds a symbol by name in a project, opening the queried file first", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({
+    outcome: "completed",
+    text: "variable value  index.ts:1:7  const value = 1;",
+  });
+});
+
+it("prints a workspace symbol without a range as its path", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "pathonly"),
+  ).toMatchObject({
+    outcome: "completed",
+    text: "variable pathonly  index.ts",
+  });
+});
+
+it("caps workspace symbols at fifty lines and reports the rest", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  const result = await instance.query("workspace_symbols", file, undefined, undefined, "many");
+  expect(result).toMatchObject({ outcome: "completed", truncated: true });
+  const text = "text" in result ? result.text : undefined;
+  expect(text?.split("\n")).toHaveLength(51);
+  expect(text).toMatch(/\n\.\.\. 10 more$/u);
+});
+
+it("does not search workspace symbols when the server lacks workspaceSymbolProvider", async () => {
+  const { instance, file } = await controller();
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "unsupported" });
+});
+
+it("rejects a malformed workspace symbol response", async () => {
+  const { instance, file } = await controller("workspace-symbols");
+  await expect(
+    instance.query("workspace_symbols", file, undefined, undefined, "bogus"),
+  ).rejects.toThrow("Unexpected LSP workspace_symbols response shape");
+});
+
+it("holds a workspace symbol query until progress ends", async () => {
+  const { instance, file, spawnLog } = await controller("progress-load");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(
+    lines.filter((line) => !line.startsWith("create")).map((line) => line.split(" ")[0]),
+  ).toEqual(["begin", "end", "symbol"]);
+});
+
+it("waits for progress that starts only after the first document is opened", async () => {
+  const { instance, file, spawnLog } = await controller("progress-late");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(lines.map((line) => line.split(" ")[0])).toEqual(["begin", "end", "symbol"]);
+});
+
+it("answers the workDoneProgress create request with null", async () => {
+  const { instance, file, spawnLog } = await controller("progress-load");
+  await instance.query("workspace_symbols", file, undefined, undefined, "value");
+  expect(await events(spawnLog)).toContain("create null");
+});
+
+it("waits a quiet window after progress ends before a workspace symbol query", async () => {
+  const { instance, file, spawnLog } = await controller("progress-load");
+  await instance.query("workspace_symbols", file, undefined, undefined, "value");
+  const lines = await events(spawnLog);
+  const at = (name: string) =>
+    Number(lines.find((line) => line.startsWith(`${name} `))?.split(" ")[1]);
+  expect(at("symbol") - at("end")).toBeGreaterThanOrEqual(300);
+});
+
+it("sends a workspace symbol query after half the call timeout while progress never ends", async () => {
+  const { instance, file, spawnLog } = await controller("progress-stuck", true, true, {
+    timeoutMs: 1000,
+  });
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(
+    lines.filter((line) => !line.startsWith("create")).map((line) => line.split(" ")[0]),
+  ).toEqual(["begin", "symbol"]);
+});
+
+it("waits for the server status to report quiescence before a workspace symbol query", async () => {
+  const { instance, file, spawnLog } = await controller("server-status");
+  expect(
+    await instance.query("workspace_symbols", file, undefined, undefined, "value"),
+  ).toMatchObject({ outcome: "completed" });
+  const lines = await events(spawnLog);
+  expect(lines.map((line) => line.split(" ")[0])).toEqual(["quiet", "symbol"]);
+});
+
+async function packages(cwd: string, count: number) {
+  return Promise.all(
+    Array.from({ length: count }, async (_, index) => {
+      const root = join(cwd, `package-${index}`);
+      await mkdir(root);
+      await writeFile(join(root, "tsconfig.json"), "{}");
+      await writeFile(join(root, "index.ts"), "const value = 1;\n");
+      return join(root, "index.ts");
+    }),
+  );
+}
+
+it("does not count failed instances toward the eight-instance limit", async () => {
+  const { instance, file, spawnLog } = await controller("wrong-encoding");
+  for (const path of await packages(join(file, ".."), 9))
+    await expect(instance.query("hover", path, { line: 1, column: 7 })).rejects.toThrow(
+      "Unsupported LSP position encoding",
+    );
+  expect((await readFile(spawnLog, "utf8")).trim().split("\n")).toHaveLength(9);
+});
+
+it("evicts the oldest instance to start a ninth", async () => {
+  const { instance, file, spawnLog } = await controller();
+  const paths = await packages(join(file, ".."), 8);
+  for (const path of paths)
+    expect(await instance.query("hover", path, { line: 1, column: 7 })).toMatchObject({
+      outcome: "completed",
+    });
+  const first = Number((await readFile(spawnLog, "utf8")).split("\n")[0]);
+  expect(await instance.query("hover", file, { line: 1, column: 7 })).toMatchObject({
+    outcome: "completed",
+  });
+  const roots = instance.status().instances.map((listed) => listed.root);
+  expect(roots).toHaveLength(8);
+  expect(roots).not.toContain(join(paths[0] ?? "", ".."));
+  expect(() => process.kill(first, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+});
+
+it("evicts the least recently used instance, not the first started", async () => {
+  const { instance, file } = await controller();
+  const paths = await packages(join(file, ".."), 8);
+  for (const path of [...paths, paths[0] ?? ""])
+    await instance.query("hover", path, { line: 1, column: 7 });
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const roots = instance.status().instances.map((listed) => listed.root);
+  expect(roots).toContain(join(paths[0] ?? "", ".."));
+  expect(roots).not.toContain(join(paths[1] ?? "", ".."));
+});
+
+const launches = async (spawnLog: string) =>
+  (await readFile(spawnLog, "utf8")).split("\n").filter((line) => /^\d+$/u.test(line)).length;
+const position = { line: 1, column: 7 };
+
+it("warm: keeps the server after a request timeout", async () => {
+  const { instance, file, spawnLog } = await controller("ignore", true, true, {
+    timeoutMs: 1000,
+  });
+  await instance.query("diagnostics", file);
+  await expect(instance.query("hover", file, position)).rejects.toThrow("aborted due to timeout");
+  await expect(instance.query("hover", file, position)).rejects.toThrow("aborted due to timeout");
+  expect(await launches(spawnLog)).toBe(1);
+  expect(await events(spawnLog)).toContain("cancel");
+});
+
+it("warm: keeps the server after the caller cancels", async () => {
+  const { instance, file, spawnLog } = await controller("ignore");
+  await instance.query("diagnostics", file);
+  // A query inside the 1 s readiness grace sends nothing, so the cancel needs a request already sent.
+  await delay(1100);
+  for (let attempt = 0; attempt < 2; attempt++)
+    await expect(instance.query("hover", file, position, AbortSignal.timeout(50))).rejects.toThrow(
+      "aborted due to timeout",
+    );
+  expect(await launches(spawnLog)).toBe(1);
+  expect(await events(spawnLog)).toContain("cancel");
+});
+
+it("warm: keeps the server after an LSP error response", async () => {
+  const { instance, file, spawnLog } = await controller("error-hover");
+  for (let attempt = 0; attempt < 2; attempt++)
+    await expect(instance.query("hover", file, position)).rejects.toThrow("hover failed");
+  expect(await launches(spawnLog)).toBe(1);
+});
+
+it("sends a request again when the server says the content was modified", async () => {
+  const { instance, file } = await controller("content-modified-once");
+  await expect(instance.query("hover", file, position)).resolves.toMatchObject({
+    outcome: "completed",
+  });
+});
+
+it("warm: lets a slow server finish starting after the request deadline", async () => {
+  const { instance, file, spawnLog } = await controller("slow-init", true, true, {
+    timeoutMs: 300,
+  });
+  await expect(instance.query("hover", file, position)).rejects.toThrow("still starting");
+  await vi.waitFor(
+    async () =>
+      expect(await instance.query("hover", file, position)).toMatchObject({
+        outcome: "completed",
+      }),
+    { timeout: 3000, interval: 100 },
+  );
+  expect(await launches(spawnLog)).toBe(1);
+});
+
+it.skipIf(process.platform === "win32")("rejects dispose when SIGKILL is refused", async () => {
+  const { instance, file, spawnLog } = await controller("stubborn-server");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const pid = Number((await readFile(spawnLog, "utf8")).trim());
+  const kill = process.kill.bind(process);
+  vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+    if (signal === "SIGKILL") throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    return kill(target, signal);
+  });
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+    process.kill(pid, "SIGKILL");
+  });
+  await expect(instance.dispose()).rejects.toThrow("LSP process group did not stop");
+});
+
+it.skipIf(process.platform === "win32")(
+  "keeps an evicted failed instance visible until its group is killed",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-garbage");
+    await packages(join(file, ".."), 1);
+    const root = join(file, "..", "package-0");
+    const failed = join(root, "index.ts");
+    await instance.query("diagnostics", failed);
+    const group = -(await lastPid(spawnLog));
+    const failing = instance.query("hover", failed, { line: 1, column: 7 }).catch(() => undefined);
+    await vi.waitFor(() => expect(instance.status().instances[0]?.active).toBe(false));
+    const kill = vi.spyOn(process, "kill");
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    const evicting = instance.query("diagnostics", file);
+    // controller.dispose() only reaches instances still in the map, so the evicted one must
+    // stay listed until its escalation ends.
+    while (!kill.mock.calls.some(([target, signal]) => target === group && signal === "SIGKILL")) {
+      expect(instance.status().instances.map((listed) => listed.root)).toContain(root);
+      await delay(10);
+    }
+    await evicting;
+    await failing;
+  },
+);
+
+// The first server's group looks gone and refuses SIGKILL, so its cleanup rejects at once
+// while the other servers still run their two-second escalation.
+function refuseFirstGroup(spawnLog: string) {
+  const first = () => Number(readFileSync(spawnLog, "utf8").split("\n")[0]);
+  const kill = process.kill.bind(process);
+  const spy = vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+    if (target !== -first()) return kill(target, signal);
+    if (signal === 0) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+    if (signal === "SIGKILL") throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    return kill(target, signal);
+  });
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+    process.kill(first(), "SIGKILL");
+  });
+  return spy;
+}
+
+const lastPid = async (spawnLog: string) =>
+  Number((await readFile(spawnLog, "utf8")).trim().split("\n").at(-1));
+
+it.skipIf(process.platform === "win32")(
+  "rejects dispose only after every other instance finishes its cleanup",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-server");
+    for (const path of await packages(join(file, ".."), 2))
+      await instance.query("hover", path, { line: 1, column: 7 });
+    const group = -(await lastPid(spawnLog));
+    const kill = refuseFirstGroup(spawnLog);
+    await expect(instance.dispose()).rejects.toThrow("LSP process group did not stop");
+    expect(kill.mock.calls).toContainEqual([group, "SIGKILL"]);
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "evicts failed instances only after every cleanup finishes",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-garbage");
+    const kill = refuseFirstGroup(spawnLog);
+    const paths = await packages(join(file, ".."), 2);
+    for (const path of paths) await instance.query("diagnostics", path);
+    const group = -(await lastPid(spawnLog));
+    const failing = paths.map((path) =>
+      instance.query("hover", path, { line: 1, column: 7 }).catch(() => undefined),
+    );
+    await vi.waitFor(() =>
+      expect(instance.status().instances.map((listed) => listed.active)).toEqual([false, false]),
+    );
+    await expect(instance.query("diagnostics", file)).rejects.toThrow(
+      "LSP process group did not stop",
+    );
+    expect(kill.mock.calls).toContainEqual([group, "SIGKILL"]);
+    await Promise.all(failing);
+  },
+);
+
+it("shuts a healthy initialized server down with shutdown, then exit", async () => {
+  const { instance, file, spawnLog } = await controller("handshake");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  await instance.dispose();
+  expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
+});
+
+it("returns soon after a healthy server exits", async () => {
+  const { instance, file } = await controller("handshake");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const started = performance.now();
+  await instance.dispose();
+  expect(performance.now() - started).toBeLessThan(40);
+});
+
+it.skipIf(process.platform === "win32")(
+  "returns soon after the last group member exits",
+  async () => {
+    const { instance, file } = await controller("lingering-child");
+    await instance.query("hover", file, { line: 1, column: 7 });
+    const started = performance.now();
+    await instance.dispose();
+    expect(performance.now() - started).toBeLessThan(40);
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "keeps probing every millisecond while the clock shows no elapsed wait",
+  async () => {
+    // Counts real probes before a real 30 ms exit, so the result depends on the scheduler; the
+    // exact rule is pinned by dispose-probe.test.ts, and this keeps a check on real processes.
+    const { instance, file, spawnLog } = await controller("slow-lingering-child");
+    await instance.query("hover", file, { line: 1, column: 7 });
+    const group = -(await lastPid(spawnLog));
+    const kill = vi.spyOn(process, "kill");
+    vi.spyOn(performance, "now").mockReturnValue(performance.now());
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    await instance.dispose();
+    vi.restoreAllMocks();
+    const probes = kill.mock.calls.filter(([target, signal]) => target === group && signal === 0);
+    expect(probes.length).toBeGreaterThanOrEqual(15);
+  },
+);
+
+it.each([
+  ["sync-log", ["didOpen 1", "didChange 2", "didClose", "didOpen 3"]],
+  ["sync-open-close", ["didOpen 1", "didClose", "didOpen 2", "didClose", "didOpen 3"]],
+])("synchronizes a changed file and a different file (%s)", async (mode, expected) => {
+  const { instance, file, spawnLog } = await controller(mode);
+  const other = join(file, "..", "other.ts");
+  await writeFile(other, "const other = 1;\n");
+  await instance.query("diagnostics", file);
+  await writeFile(file, "const value = 2;\n");
+  // The observation must come from the new version, not from the first snapshot.
+  expect(await instance.query("diagnostics", file)).toMatchObject({
+    evidence: "revision_correlated",
+    documentVersion: 2,
+  });
+  await instance.query("diagnostics", other);
+  expect(await events(spawnLog)).toEqual(expected);
+});
+
+it("falls back to signals within the budget when shutdown gets no answer", async () => {
+  const { instance, file, spawnLog } = await controller("mute-shutdown");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const started = performance.now();
+  await instance.dispose();
+  expect(performance.now() - started).toBeLessThan(2500);
+  expect(await events(spawnLog)).toEqual(["shutdown"]);
+});
+
+it.skipIf(process.platform === "win32")(
+  "accepts a SIGKILL refused by a group whose server is exiting",
+  async () => {
+    const { instance, file, spawnLog } = await controller("mute-shutdown");
+    await instance.query("hover", file, { line: 1, column: 7 });
+    const group = -(await lastPid(spawnLog));
+    const kill = process.kill.bind(process);
+    // macOS answers EPERM while the dying server is a zombie that Node has not reaped yet.
+    vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+      if (target === group && signal === "SIGKILL")
+        throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      return kill(target, signal);
+    });
+    onTestFinished(() => {
+      vi.restoreAllMocks();
+    });
+    await expect(instance.dispose()).resolves.toBeUndefined();
+  },
+);
+
+it.skipIf(process.platform === "win32").each([
+  ["resolves when a fresh probe finds the group gone", "ESRCH", "resolved"],
+  ["rejects while the group still refuses", "EPERM", "LSP process group did not stop"],
+])("after the server exits and SIGKILL is refused, %s", async (_case, refusal, expected) => {
+  const { instance, file, spawnLog } = await controller("stubborn-grandchild");
+  await instance.query("hover", file, { line: 1, column: 7 });
+  const group = -(await lastPid(spawnLog));
+  const kill = process.kill.bind(process);
+  let killed = false;
+  // The server leaves on SIGTERM; its grandchild ignores it until SIGKILL. macOS may answer EPERM
+  // for a group whose last member is an unreaped zombie, so the real SIGKILL is delivered, the
+  // system is given time to reap, and EPERM is reported.
+  vi.spyOn(process, "kill").mockImplementation((target, signal) => {
+    if (target !== group) return kill(target, signal);
+    if (signal === "SIGKILL") {
+      kill(target, signal);
+      killed = true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    }
+    if (killed && refusal === "EPERM")
+      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+    return kill(target, signal);
+  });
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
+  const outcome = await instance.dispose().then(
+    () => "resolved",
+    (error: unknown) => (error instanceof Error ? error.message : "rejected"),
+  );
+  expect(outcome).toBe(expected);
+});
+
+it.skipIf(process.platform === "win32")(
+  "keeps one two-second budget for a server that ignores shutdown and SIGTERM",
+  async () => {
+    const { instance, file, spawnLog } = await controller("stubborn-mute");
+    await instance.query("hover", file, { line: 1, column: 7 });
+    const started = performance.now();
+    await instance.dispose();
+    expect(performance.now() - started).toBeLessThan(2500);
+    expect(await events(spawnLog)).toEqual(["shutdown"]);
+  },
+);
+
+it("does not send shutdown to a server that never finished initializing", async () => {
+  const { instance, file, spawnLog } = await controller("wrong-encoding");
+  await expect(instance.query("hover", file, { line: 1, column: 7 })).rejects.toThrow(
+    "Unsupported LSP position encoding",
+  );
+  await instance.dispose();
+  expect(await events(spawnLog)).toEqual([]);
+});
+
+it("sends nothing but exit after shutdown when a pending request is aborted", async () => {
+  const cwd = await directory();
+  const spawnLog = join(cwd, "spawns.log");
+  const client = new LanguageServer(
+    { command: process.execPath, args: [fixture, "slow-shutdown", spawnLog] },
+    cwd,
+    5000,
+    () => {},
+  );
+  onTestFinished(() => client.dispose());
+  await client.initialize();
+  const abort = new AbortController();
+  const outcome = client.request("textDocument/hover", {}, abort.signal).then(
+    () => "resolved",
+    (error: unknown) => error,
+  );
+  const disposing = client.dispose();
+  // The fixture answers shutdown after 500 ms; the abort lands inside that window.
+  await vi.waitFor(async () => expect(await events(spawnLog)).toContain("shutdown"));
+  abort.abort(new Error("Caller cancelled"));
+  await disposing;
+  expect(await outcome).toHaveProperty("message", "Caller cancelled");
+  expect(await events(spawnLog)).toEqual(["shutdown", "exit"]);
+});
+
+it.skipIf(process.platform === "win32")(
+  "prints no source text for an in-cwd symlink that points outside the cwd",
+  async () => {
+    const { instance, file } = await controller("special-targets");
+    const root = join(file, "..");
+    const outside = join(await directory(), "secret.ts");
+    await writeFile(outside, "const secret = 1;\n");
+    await symlink(outside, join(root, "link.ts"));
+    await writeFile(join(root, "pipe.ts"), "const pipe = 1;\n");
+    expect(await instance.query("definition", file, position)).toMatchObject({
+      outcome: "completed",
+      text: "link.ts:1:1\npipe.ts:1:1  const pipe = 1;",
+    });
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "does not read a FIFO target, so the definition completes before its deadline",
+  async () => {
+    const { instance, file } = await controller("special-targets", true, true, {
+      timeoutMs: 2000,
+    });
+    const root = join(file, "..");
+    await writeFile(join(root, "link.ts"), "const link = 1;\n");
+    execFileSync("mkfifo", [join(root, "pipe.ts")]);
+    const started = performance.now();
+    expect(await instance.query("definition", file, position)).toMatchObject({
+      outcome: "completed",
+      text: "link.ts:1:1  const link = 1;\npipe.ts:1:1",
+    });
+    expect(performance.now() - started).toBeLessThan(1500);
+  },
+);
+
+it("prevents use after disposal", async () => {
+  const { instance, file } = await controller();
+  await instance.dispose();
+  const result = await instance.query("hover", file, { line: 1, column: 7 });
+  expect(result).toMatchObject({ outcome: "unavailable" });
+  expect(result).toHaveProperty("reason", expect.stringContaining("closed"));
+});

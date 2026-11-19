@@ -1,0 +1,51 @@
+{
+  "name": "pi-hl-lsp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Qualified language-server observations and file-aware navigation for Pi.",
+  "keywords": [
+    "language-server",
+    "pi-extension",
+    "pi-package"
+  ],
+  "license": "MIT",
+  "author": "HugoLopes45",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "rolldown -c rolldown.config.mjs",
+    "prepack": "rolldown -c rolldown.config.mjs",
+    "check": "rolldown -c rolldown.config.mjs && tsc --noEmit && vitest --run"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^1.5.2",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
+    "@earendil-works/pi-tui": "^1.5.2",
+    "@types/node": "^26.6.6",
+    "pi-hl-utils": "workspace:*",
+    "rolldown": "1.2.19",
+    "typebox": "^1.4.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "vscode-jsonrpc": "10.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "pi": ">=1.5.2"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

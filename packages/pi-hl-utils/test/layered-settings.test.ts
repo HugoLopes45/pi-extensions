@@ -167,6 +167,21 @@ describe("layered settings resolution", () => {
     );
   });
 
+  it("escapes control characters from authored keys in errors", () => {
+    const key = "x\u001b]0;title\u0007";
+    const { manager } = storageHarness(
+      JSON.stringify({ demo: { [key]: true } }),
+      JSON.stringify({ demo: { tools: { [key]: 1 } } }),
+    );
+    const layers = define().readLayers(manager);
+    expect(errorMessage(layers.global)).toBe(
+      "Invalid global Demo settings: unknown option x\\u001b]0;title\\u0007",
+    );
+    expect(errorMessage(layers.project)).toContain(
+      "Invalid project Demo settings/tools/x\\u001b]0;title\\u0007:",
+    );
+  });
+
   it("rejects an option key the schema does not declare", () => {
     const settings = define();
     expect(settings.optionKey("limit")).toBe("limit");
@@ -205,6 +220,116 @@ describe("layered settings resolution", () => {
       limit: "global",
       tools: "session",
     });
+  });
+});
+
+describe("global-only settings", () => {
+  const globalOnlyKeys: readonly (keyof Options)[] = ["limit"];
+  const restrictedDefinition = {
+    ...definition,
+    sessionEntryType,
+    globalOnlyKeys,
+  };
+  const restricted = () => defineLayeredSettings(restrictedDefinition);
+  const nonGlobalScopes: ("project" | "session")[] = ["project", "session"];
+
+  it.each(nonGlobalScopes)("rejects a global-only option parsed for %s", (scope) => {
+    expect(() => restricted().parseOptions({ limit: 5 }, scope)).toThrow(
+      `Invalid ${scope} Demo settings: limit is global-only; set it in global settings`,
+    );
+  });
+
+  it("preserves the trusted project's scope error and refuses resolution", () => {
+    const { manager } = storageHarness("{}", JSON.stringify({ demo: { limit: 5 } }));
+    const settings = restricted();
+    const layers = settings.readLayers(manager);
+    expect(errorMessage(layers.project)).toBe(
+      "Invalid project Demo settings: limit is global-only; set it in global settings",
+    );
+    expect(() =>
+      settings.readSettings({ settingsManager: manager, sessionManager: branch() }, layers),
+    ).toThrow("Invalid project Demo settings: limit is global-only; set it in global settings");
+  });
+
+  it("rejects a global-only option replayed from a session entry", () => {
+    expect(() =>
+      restricted().readOverrides(branch({ version: 1, overrides: { limit: 5 } })),
+    ).toThrow("Invalid session Demo settings: limit is global-only; set it in global settings");
+  });
+
+  it("rejects a global-only option in caller-supplied project layers", () => {
+    const { manager } = storageHarness();
+    expect(() =>
+      restricted().readSettings(
+        { settingsManager: manager, sessionManager: branch() },
+        { global: {}, project: { limit: 5 } },
+      ),
+    ).toThrow("Invalid project Demo settings: limit is global-only; set it in global settings");
+  });
+
+  it("rejects a direct project write without changing its document", async () => {
+    const { documents, manager } = storageHarness("{}", '{"theme":"dark"}');
+    await expect(
+      restricted().writeSettings(
+        manager,
+        "project",
+        { action: "set", key: "limit", patch: { limit: 5 } },
+        () => true,
+      ),
+    ).rejects.toThrow(
+      "Invalid project Demo settings: limit is global-only; set it in global settings",
+    );
+    expect(documents.project).toBe('{"theme":"dark"}');
+  });
+
+  it("rejects a direct session write without appending an entry", async () => {
+    const { manager } = storageHarness();
+    const appendEntry = vi.fn<(customType: string, data?: unknown) => void>();
+    await expect(
+      restricted().writeChange(
+        { appendEntry },
+        { settingsManager: manager, sessionManager: branch() },
+        "session",
+        { action: "set", key: "limit", patch: { limit: 5 } },
+        () => true,
+      ),
+    ).rejects.toThrow(
+      "Invalid session Demo settings: limit is global-only; set it in global settings",
+    );
+    expect(appendEntry).not.toHaveBeenCalled();
+  });
+
+  it("allows the global value and ordinary session overrides", async () => {
+    const { manager } = storageHarness(JSON.stringify({ demo: { limit: 5 } }));
+    const settings = restricted();
+    expect(
+      settings.readSettings({
+        settingsManager: manager,
+        sessionManager: branch({ version: 1, overrides: { enabled: true } }),
+      }).settings,
+    ).toEqual({ enabled: true, limit: 5, tools: { read: true } });
+    await expect(
+      settings.writeSettings(
+        manager,
+        "global",
+        { action: "set", key: "limit", patch: { limit: 9 } },
+        () => true,
+      ),
+    ).resolves.toEqual({ limit: 9 });
+  });
+
+  it("still ignores the whole untrusted project layer", () => {
+    const { manager } = storageHarness(
+      JSON.stringify({ demo: { limit: 5 } }),
+      JSON.stringify({ demo: { limit: 9 } }),
+      false,
+    );
+    expect(
+      restricted().readSettings({
+        settingsManager: manager,
+        sessionManager: branch(),
+      }).settings.limit,
+    ).toBe(5);
   });
 });
 
@@ -365,6 +490,27 @@ describe("layered settings lenient reads", () => {
     });
     expect(resolved.settings).toEqual(defaults);
     expect(resolved.invalid.map((error) => error.message)).toEqual([expect.stringMatching(/JSON/)]);
+  });
+
+  it("escapes control characters quoted from a malformed document", async () => {
+    const document = "\u001b]0;title\u0007";
+    const { manager } = storageHarness(document);
+    const settings = define();
+    const [read] = settings.readSettingsLeniently({
+      settingsManager: manager,
+      sessionManager: branch(),
+    }).invalid;
+    const write = await settings
+      .writeSettings(
+        manager,
+        "global",
+        { action: "set", key: "limit", patch: { limit: 2 } },
+        () => true,
+      )
+      .catch((error: unknown) => error);
+    expect(write).toBeInstanceOf(SyntaxError);
+    for (const error of [read, write])
+      expect(error instanceof Error && error.message).toMatch(/\\u001b\]0;title\\u0007/u);
   });
 });
 

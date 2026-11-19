@@ -707,7 +707,7 @@ describe("pi-context-kit inside Pi", () => {
     });
     expect(notify.mock.calls).toEqual([
       [
-        "pi-context-kit settings need attention: Invalid global context-kit settings: unknown option ab. Type /context-kit to see them.",
+        "pi-context-kit settings need attention: Invalid global context-kit settings: unknown option a\\u001b]52;c;ZQ==\\u0007b\\u009b. Type /context-kit to see them.",
         "warning",
       ],
     ]);
