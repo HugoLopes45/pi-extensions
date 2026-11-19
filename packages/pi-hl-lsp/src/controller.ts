@@ -1510,13 +1510,9 @@ export class LspController {
       coverage: "observed",
       projectComplete: false,
       server: instance.server,
-      generation: instance.generation,
-      documentVersion: document.version,
       evidence: observation.evidence,
       reportedCount: observation.reportedCount,
       omitted: observation.omitted,
-      receivedAt: observation.receivedAt,
-      checkedAt: Date.now(),
       diagnostics: observation.diagnostics.map(({ code, severity, range }) => ({
         code,
         severity,

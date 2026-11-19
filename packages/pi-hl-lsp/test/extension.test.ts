@@ -1465,6 +1465,7 @@ it("adds one bounded transient summary per natural request without raw diagnosti
         projectComplete: false,
       });
       expect(text).not.toContain("Untrusted diagnostic prose");
+      expect(text).not.toMatch(/generation|documentVersion|receivedAt|checkedAt/u);
       expect(text.length).toBeLessThan(4096);
     }
   }
