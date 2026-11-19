@@ -1161,6 +1161,12 @@ export class LspController {
       seen.set(key, count);
       return count > (before?.get(key) ?? 0);
     });
+    // An unversioned list can precede the type check, so only a new error in it is evidence.
+    if (result.evidence === "settled_unversioned" && errors.length === 0)
+      return {
+        outcome: "unchecked",
+        reason: "the server gave no version, so its errors may still arrive",
+      };
     return { outcome: "checked", compared: before !== undefined, errors };
   }
 

@@ -104,6 +104,15 @@ it("does not call a file checked when its errors may be among the omitted diagno
   });
 });
 
+// Under load typescript-language-server published the type errors up to 1410 ms after an empty list.
+it("does not call a file checked from an empty list without a version", async () => {
+  const { instance, file } = await controller("normal");
+  expect(await instance.newErrors(file, new AbortController().signal)).toEqual({
+    outcome: "unchecked",
+    reason: "the server gave no version, so its errors may still arrive",
+  });
+});
+
 it("reports a new error after more warnings than are shown", async () => {
   const { instance, file } = await controller("error-lines");
   await writeFile(file, `${"WARN\n".repeat(25)}ERROR\n`);

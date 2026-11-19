@@ -595,10 +595,16 @@ function reportedFindings(value: unknown): object[] {
   const code = reportedCodes.get(mode);
   return code === undefined ? [] : [finding(code)];
 }
-// Modes whose publication carries the document version, and the code each mode reports.
+// Modes whose publication carries the document version, so an empty list proves a clean file, and the code each mode reports.
 const versionedModes = new Set<string | undefined>([
   "versioned",
   "rename-errors",
+  "rename-changes",
+  "rename-versioned",
+  "rename-file",
+  "rename-file-null",
+  "format",
+  "format-race",
   "rename-file-errors",
   "pull-empty-reopen-versioned",
   "error-lines",
