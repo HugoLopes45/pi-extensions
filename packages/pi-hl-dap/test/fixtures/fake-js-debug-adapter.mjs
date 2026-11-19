@@ -554,10 +554,16 @@ function handleChildMessage(message, send, name, idBase) {
   childRequest(send, message, name);
 }
 
+let childEndCount = 0;
+
 /** @param {Send} send @param {FixtureRequest} message @param {string} name */
 function childRequest(send, message, name) {
-  // The child ends while its answer is in flight.
-  if (message.command === process.env.FAKE_CHILD_END_ON) event(send, "terminated");
+  // The child ends while its answer to the FAKE_CHILD_END_AT-th such request is in flight.
+  if (
+    message.command === process.env.FAKE_CHILD_END_ON &&
+    ++childEndCount === Number(process.env.FAKE_CHILD_END_AT)
+  )
+    event(send, "terminated");
   targetRequest(send, message, name);
 }
 

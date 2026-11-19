@@ -254,6 +254,17 @@ function stopInput(request) {
   respond(request, true, {});
 }
 
+/** @param {FixtureRequest} request */
+function fillStderr(request) {
+  const bytes = request.arguments?.bytes ?? 1024;
+  if (bytes > 1024 * 1024) {
+    respond(request, false, {}, "stderr-fill allows at most 1 MiB");
+    return;
+  }
+  process.stderr.write(Buffer.alloc(bytes, "x"));
+  respond(request, true, {});
+}
+
 /**
  * @param {FixtureRequest} request
  */
@@ -267,8 +278,7 @@ async function handleRequest(request) {
       await sendFragmentedResponse(request);
       return;
     case "stderr-fill":
-      process.stderr.write(Buffer.alloc(request.arguments?.bytes ?? 1024, "x"));
-      respond(request, true, {});
+      fillStderr(request);
       return;
     case "spawn-descendant":
       await spawnDescendant(request);

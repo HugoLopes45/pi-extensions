@@ -783,12 +783,18 @@ describe("DapController with vscode-js-debug Child sessions", () => {
   });
 
   test.each([
-    ["stack", "stackTrace", (session: DapController) => session.stack()],
-    ["variables", "scopes", (session: DapController) => session.variables({ frameId: 1 })],
-    ["evaluate", "stackTrace", (session: DapController) => session.evaluate({ expression: "x" })],
+    // Launch sends the first stackTrace for its top frame.
+    ["stack", "stackTrace", 2, (session: DapController) => session.stack()],
+    ["variables", "scopes", 1, (session: DapController) => session.variables({ frameId: 1 })],
+    [
+      "evaluate",
+      "stackTrace",
+      2,
+      (session: DapController) => session.evaluate({ expression: "x" }),
+    ],
   ] as const)(
     "%s rejects when its Child session ends during its %s request",
-    async (operation, request, call) => {
+    async (operation, request, occurrence, call) => {
       const session = await createJsDapSession(
         "children",
         {},
@@ -797,6 +803,7 @@ describe("DapController with vscode-js-debug Child sessions", () => {
         {},
         {
           FAKE_CHILD_END_ON: request,
+          FAKE_CHILD_END_AT: String(occurrence),
         },
       );
       try {

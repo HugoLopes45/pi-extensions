@@ -1,6 +1,6 @@
 import childProcess, { execFile } from "node:child_process";
 import { once } from "node:events";
-import filesystem, { mkdtemp, open, readFile, rm } from "node:fs/promises";
+import filesystem, { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import net, { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -575,13 +575,11 @@ describe("DapConnection", () => {
         const cleanup = error instanceof DapConnectionError ? error.cause : undefined;
         expect(cleanup).toBeInstanceOf(AggregateError);
         if (!(cleanup instanceof AggregateError)) throw new Error("Expected cleanup failures");
-        expect(cleanup.errors).toEqual(
-          arrayContaining([
-            objectContaining({
-              message: "Owned process group remains present",
-            }),
-          ]),
-        );
+        // The startup cause leads, so cleanup failures never hide why the startup failed.
+        expect(cleanup.errors).toEqual([
+          objectContaining({ code: "ECONNREFUSED" }),
+          objectContaining({ message: "Owned process group remains present" }),
+        ]);
       } finally {
         kill.mockRestore();
       }
@@ -658,11 +656,13 @@ describe("DapConnection", () => {
         return realKill(target, signal);
       });
       const realWriteFile = filesystem.writeFile;
-      const write = vi
-        .spyOn(filesystem, "writeFile")
-        .mockImplementation((...args) =>
-          typeof args[1] === "string" ? realWriteFile(...args) : Promise.reject(writeError),
-        );
+      // Startup fails only once the stderr snapshot write has failed, however slow the host is.
+      const startupController = new AbortController();
+      const write = vi.spyOn(filesystem, "writeFile").mockImplementation((...args) => {
+        if (typeof args[1] === "string") return realWriteFile(...args);
+        startupController.abort();
+        return Promise.reject(writeError);
+      });
       syncBuiltinESMExports();
       try {
         let alive: boolean | undefined;
@@ -674,8 +674,9 @@ describe("DapConnection", () => {
             args: ["-e", "process.stderr.write('startup detail\\n'); setInterval(() => {}, 1000)"],
             environment: {},
             transport: tcpTransport(),
-            timeouts: { startupMs: 60, requestMs: 30, shutdownMs: 100 },
+            timeouts: { startupMs: 10_000, requestMs: 30, shutdownMs: 100 },
             stderrPath,
+            startupSignal: startupController.signal,
           }).catch((cause: unknown) => cause);
           // Probe before the helper stops leftovers: the denied SIGTERM must not stop cleanup.
           if (group === undefined) throw new Error("Expected a signalled process group");
@@ -690,15 +691,14 @@ describe("DapConnection", () => {
 
         expect(error).toBeInstanceOf(DapConnectionError);
         expect(error).toMatchObject({
-          kind: "timeout",
-          message: stringContaining("TCP startup timed out"),
+          kind: "cancelled",
+          message: stringContaining("Debug Adapter startup was cancelled"),
         });
         const cleanup = error instanceof DapConnectionError ? error.cause : undefined;
         expect(cleanup).toBeInstanceOf(AggregateError);
         if (!(cleanup instanceof AggregateError))
           throw new Error("Expected aggregated startup cleanup failures");
         expect(cleanup.errors).toEqual([
-          expect.any(Error),
           expect.objectContaining({ code: "EPERM" }),
           expect.objectContaining({ code: "EIO" }),
         ]);
@@ -812,6 +812,8 @@ describe("DapConnection", () => {
     const client = await createClient({
       environment: { FAKE_REQUEST_LOG: requestLogPath },
     });
+    // A loaded host can start the adapter slower than shutdownMs; shutdown must reach a reading adapter.
+    await client.request("echo");
     const pid = client.adapterPid;
 
     await client.dispose();
@@ -829,6 +831,8 @@ describe("DapConnection", () => {
     const client = await createClient({
       environment: { FAKE_REQUEST_LOG: requestLogPath },
     });
+    // A loaded host can start the adapter slower than shutdownMs; shutdown must reach a reading adapter.
+    await client.request("echo");
 
     const shutdown = client.dispose();
     client.setSupportsTerminateRequest(true);
@@ -891,7 +895,7 @@ describe("DapConnection", () => {
         await rm(stderrPath, { force: true });
         expect((await stalledSnapshot.readFile()).length).toBeGreaterThan(0);
         await new Promise((resolveTurn) => setImmediate(resolveTurn));
-        await expect(readFile(stderrPath)).rejects.toMatchObject({
+        await expect(stat(stderrPath)).rejects.toMatchObject({
           code: "ENOENT",
         });
         expect(unhandled).toEqual([]);
@@ -1049,8 +1053,12 @@ describe("DapConnection", () => {
       const groupPid = client.adapterPid;
       if (groupPid === undefined) throw new Error("Expected owned adapter PID");
       const realKill = process.kill;
-      const termError = Object.assign(new Error("fixture SIGTERM denied"), { code: "EPERM" });
-      const killError = Object.assign(new Error("fixture SIGKILL denied"), { code: "EPERM" });
+      const termError = Object.assign(new Error("fixture SIGTERM denied"), {
+        code: "EPERM",
+      });
+      const killError = Object.assign(new Error("fixture SIGKILL denied"), {
+        code: "EPERM",
+      });
       const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
         if (pid !== -groupPid) return realKill(pid, signal);
         if (signal === "SIGTERM") throw termError;
@@ -1073,7 +1081,9 @@ describe("DapConnection", () => {
           termError,
           outcome === "refused"
             ? killError
-            : objectContaining({ message: "Owned process group remains present" }),
+            : objectContaining({
+                message: "Owned process group remains present",
+              }),
         ]);
       } finally {
         kill.mockRestore();
@@ -1088,7 +1098,9 @@ describe("DapConnection", () => {
       const groupPid = client.adapterPid;
       if (groupPid === undefined) throw new Error("Expected owned adapter PID");
       const realKill = process.kill;
-      const termError = Object.assign(new Error("fixture group denied"), { code: "EPERM" });
+      const termError = Object.assign(new Error("fixture group denied"), {
+        code: "EPERM",
+      });
       const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
         if (pid !== -groupPid) return realKill(pid, signal);
         if (signal === "SIGKILL") return true;
