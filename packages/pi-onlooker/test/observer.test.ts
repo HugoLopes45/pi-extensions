@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import {
   createAssistantMessageEventStream,
   fauxAssistantMessage,
+  type AssistantMessage,
+  type AssistantMessageEventStream,
   type Context,
 } from "@earendil-works/pi-ai";
 import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -19,6 +21,7 @@ import {
   expectPrefix,
   longSessionStream,
   seedPayload,
+  type ObserverSettings,
   type PrivateRequest,
   createObserver,
 } from "./fixtures/observer-harness.js";
@@ -460,6 +463,147 @@ it("pauses when a Review omits its terminating report", async () => {
     state: "paused",
     lastError: "Onlooker Review did not call onlooker_report",
   });
+});
+
+type ReviewReply = "text" | "report" | "invalid" | "error" | "hang";
+
+/** The Onlooker's scripted reply: a report, an invalid report, plain text, a failure or no end. */
+function scriptedReply(
+  reply: ReviewReply,
+  message: AssistantMessage,
+  signal: AbortSignal | undefined,
+): AssistantMessageEventStream {
+  const stream = createAssistantMessageEventStream();
+  if (reply === "hang") {
+    signal?.addEventListener(
+      "abort",
+      () =>
+        stream.push({
+          type: "error",
+          reason: "aborted",
+          error: { ...message, stopReason: "aborted" },
+        }),
+      { once: true },
+    );
+    return stream;
+  }
+  if (reply === "error") {
+    const error = { ...message, stopReason: "error" as const, errorMessage: "provider failed" };
+    queueMicrotask(() => stream.push({ type: "error", reason: "error", error }));
+    return stream;
+  }
+  if (reply === "text") {
+    queueMicrotask(() => stream.push({ type: "done", reason: "stop", message }));
+    return stream;
+  }
+  const findings = reply === "report" ? [] : [{ severity: "concern", message: " ", quote: "Done" }];
+  message.content = [
+    { type: "toolCall", id: "report", name: "onlooker_report", arguments: { findings } },
+  ];
+  message.stopReason = "toolUse";
+  queueMicrotask(() => stream.push({ type: "done", reason: "toolUse", message }));
+  return stream;
+}
+
+/**
+ * Scripts the Onlooker's replies in order; the observed agent always answers "Done". Records the
+ * last message of each Onlooker request, so a test can tell which request the reminder started.
+ */
+function scriptReviews(replies: readonly ReviewReply[]) {
+  const prompts: string[] = [];
+  globalThis.onlookerObserverTest = {
+    stream(model, context, options) {
+      const message: AssistantMessage = {
+        ...fauxAssistantMessage("Done"),
+        model: model.id,
+        provider: model.provider,
+        api: model.api,
+      };
+      if (!context.tools?.some((tool) => tool.name === "onlooker_report"))
+        return scriptedReply("text", message, undefined);
+      prompts.push(JSON.stringify(context.messages.at(-1)));
+      return scriptedReply(replies[prompts.length - 1] ?? "text", message, options?.signal);
+    },
+  };
+  return prompts;
+}
+
+async function observeScripted(settings: Partial<ObserverSettings> = {}) {
+  const session = await activeFixture();
+  const observer = createObserver(
+    session,
+    {
+      ...onlookerSettings.readSettings(session).settings,
+      enabled: true,
+      catchUpThreshold: 1,
+      ...settings,
+    },
+    "headless-root",
+  );
+  globalThis.onlookerObserverTest.settled = (aborted) => observer.settled(aborted);
+  onTestFinished(() => observer.dispose());
+  return { session, observer };
+}
+
+const reminder = "ended without onlooker_report";
+
+it("reminds a Review that omits its report once, then accepts the report", async () => {
+  const prompts = scriptReviews(["text", "report"]);
+  const { session, observer } = await observeScripted();
+  await session.prompt("Complete normally");
+  expect(observer.status).toMatchObject({ state: "armed", lastError: null });
+  expect(prompts).toHaveLength(2);
+  expect(prompts[1]).toContain(reminder);
+  expect(observer.status.spend.reviews.count).toBe(1);
+});
+
+it("pauses without a second reminder when the reminded reply omits the report too", async () => {
+  const prompts = scriptReviews(["text", "text", "report"]);
+  const { session, observer } = await observeScripted();
+  await session.prompt("Complete normally");
+  expect(observer.status).toMatchObject({
+    state: "paused",
+    lastError: "Onlooker Review did not call onlooker_report",
+  });
+  expect(prompts).toHaveLength(2);
+});
+
+it("pauses with the provider error when the reminded reply fails", async () => {
+  const prompts = scriptReviews(["text", "error"]);
+  const { session, observer } = await observeScripted();
+  await session.prompt("Complete normally");
+  expect(observer.status).toMatchObject({ state: "paused", lastError: "provider failed" });
+  expect(prompts).toHaveLength(2);
+});
+
+it("bounds the reminded reply by the Review deadline without cancelling the observed agent", async () => {
+  const prompts = scriptReviews(["text", "hang", "report"]);
+  const { session, observer } = await observeScripted({ reviewTimeoutMs: 50 });
+  await session.prompt("First");
+  expect(prompts).toHaveLength(2);
+  expect(session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
+  // A Review past its deadline is left to the next turn, which reviews normally.
+  await session.prompt("Second");
+  expect(prompts).toHaveLength(3);
+  expect(observer.status).toMatchObject({ state: "armed", lastError: null, backlog: 0 });
+});
+
+it("ends a reminded Review after two invalid reports without pausing", async () => {
+  const prompts = scriptReviews(["text", "invalid", "invalid", "report"]);
+  const { session, observer } = await observeScripted();
+  await session.prompt("Complete normally");
+  expect(observer.status).toMatchObject({ state: "armed", lastError: null });
+  expect(prompts).toHaveLength(3);
+});
+
+it("reminds each later Review afresh", async () => {
+  const prompts = scriptReviews(["text", "report", "text", "report"]);
+  const { session, observer } = await observeScripted();
+  await session.prompt("Step 0");
+  await session.prompt("Step 1");
+  expect(observer.status).toMatchObject({ state: "armed", lastError: null });
+  expect(prompts.map((prompt) => prompt.includes(reminder))).toEqual([false, true, false, true]);
+  expect(observer.status.spend.reviews.count).toBe(2);
 });
 
 it("pauses after three Review deadlines in a row without cancelling the observed agent", async () => {
