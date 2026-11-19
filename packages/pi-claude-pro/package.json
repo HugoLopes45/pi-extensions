@@ -1,6 +1,6 @@
 {
   "name": "pi-claude-pro",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "Use your Claude Pro, Max or Ultra plan in the Pi coding agent with Opus, Sonnet, Haiku and Fable. No API key, no Claude Code. Shows your usage limits and warns when requests are billed as extra usage.",
   "keywords": [
     "anthropic",

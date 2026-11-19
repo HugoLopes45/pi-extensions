@@ -2,6 +2,12 @@
 
 Pi shows the entries newer than your installed version after `pi update`.
 
+## 0.1.4
+
+### Patch Changes
+
+- The package installs and updates with npm again. Earlier versions declared their bundled shared code with pnpm's `workspace:` protocol, which npm rejects with "Unsupported URL Type", for example when Pi updates the package.
+
 ## 0.1.3
 
 ### Patch Changes
