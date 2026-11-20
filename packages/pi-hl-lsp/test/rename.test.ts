@@ -162,6 +162,23 @@ it("refuses a versioned edit whose version is not the synchronized one", async (
   expect(await filesIn(root, ["index.ts"])).toEqual(["const value = 1;\n"]);
 });
 
+it("applies same-position insertions in server order", async () => {
+  const root = await directory();
+  const file = join(root, "a.ts");
+  await writeFile(file, "tail");
+  const edits = ["first ", "second "].map((newText) => ({
+    range: { start, end: start },
+    newText,
+  }));
+  const result = await applyWorkspaceEdit(
+    { changes: { [uriOf(root, "a.ts")]: edits } },
+    root,
+    undefined,
+  );
+  expect(result.outcome).toBe("written");
+  expect(await readFile(file, "utf8")).toBe("first second tail");
+});
+
 it("refuses overlapping edits in one file", async () => {
   const root = await directory();
   await writeFile(join(root, "index.ts"), "const value = 1;\n");
