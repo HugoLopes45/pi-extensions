@@ -386,6 +386,34 @@ function endpoint(address: string | undefined, port: number | undefined): string
 }
 
 // Match the server end of this established stream, not a listening port that can change owners.
+async function peerVisible(
+  pid: number,
+  name: string,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    const { stdout } = await promisify(execFile)(
+      process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof",
+      ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:ESTABLISHED", "-Fpn"],
+      { timeout: Math.max(1, deadline - Date.now()), signal },
+    );
+    const fields = stdout.split("\n");
+    return fields.includes("p" + String(pid)) && fields.includes(name);
+  } catch (error) {
+    // lsof exits 1 with no diagnostics when the adapter hasn't accepted the stream yet.
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === 1 &&
+      "stderr" in error &&
+      error.stderr === ""
+    )
+      return false;
+    throw error;
+  }
+}
+
 async function verifyPeer(
   socket: Socket,
   child: ChildProcessWithoutNullStreams,
@@ -402,24 +430,18 @@ async function verifyPeer(
       endpoint(socket.remoteAddress, socket.remotePort) +
       "->" +
       endpoint(socket.localAddress, socket.localPort);
-    const { stdout } = await promisify(execFile)(
-      process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof",
-      ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:ESTABLISHED", "-Fpn"],
-      {
-        timeout: Math.max(1, deadline - Date.now()),
+    while (
+      !socket.destroyed &&
+      child.exitCode === null &&
+      child.signalCode === null &&
+      Date.now() < deadline
+    ) {
+      if (await peerVisible(pid, name, deadline, options.startupSignal)) return socket;
+      await delay(Math.min(TCP_RETRY_DELAY_MS, Math.max(0, deadline - Date.now())), undefined, {
         signal: options.startupSignal,
-      },
-    );
-    const fields = stdout.split("\n");
-    if (
-      !fields.includes("p" + String(pid)) ||
-      !fields.includes(name) ||
-      socket.destroyed ||
-      child.exitCode !== null ||
-      child.signalCode !== null
-    )
-      throw new Error("Connected socket is not owned by the Debug Adapter");
-    return socket;
+      });
+    }
+    throw new Error("Connected socket is not owned by the Debug Adapter");
   } catch (cause) {
     socket.destroy();
     throw new DapConnectionError(

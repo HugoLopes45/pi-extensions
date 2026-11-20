@@ -47,7 +47,7 @@ function resultContext(overrides: Partial<DapResultRenderContext> = {}): DapResu
   };
 }
 
-function lines(component: { render(width: number): string[] }, width = 120): string[] {
+function lines(component: { render(width: number): readonly string[] }, width = 120): string[] {
   const rendered = component.render(width);
   expectLinesFitWidth(rendered, width);
   return rendered.map((line) => readableTags(line).trimEnd());
@@ -131,7 +131,10 @@ describe("dap tool call", () => {
       renderCall(
         {
           operation: "launch",
-          launch_arguments: { autoAttachChildProcesses: false, note: "x".repeat(400) },
+          launch_arguments: {
+            autoAttachChildProcesses: false,
+            note: "x".repeat(400),
+          },
         },
         escapeTaggedTheme,
         callContext({ expanded: true }),

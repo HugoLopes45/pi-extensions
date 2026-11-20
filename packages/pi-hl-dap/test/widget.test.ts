@@ -25,7 +25,7 @@ const plainTheme = {
 
 function createContext(mode: "tui" | "rpc") {
   const { tui } = createMenuTui();
-  let component: { render(width: number): string[] } | undefined;
+  let component: { render(width: number): readonly string[] } | undefined;
   const ui = {
     notify: vi.fn<Pick<ExtensionUIContext, "notify">["notify"]>(),
     theme: plainTheme,
