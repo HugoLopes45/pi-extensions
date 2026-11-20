@@ -2023,7 +2023,15 @@ it("packs the compiled entry, its chunks and the notices without sources", () =>
   );
   if (!Value.Check(packResult, output)) throw new Error("Unexpected npm pack output");
   const files = output.flatMap((pack) => pack.files.map((file) => file.path));
-  expect(files).toEqual(expect.arrayContaining(["dist/index.js", "THIRD_PARTY_NOTICES"]));
+  expect(files).toEqual(
+    expect.arrayContaining([
+      "dist/index.js",
+      "CHANGELOG.md",
+      "LICENSE",
+      "README.md",
+      "THIRD_PARTY_NOTICES",
+    ]),
+  );
   expect(files.filter((path) => path.startsWith("dist/")).length).toBeGreaterThan(1);
   expect(files.filter((path) => path.startsWith("src/"))).toEqual([]);
 });

@@ -1,8 +1,29 @@
-# pi-hl-lsp
+# pi-hl-lsp: navigate and edit code with language servers in Pi
 
-Private, disabled-by-default LSP extension for Pi. Requires Pi 1.5.2 or newer and Node.js 22.19.0 or newer. This package is not installed in the live agent.
+[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/pi-hl-lsp)](https://www.npmjs.com/package/pi-hl-lsp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Scope
+**Ask Pi to find definitions, inspect diagnostics, and apply edits from your project's language server.**
+
+```bash
+pi install npm:pi-hl-lsp
+```
+
+## Why pi-hl-lsp
+
+- Follow a symbol across files instead of searching for matching text.
+- See which diagnostics the server reported and which files it checked.
+- Preview code actions before asking Pi to apply one. A failed multi-file edit may need manual recovery.
+
+## Quick start
+
+1. Install the package with Pi 1.5.2 or later and Node.js 22.19 or later.
+2. Open a trusted project, run `/hl-lsp-setup`, and select a language server you trust.
+3. Open `/hl-lsp` to review settings. Enable LSP and allow project execution only if you trust the server and project.
+4. Ask Pi for the definition of a symbol in a source file. Use `hl_lsp_status` to inspect the server.
+
+## How it works
 
 The extension provides 16 tools. Ten tools read: `hl_lsp_hover`, `hl_lsp_definition`, `hl_lsp_type_definition`, `hl_lsp_implementation`, `hl_lsp_references`, `hl_lsp_incoming_calls`, `hl_lsp_outgoing_calls`, `hl_lsp_symbols`, `hl_lsp_workspace_symbols`, and `hl_lsp_diagnostics`. `hl_lsp_code_actions` lists the code actions at a position. Three tools edit files on disk: `hl_lsp_rename`, `hl_lsp_rename_file`, and `hl_lsp_apply_code_action`. `hl_lsp_status` and `hl_lsp_reload` manage servers. Navigation tools take a 1-based line and either a symbol name on that line or a 1-based column. Call tools use the first item that the server prepares for the position, and name it when the server prepares several. `hl_lsp_workspace_symbols` takes a query and finds matching symbols across the project of any file you pass. `hl_lsp_diagnostics` takes one file, or up to 20 paths checked one after another.
 
@@ -160,7 +181,7 @@ The matrix lists the probes that ran. Each probe ran the built `dist` on the loc
 | clangd       | clangd 21.0.0 (custom)                               | clangd-custom, 3 runs | Diagnostics and definition pass.                                                                                                     |
 | iOS app      | sourcekit-lsp with xcode-build-server                | none                  | Not yet proven.                                                                                                                      |
 
-## Boundaries
+## Limits
 
 - Routing recognizes local project markers and exposes `local-marker` coverage.
 - Escaped file symlinks are rejected during routing. This does not provide atomic protection against concurrent filesystem changes.
@@ -195,14 +216,34 @@ Tests use temporary homes, controlled stdio servers, public Pi SDK lifecycle API
 
 Real-server checks must run against the packed artifact. Spike results are not acceptance evidence for this runtime.
 
-## Deferred product requirements
+## Unsupported features
 
 Full TypeScript project-reference routing, Python interpreter binding, and virtual documents remain unimplemented.
 
 Post-edit background analysis, configuration migration, and whole-project diagnostic coverage remain unimplemented.
 
-Global resource bounds and real-agent effectiveness remain unverified. No live activation or publication is part of this package.
+Global resource bounds and real-agent effectiveness remain unverified.
 
 ## Conventions
 
 The package reuses public Pi APIs and `vscode-jsonrpc` framing. Settings writes are the exception: they go through Pi's private settings storage via `pi-hl-utils`. It has no separate extension host, watcher, scheduler, or mutation engine.
+
+## Update, try or remove
+
+```bash
+pi update --extensions
+pi -e npm:pi-hl-lsp
+pi remove npm:pi-hl-lsp
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/HugoLopes45/pi-extensions/blob/main/CONTRIBUTING.md) for setup, checks and releases. Report bugs on [GitHub Issues](https://github.com/HugoLopes45/pi-extensions/issues), and vulnerabilities through [SECURITY.md](https://github.com/HugoLopes45/pi-extensions/blob/main/SECURITY.md).
+
+## Author
+
+Built by [Hugo Lopes](https://github.com/HugoLopes45), a senior frontend developer based in Paris, passionate about AI and agent harnesses.
+
+## License
+
+[MIT](LICENSE)

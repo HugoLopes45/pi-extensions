@@ -1,12 +1,13 @@
 # pi-hl-dap: debug configured programs in Pi
 
-[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoLopes45/pi-extensions/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/pi-hl-dap)](https://www.npmjs.com/package/pi-hl-dap)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Launch and inspect a configured [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) session from [Pi](https://pi.dev).** This package is private and not published. From the repository root, install its workspace dependencies and register the local package:
+**Launch and inspect a configured [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) session from [Pi](https://pi.dev).**
 
 ```bash
-pnpm install --ignore-scripts
-pi install ./packages/pi-hl-dap
+pi install npm:pi-hl-dap
 ```
 
 Configure an adapter and a launch profile before asking Pi to debug a program.
@@ -22,14 +23,14 @@ Configure an adapter and a launch profile before asking Pi to debug a program.
 
 You need macOS or Linux, Node.js 22.19 or later, Pi 1.5.2 or later, and a user-managed Debug Adapter executable. This release candidate is verified on macOS arm64 and Linux arm64 with Pi 1.5.2. Windows is unsupported.
 
-1. Install the local package with the commands above.
+1. Install the package with the command above.
 2. Add an adapter and a launch profile under `hlDap` in Pi settings, as shown in [Settings](#settings).
 3. Start Pi, or run `/reload` in an existing session.
 4. Ask Pi to set breakpoints and launch the profile with the `hl_dap_*` tools.
 
 Do not load another copy of this extension: the `hl_dap_*` tool names collide. Pi HL DAP has no adapter discovery, installer, or catalog.
 
-This is a private release candidate installed from a local checkout, not from the npm registry. `pi install` records the checkout path: moving or deleting the checkout breaks the install, `pi update` never changes it, and the bundled `pi-hl-utils` workspace dependency needs `pnpm install` in the checkout first.
+The package does not install a debugger. Choose an adapter you trust: it runs with your user's permissions.
 
 ## How it works
 
@@ -248,11 +249,10 @@ Preparation downloads and hash-verifies vscode-js-debug 1.117.0; later preparati
 
 ## Update, try or remove
 
-The package is local and unpublished. Update your checkout and workspace dependencies, then restart Pi or run `/reload`.
-
 ```bash
-pi -e ./packages/pi-hl-dap       # try without installing, from the repository root
-pi remove ./packages/pi-hl-dap  # remove the local installation, then restart Pi
+pi update --extensions
+pi -e npm:pi-hl-dap
+pi remove npm:pi-hl-dap
 ```
 
 Do not load the installed package and the one-session copy together.
