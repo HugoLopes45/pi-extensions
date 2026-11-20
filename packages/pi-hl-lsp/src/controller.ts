@@ -1218,7 +1218,7 @@ export class LspController {
     };
   }
 
-  // Formats the file an edit just wrote; the server's edits are applied all or none, as in rename.
+  // Formats the file an edit just wrote; using the same validation as rename.
   async format(file: string, signal: AbortSignal): Promise<FormatOutcome> {
     if (!this.settings.formatOnWrite || this.gate() !== undefined) return { outcome: "unchanged" };
     const route = await resolveRoute(file, this.cwd, this.definitions);
@@ -1271,7 +1271,7 @@ export class LspController {
     return this.applyFileRename(instance, route, plan.move, capabilities, root, deadline);
   }
 
-  // The move runs after the import edits are written; if it fails, the edits are restored.
+  // The move runs after the import edits are written.
   private async applyFileRename(
     instance: Instance,
     route: SelectedRoute,
