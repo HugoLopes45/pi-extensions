@@ -279,7 +279,10 @@ function applyEdits(text: string, edits: Edit[], name: string): string {
     const previous = ranges[index - 1];
     if (range.end < range.start)
       throw new Refusal(`The workspace edit has a reversed range in ${name}`);
-    if (previous && (range.start < previous.end || range.start === previous.start))
+    if (
+      previous &&
+      (range.start < previous.end || (range.start === previous.start && range.start !== range.end))
+    )
       throw new Refusal(`The workspace edits overlap in ${name}`);
   }
   let result = text;
