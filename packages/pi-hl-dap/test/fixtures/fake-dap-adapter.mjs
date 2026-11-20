@@ -14,6 +14,7 @@ const messageSchema = fixtureMessageSchema(
     value: Type.Optional(Type.Unknown()),
     chunks: Type.Optional(Type.Array(Type.Number())),
     bytes: Type.Optional(Type.Number()),
+    terminateDebuggee: Type.Optional(Type.Boolean()),
     descendant_pid_path: Type.Optional(Type.String()),
     command: Type.Optional(Type.String()),
     arguments: Type.Optional(Type.Unknown()),
@@ -160,10 +161,7 @@ function handleShutdownOrCrash(request, command) {
       if (process.env.FAKE_IGNORE_SHUTDOWN !== "1") respond(request, true, {});
       return;
     case "disconnect":
-      if (process.env.FAKE_IGNORE_SHUTDOWN !== "1") {
-        respond(request, true, {});
-        setTimeout(() => process.exit(0), 5);
-      }
+      disconnectFixture(request);
       return;
     case "crash":
       process.stderr.write("fixture adapter crashed\n", () => process.exit(23));
@@ -352,6 +350,20 @@ function receive(message) {
       reverseBody: message.body,
       reverseMessage: message.message,
     });
+  }
+}
+
+/** @param {FixtureRequest} request */
+function disconnectFixture(request) {
+  if (request.arguments?.terminateDebuggee === false && process.env.FAKE_CHILD_DISCONNECT) {
+    if (process.env.FAKE_CHILD_DISCONNECT === "refuse")
+      respond(request, false, undefined, "refused disconnect");
+    if (process.env.FAKE_CHILD_DISCONNECT === "ack") respond(request, true, {});
+    return;
+  }
+  if (process.env.FAKE_IGNORE_SHUTDOWN !== "1") {
+    respond(request, true, {});
+    setTimeout(() => process.exit(0), 5);
   }
 }
 

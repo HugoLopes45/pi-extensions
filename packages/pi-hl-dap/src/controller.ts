@@ -1527,7 +1527,7 @@ export class DapController {
   ): void {
     if (active.stopping) return;
     if (channel === "child") {
-      this.removeChildSession(active, target);
+      this.removeChildSession(active, target, undefined, true);
       return;
     }
     if (channel === "root") active.rootTerminated = true;
@@ -1562,13 +1562,14 @@ export class DapController {
     active: ActiveDapSession,
     target: DapTarget,
     firstFailure?: Error,
+    alreadyTerminated = false,
   ): void {
     if (!active.children.has(target) || target.detaching) return;
     target.detaching = true;
     target.ready = false;
     target.stop = undefined;
     this.wakeTerminationWaiters(active);
-    void target.client.detach().then(
+    void target.client.detach(alreadyTerminated).then(
       () => {
         active.children.delete(target);
         if (firstFailure !== undefined) this.recordFailedChildSession(target, firstFailure);

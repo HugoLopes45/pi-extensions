@@ -425,6 +425,7 @@ async function verifyPeer(
   try {
     const pid = child.pid;
     if (pid === undefined) throw new Error("Debug Adapter has no PID");
+    // socket is Pi's client socket. Its remote endpoint is local to the adapter PID inspected by lsof.
     const name =
       "n" +
       endpoint(socket.remoteAddress, socket.remotePort) +
@@ -1063,13 +1064,27 @@ export class DapConnection {
 
   /**
    * Close a target channel without terminating its Debuggee: send `disconnect` with
-   * `terminateDebuggee: false`, which makes the adapter detach and resume the target, then end the
-   * socket. Unlike {@link dispose}, it never sends `terminate`.
+   * `terminateDebuggee: false`, then close the socket. A live child must acknowledge the request.
    */
-  async detach(): Promise<void> {
-    this.disposePromise ??= Promise.resolve().then(() =>
-      this.performShutdown([["disconnect", { terminateDebuggee: false }]]),
-    );
+  async detach(alreadyTerminated = false): Promise<void> {
+    this.disposePromise ??= Promise.resolve().then(async () => {
+      const args = { terminateDebuggee: false };
+      if (alreadyTerminated || this.child !== undefined)
+        return this.performShutdown([["disconnect", args]]);
+      try {
+        await this.request("disconnect", args, {
+          timeoutMs: Math.max(
+            1,
+            Math.min(
+              this.options.timeouts.requestMs,
+              Math.floor(this.options.timeouts.shutdownMs / 3),
+            ),
+          ),
+        });
+      } finally {
+        await this.performShutdown([]);
+      }
+    });
     return this.disposePromise;
   }
 

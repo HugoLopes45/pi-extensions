@@ -273,11 +273,32 @@ describe("DapConnection", () => {
     await target.dispose();
   });
 
+  test.each(["refuse", "ignore"])(
+    "does not confirm a live child detach when adapters %s disconnect",
+    async (behavior) => {
+      const root = await createClient({
+        args: [fixturePath, "--tcp", "$PORT"],
+        environment: {
+          FAKE_CHILD_DISCONNECT: behavior,
+          FAKE_MULTI_CONNECT: "1",
+        },
+        transport: tcpTransport(),
+      });
+      const target = await root.connectTargetChannel();
+      await expect(target.detach()).rejects.toMatchObject({
+        kind: behavior === "refuse" ? "request" : "timeout",
+      });
+      await expect(target.request("echo")).rejects.toMatchObject({
+        kind: "shutdown",
+      });
+    },
+  );
+
   test("keeps writing the shared adapter stderr after a target channel detaches", async () => {
     const port = await unusedTcpPort();
     const root = await createClient({
       args: [fixturePath, "--tcp", "$PORT"],
-      environment: { FAKE_IGNORE_SHUTDOWN: "1", FAKE_MULTI_CONNECT: "1" },
+      environment: { FAKE_CHILD_DISCONNECT: "ack", FAKE_MULTI_CONNECT: "1" },
       transport: tcpTransport(port),
       timeouts: { startupMs: 5_000, requestMs: 1_000, shutdownMs: 500 },
     });

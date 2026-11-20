@@ -557,7 +557,10 @@ describe("DapController with vscode-js-debug Child sessions", () => {
       },
     );
     try {
-      await session.setBreakpoints({ filePath: "/src/shared.js", breakpoints: [{ line: 3 }] });
+      await session.setBreakpoints({
+        filePath: "/src/shared.js",
+        breakpoints: [{ line: 3 }],
+      });
       expect((await session.launch()).snapshot.state).toBe("running");
     } finally {
       await session.dispose();
@@ -735,7 +738,10 @@ describe("DapController with vscode-js-debug Child sessions", () => {
         const operation =
           command === "pause"
             ? session.pause()
-            : session.setBreakpoints({ filePath: "/src/shared.js", breakpoints: [{ line: 3 }] });
+            : session.setBreakpoints({
+                filePath: "/src/shared.js",
+                breakpoints: [{ line: 3 }],
+              });
 
         await expect(operation).rejects.toThrow(`child refused ${command}`);
         // The primary target applied the new list, so it stays the Desired Breakpoints.
@@ -773,7 +779,10 @@ describe("DapController with vscode-js-debug Child sessions", () => {
         ).length;
       const before = await childUpdates();
       await expect(
-        session.setBreakpoints({ filePath: "/src/shared.js", breakpoints: [{ line: 3 }] }),
+        session.setBreakpoints({
+          filePath: "/src/shared.js",
+          breakpoints: [{ line: 3 }],
+        }),
       ).rejects.toThrow("target refused setBreakpoints");
       expect(session.status().desiredBreakpoints).toEqual([]);
       expect(await childUpdates()).toBe(before);
@@ -807,7 +816,10 @@ describe("DapController with vscode-js-debug Child sessions", () => {
         },
       );
       try {
-        await session.setBreakpoints({ filePath: "/src/shared.js", breakpoints: [{ line: 3 }] });
+        await session.setBreakpoints({
+          filePath: "/src/shared.js",
+          breakpoints: [{ line: 3 }],
+        });
         expect((await session.launch()).snapshot.state).toBe("stopped");
         await expect(call(session)).rejects.toThrow(
           `${operation} requires the stopped target it started on`,
@@ -1700,7 +1712,7 @@ describe("DapController", () => {
     let session: DapController | undefined;
     const restorers: (() => void)[] = [];
     try {
-      session = await createJsDapSession("child-detaching", {}, 3_000, 100);
+      session = await createJsDapSession("child-detaching", {}, 3_000, 5_000);
       const launched = await session.launch();
       expect(launched.stop?.childSession).toBe("worker-a");
       const sockets = connections.mock.results.flatMap((result) =>
@@ -1721,7 +1733,7 @@ describe("DapController", () => {
         () => childDestroy.mockRestore(),
         () => rootDestroy.mockRestore(),
       );
-      const resumed = await session.continue();
+      const resumed = await session.continue(undefined, AbortSignal.abort());
       // The detaching child answers inside its 1s detach request budget, not a test-wide wait.
       await expect
         .poll(() => childEvents.includes('"event":"stopped"'), {
