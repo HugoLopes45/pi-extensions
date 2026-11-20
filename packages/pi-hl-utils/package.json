@@ -18,6 +18,7 @@
     "./record": "./src/record.ts",
     "./settings-command": "./src/settings-command.ts",
     "./settings-menu": "./src/settings-menu.ts",
+    "./steering": "./src/steering.ts",
     "./token-calibration": "./src/token-calibration.ts",
     "./ui": "./src/ui.ts",
     "./testing/*": "./testing/*.ts"

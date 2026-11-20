@@ -4,10 +4,17 @@ import {
   fauxAssistantMessage,
   getCurrentTools,
   type JsonObject,
+  type SimpleStreamOptions,
   type ToolCall,
 } from "@earendil-works/pi-ai";
 import { AgentSession, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { discoverPiAgentSession } from "pi-hl-utils/pi-agent-session-discovery";
+
+function logAuthentication(options: SimpleStreamOptions | undefined): void {
+  if (options?.apiKey !== "offline" && options?.apiKey !== "refreshed-offline-access")
+    throw new Error("Unexpected CLI fixture authentication");
+  console.log(`ONLOOKER_CLI_AUTH=${options.apiKey === "offline" ? "api-key" : "oauth"}`);
+}
 
 /** Offline CLI boundary: real loading, commands, and reviews without network requests. */
 export default function cliFixture(pi: ExtensionAPI): void {
@@ -61,9 +68,7 @@ export default function cliFixture(pi: ExtensionAPI): void {
       },
     ],
     streamSimple(model, context, options) {
-      if (options?.apiKey !== "offline" && options?.apiKey !== "refreshed-offline-access")
-        throw new Error("Unexpected CLI fixture authentication");
-      console.log(`ONLOOKER_CLI_AUTH=${options.apiKey === "offline" ? "api-key" : "oauth"}`);
+      logAuthentication(options);
       const tools = getCurrentTools(context.messages);
       const declared = (name: string) => tools.some((tool) => tool.name === name);
       // Built-in `codemode.mode: "only"` leaves callable direct tools undeclared but listed by codemode.
@@ -93,26 +98,29 @@ export default function cliFixture(pi: ExtensionAPI): void {
         model: model.id,
         api: model.api,
       };
-      if (consultation) {
-        message.content = [{ type: "text", text: "Inspect the native path." }];
-        console.log("ONLOOKER_CLI_CONSULTATION=Inspect the native path.");
-      } else if (reviewing) {
-        // A scripted report does not terminate the turn; answer its script result with text.
-        if (context.messages.at(-1)?.role !== "toolResult") {
-          message.content = [call("onlooker_report", { severity: "none" })];
+      const planReply = () => {
+        if (consultation) {
+          message.content = [{ type: "text", text: "Inspect the native path." }];
+          console.log("ONLOOKER_CLI_CONSULTATION=Inspect the native path.");
+        } else if (reviewing) {
+          // A scripted report does not terminate the turn; answer its script result with text.
+          if (context.messages.at(-1)?.role !== "toolResult") {
+            message.content = [call("onlooker_report", { severity: "none" })];
+            message.stopReason = "toolUse";
+          }
+        } else if (
+          lastUser.includes("Ask Onlooker which path to inspect") &&
+          !context.messages.some(
+            (item) =>
+              item.role === "toolResult" &&
+              (item.toolCallId === "onlooker_ask" || item.toolName === "onlooker_ask"),
+          )
+        ) {
+          message.content = [call("onlooker_ask", { message: "Which path should I inspect?" })];
           message.stopReason = "toolUse";
         }
-      } else if (
-        lastUser.includes("Ask Onlooker which path to inspect") &&
-        !context.messages.some(
-          (item) =>
-            item.role === "toolResult" &&
-            (item.toolCallId === "onlooker_ask" || item.toolName === "onlooker_ask"),
-        )
-      ) {
-        message.content = [call("onlooker_ask", { message: "Which path should I inspect?" })];
-        message.stopReason = "toolUse";
-      }
+      };
+      planReply();
       queueMicrotask(() =>
         stream.push({
           type: "done",

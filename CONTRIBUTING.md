@@ -4,11 +4,12 @@ Small, focused contributions are welcome. Discuss a large behavior change in an 
 
 ## Setup
 
-You need Node.js 22.19 or later. Corepack installs the pnpm version of `package.json`.
+You need Node.js 22.19 or later. Corepack installs the pnpm version of `package.json`. The `fetch-vscode-js-debug.mjs` script downloads the pinned vscode-js-debug release that the pi-hl-dap tests use, and checks its hash.
 
 ```bash
 corepack enable pnpm
 pnpm install
+node packages/pi-hl-dap/scripts/fetch-vscode-js-debug.mjs
 pnpm run verify
 ```
 
@@ -18,7 +19,7 @@ To try a package in Pi, run `pi -e ./packages/<package>` from the repository roo
 
 `pnpm run verify` runs `pnpm check` (oxfmt in check mode, then oxlint with type-aware rules through `oxlint-tsgolint`), then each package's `check` script (TypeScript with the shared root `tsconfig.json`, then Vitest offline tests). The tests use fake providers and never call a real model.
 
-Lint rules apply to source and tests alike, including the `typescript/no-unsafe-*` rules. In `packages/*/test/**`, only `no-console`, `no-base-to-string` and `promise/no-callback-in-promise` are off. In `packages/*/scripts/**`, `no-console` is off. One root `.oxlintrc.json` lints every package. Cyclomatic complexity is limited to 10, and to 20 in pi-onlooker. Split a function that is too complex. Inline `oxlint-disable` and `eslint-disable` comments are rejected.
+Lint rules apply to source and tests alike, including the `typescript/no-unsafe-*` rules. In `packages/*/test/**`, only `no-console`, `no-base-to-string` and `promise/no-callback-in-promise` are off. In `packages/*/scripts/**`, `no-console` is off. One root `.oxlintrc.json` lints every package. Cyclomatic complexity is limited to 10 in every package. Split a function that is too complex. Inline `oxlint-disable` and `eslint-disable` comments are rejected.
 
 Each package must declare `"type": "module"` in its `package.json`; otherwise, TypeScript `NodeNext` treats its `.ts` files as CommonJS and rejects `import` and `export`.
 

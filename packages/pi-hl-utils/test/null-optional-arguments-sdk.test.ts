@@ -47,7 +47,7 @@ const ProbeParameters = Type.Object(
   { additionalProperties: false },
 );
 
-/** Strict like pi-dap's parser: it throws on what the schema rejects, before Pi's validation. */
+/** Strict like pi-hl-dap's parser: it throws on what the schema rejects, before Pi's validation. */
 function strictProbeArguments(arguments_: unknown) {
   if (!Value.Check(ProbeParameters, arguments_)) {
     throw new Error(`invalid tool arguments: ${JSON.stringify(arguments_)}`);
