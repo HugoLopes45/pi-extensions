@@ -11,6 +11,7 @@ Personal extensions for the [Pi](https://pi.dev) coding agent, built and maintai
 | [pi-context-kit](packages/pi-context-kit#readme) | Keeps long sessions clear by putting old, unneeded context aside.  | `pi install npm:pi-context-kit` |
 | [pi-claude-pro](packages/pi-claude-pro#readme)   | Lets Pi use a Claude Pro, Max or Ultra plan instead of an API key. | `pi install npm:pi-claude-pro`  |
 | [pi-onlooker](packages/pi-onlooker#readme)       | A second model checks the agent's work while it runs.              | `pi install npm:pi-onlooker`    |
+| [pi-hl-dap](packages/pi-hl-dap#readme)           | Configured Debug Adapter Protocol sessions for Pi.                 | Not released yet                |
 
 Read an extension's README before you install it. It lists what the extension needs and its limits.
 

@@ -9,6 +9,8 @@ import {
   contentText,
   createAssistantMessageEventStream,
   fauxAssistantMessage,
+  type AssistantMessage,
+  type Context,
 } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
@@ -32,6 +34,40 @@ it("returns enabled main-agent consultation as an ordinary tool result", async (
   let failConsultation = false;
   let failOnlookerTool = false;
   let consultationRequests = 0;
+  function answerPrivateRequest(context: Context, message: AssistantMessage, prompt: string): void {
+    privatePrompts.push(prompt);
+    privateToolNames.push((context.tools ?? []).map((tool) => tool.name));
+    const failedRead = context.messages
+      .slice(context.messages.findLastIndex((entry) => entry.role === "user"))
+      .some((entry) => entry.role === "toolResult" && entry.toolName === "read" && entry.isError);
+    if (failOnlookerTool && !failedRead) {
+      message.content = [
+        {
+          type: "toolCall",
+          id: "failed-read",
+          name: "read",
+          arguments: { path: join(directory, "missing-onlooker-file") },
+        },
+      ];
+      message.stopReason = "toolUse";
+    } else if (prompt.includes("Consultation request")) {
+      consultationRequests++;
+      if (failConsultation) {
+        message.stopReason = "error";
+        message.errorMessage = "Offline consultation failure";
+      } else message.content = [{ type: "text", text: "Check the cancellation path first." }];
+    } else {
+      message.content = [
+        {
+          type: "toolCall",
+          id: "report",
+          name: "onlooker_report",
+          arguments: { severity: "none" },
+        },
+      ];
+      message.stopReason = "toolUse";
+    }
+  }
   globalThis.onlookerObserverTest = {
     stream(model, context) {
       const privateRole = context.tools?.some((tool) => tool.name === "onlooker_report") ?? false;
@@ -45,40 +81,7 @@ it("returns enabled main-agent consultation as an ordinary tool result", async (
         model: model.id,
       };
       if (privateRole) {
-        privatePrompts.push(prompt);
-        privateToolNames.push((context.tools ?? []).map((tool) => tool.name));
-        const failedRead = context.messages
-          .slice(context.messages.findLastIndex((entry) => entry.role === "user"))
-          .some(
-            (entry) => entry.role === "toolResult" && entry.toolName === "read" && entry.isError,
-          );
-        if (failOnlookerTool && !failedRead) {
-          message.content = [
-            {
-              type: "toolCall",
-              id: "failed-read",
-              name: "read",
-              arguments: { path: join(directory, "missing-onlooker-file") },
-            },
-          ];
-          message.stopReason = "toolUse";
-        } else if (prompt.includes("Consultation request")) {
-          consultationRequests++;
-          if (failConsultation) {
-            message.stopReason = "error";
-            message.errorMessage = "Offline consultation failure";
-          } else message.content = [{ type: "text", text: "Check the cancellation path first." }];
-        } else {
-          message.content = [
-            {
-              type: "toolCall",
-              id: "report",
-              name: "onlooker_report",
-              arguments: { severity: "none" },
-            },
-          ];
-          message.stopReason = "toolUse";
-        }
+        answerPrivateRequest(context, message, prompt);
       } else {
         const question = questions.shift();
         if (question) {

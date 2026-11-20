@@ -74,12 +74,6 @@
         "typescript/no-base-to-string": "off",
         "promise/no-callback-in-promise": "off"
       }
-    },
-    {
-      "files": ["packages/pi-onlooker/**"],
-      "rules": {
-        "eslint/complexity": ["error", 20]
-      }
     }
   ]
 }

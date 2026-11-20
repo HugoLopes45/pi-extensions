@@ -15,6 +15,33 @@ const cli = fileURLToPath(
 const onlooker = fileURLToPath(new URL("../extensions/index.ts", import.meta.url));
 const fixture = fileURLToPath(new URL("./fixtures/cli-extension.ts", import.meta.url));
 
+async function writeCliSettings(
+  agentDir: string,
+  withCodeMode: boolean,
+  withOAuth: boolean,
+): Promise<void> {
+  await mkdir(agentDir);
+  await writeFile(
+    join(agentDir, "auth.json"),
+    JSON.stringify({
+      [withOAuth ? "onlooker-cli-fixture" : "unused-offline-oauth"]: {
+        type: "oauth",
+        access: "offline-access",
+        refresh: "offline-refresh",
+        expires: withOAuth ? 0 : 4102444800000,
+      },
+    }),
+  );
+  await writeFile(
+    join(agentDir, "settings.json"),
+    JSON.stringify({
+      defaultTools: [withCodeMode ? "+codemode" : "-codemode"],
+      codemode: { mode: withCodeMode ? "only" : "on" },
+      extensions: ["-builtin:tool-search"],
+    }),
+  );
+}
+
 // One run per axis value: each of CodeMode and OAuth is on in one case and off in the other.
 it.each([
   [false, true],
@@ -25,26 +52,7 @@ it.each([
     const dir = await mkdtemp(join(tmpdir(), "pi-onlooker-cli-"));
     const agentDir = join(dir, "agent");
     try {
-      await mkdir(agentDir);
-      await writeFile(
-        join(agentDir, "auth.json"),
-        JSON.stringify({
-          [withOAuth ? "onlooker-cli-fixture" : "unused-offline-oauth"]: {
-            type: "oauth",
-            access: "offline-access",
-            refresh: "offline-refresh",
-            expires: withOAuth ? 0 : 4102444800000,
-          },
-        }),
-      );
-      await writeFile(
-        join(agentDir, "settings.json"),
-        JSON.stringify({
-          defaultTools: [withCodeMode ? "+codemode" : "-codemode"],
-          codemode: { mode: withCodeMode ? "only" : "on" },
-          extensions: ["-builtin:tool-search"],
-        }),
-      );
+      await writeCliSettings(agentDir, withCodeMode, withOAuth);
       const completed = execute(
         process.execPath,
         [

@@ -84,6 +84,44 @@ export function seedNote(seed: ContextSeed, total: number, budget: number): stri
   ].join("");
 }
 
+function chooseSeedUnits(
+  content: (unit: number) => EvidenceItem[],
+  anchors: ReadonlySet<number>,
+  recent: ReadonlySet<number>,
+  newest: number,
+  remaining: number,
+): Map<number, EvidenceItem[]> {
+  const chosen = new Map<number, EvidenceItem[]>();
+  const anchorItems = [...anchors].flatMap(content);
+  const recentItems = [...recent].flatMap(content);
+  // Shorten the newest turn first, then the original request too, so both always appear.
+  const required =
+    fitEvidence(recentItems, remaining - evidenceItemsCost(anchorItems), omissionMarker)?.concat(
+      anchorItems,
+    ) ??
+    fitEvidence([...recentItems, ...anchorItems], remaining, omissionMarker) ??
+    shortenEvidence([...recentItems, ...anchorItems], 0, omissionMarker);
+  remaining -= evidenceItemsCost(required);
+  const shortenedRequired = new Map(
+    [...recentItems, ...anchorItems].map((item, index) => [item, required[index]] as const),
+  );
+  for (const unit of [...anchors, ...recent])
+    chosen.set(
+      unit,
+      content(unit).map((item) => shortenedRequired.get(item) ?? item),
+    );
+  for (let unit = newest; unit >= 0; unit--) {
+    if (chosen.has(unit)) continue;
+    const items = fitEvidence(content(unit), remaining, omissionMarker);
+    if (!items) break;
+    chosen.set(unit, items);
+    remaining -= evidenceItemsCost(items);
+    if (items.some((item, index) => item !== content(unit)[index])) break;
+  }
+
+  return chosen;
+}
+
 /**
  * Fit a Context Seed to a token budget, measured as Pi's chars/4 estimate of the seed JSON with
  * Pi's per-image estimate. The caller scales a budget in reported tokens down to that estimate. Always kept: the Observed Setup; the original request (the first
@@ -135,35 +173,9 @@ export function selectContextSeed(
   const recent = new Set([prompt, messages.length - 1].filter((index) => index >= 0).map(unitAt));
   for (const unit of anchors) recent.delete(unit);
 
-  const chosen = new Map<number, EvidenceItem[]>();
-  let remaining =
+  const remaining =
     options.budgetTokens - Math.ceil(JSON.stringify({ observedSetup, messages: [] }).length / 4);
-  const anchorItems = [...anchors].flatMap(content);
-  const recentItems = [...recent].flatMap(content);
-  // Shorten the newest turn first, then the original request too, so both always appear.
-  const required =
-    fitEvidence(recentItems, remaining - evidenceItemsCost(anchorItems), omissionMarker)?.concat(
-      anchorItems,
-    ) ??
-    fitEvidence([...recentItems, ...anchorItems], remaining, omissionMarker) ??
-    shortenEvidence([...recentItems, ...anchorItems], 0, omissionMarker);
-  remaining -= evidenceItemsCost(required);
-  const shortenedRequired = new Map(
-    [...recentItems, ...anchorItems].map((item, index) => [item, required[index]] as const),
-  );
-  for (const unit of [...anchors, ...recent])
-    chosen.set(
-      unit,
-      content(unit).map((item) => shortenedRequired.get(item) ?? item),
-    );
-  for (let unit = newest; unit >= 0; unit--) {
-    if (chosen.has(unit)) continue;
-    const items = fitEvidence(content(unit), remaining, omissionMarker);
-    if (!items) break;
-    chosen.set(unit, items);
-    remaining -= evidenceItemsCost(items);
-    if (items.some((item, index) => item !== content(unit)[index])) break;
-  }
+  const chosen = chooseSeedUnits(content, anchors, recent, newest, remaining);
 
   const ordered = [...chosen.keys()].toSorted((left, right) => left - right);
   const kept = ordered.flatMap((unit) => {

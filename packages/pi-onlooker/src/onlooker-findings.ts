@@ -36,6 +36,12 @@ export function selectFindings(
   return ordered.filter((finding) => selected.has(finding));
 }
 
+function findingEvidence(finding: OnlookerFinding) {
+  const refs = (finding.evidence?.refs ?? []).map((ref) => ref.trim().replace(/^`(.*)`$/, "$1"));
+  const quote = finding.evidence?.quote?.trim();
+  return { refs, quote };
+}
+
 /**
  * Split reported findings by their evidence: each must cite a Tool-Call Reference or a quote.
  * Every cited reference and quote must occur in the evidence supplied to this Onlooker Session.
@@ -48,8 +54,7 @@ export function checkEvidence(
   const supported: OnlookerFinding[] = [];
   const unsupported: OnlookerFinding[] = [];
   for (const finding of findings) {
-    const refs = (finding.evidence?.refs ?? []).map((ref) => ref.trim().replace(/^`(.*)`$/, "$1"));
-    const quote = finding.evidence?.quote?.trim();
+    const { refs, quote } = findingEvidence(finding);
     if (
       (!refs.length && !quote) ||
       refs.some((ref) => !known.has(ref)) ||

@@ -84,11 +84,7 @@ export async function createOnlookerSession(
   }
 }
 
-async function buildOnlookerSession(
-  observed: AgentSession,
-  options: OnlookerSessionOptions,
-): Promise<AgentSessionRuntime> {
-  const config = structuredClone(options.config);
+function selectOnlookerModel(observed: AgentSession, config: OnlookerConfig) {
   let selectedModel = observed.model;
   if (config.model) {
     const separator = config.model.indexOf("/");
@@ -99,7 +95,15 @@ async function buildOnlookerSession(
   }
   if (!selectedModel)
     throw new Error(`Onlooker model is unavailable: ${config.model ?? "observed model"}`);
-  const model = structuredClone(selectedModel);
+  return structuredClone(selectedModel);
+}
+
+async function buildOnlookerSession(
+  observed: AgentSession,
+  options: OnlookerSessionOptions,
+): Promise<AgentSessionRuntime> {
+  const config = structuredClone(options.config);
+  const model = selectOnlookerModel(observed, config);
   const cwd = observed.sessionManager.getCwd();
   const agentDir = piSdk.getAgentDir();
   const guidance = onlookerGuidance(cwd, agentDir);
