@@ -90,8 +90,7 @@ type Group = { uri: string; version: number | null | undefined; edits: Edit[] };
 class Refusal extends Error {}
 
 // Validates the edit, then plans and writes each file under its queue; the move runs once all files are written.
-// A refusal, write error or move error leaves files as they were; a killed process leaves a journal for
-// recoverInterruptedEdits.
+// After writes begin, failure leaves the journal for manual recovery.
 export async function applyWorkspaceEdit(
   response: unknown,
   root: string,
@@ -367,7 +366,7 @@ async function replaceFile(file: string, text: string, mode?: number): Promise<v
   }
 }
 
-// Writes every planned file and then moves the file, or restores the written files when either fails.
+// Keep the original text until every write and the optional move have succeeded.
 async function writeAll(
   planned: Planned[],
   root: string,
@@ -421,38 +420,12 @@ async function writeJournaled(
   };
 }
 
-async function failed(
-  reason: string,
-  attempted: Planned[],
-  root: string,
-  entry: string,
-): Promise<ApplyOutcome> {
-  const unrestored = await restore(attempted, root);
-  if (unrestored.length === 0) {
-    await unlink(entry);
-    return {
-      outcome: "failed",
-      reason: `${reason} Restored every written file.`,
-    };
-  }
-  // The journal stays, so the next Pi start can still undo the files left changed.
+function failed(reason: string, attempted: Planned[], root: string, entry: string): ApplyOutcome {
+  const paths = attempted.map(({ file }) => relative(root, file)).join(", ");
   return {
     outcome: "failed",
-    reason: `${reason} Could not restore: ${unrestored.join(", ")}. The next Pi start retries.`,
+    reason: `${reason} ${paths ? `Inspect files for partial edits: ${paths}. ` : ""}Review the edit journal: ${entry}.`,
   };
-}
-
-// Rewrites the original text of each attempted file, newest first; returns the names still changed.
-async function restore(attempted: Planned[], root: string): Promise<string[]> {
-  const unrestored: string[] = [];
-  for (const target of attempted.toReversed()) {
-    try {
-      await replaceFile(target.file, target.original, target.mode);
-    } catch {
-      unrestored.push(relative(root, target.file));
-    }
-  }
-  return unrestored;
 }
 
 function running(pid: number): boolean {
@@ -464,8 +437,7 @@ function running(pid: number): boolean {
   }
 }
 
-// Undoes the edits that a killed process left in the journal. A file changed since then is kept and named,
-// and its journal stays so the original text is not lost. Returns one note per journal it acted on.
+// Recovery is read-only: even comparing text immediately before a restore can race an editor save.
 export async function recoverInterruptedEdits(): Promise<string[]> {
   const names = await readdir(journalDir()).catch((error: unknown) => {
     if (isMissingPath(error)) return [];
@@ -484,23 +456,10 @@ async function recoverJournal(entry: string): Promise<string | undefined> {
   if (!Value.Check(journal, record))
     return `The LSP edit journal ${entry} is invalid; it was kept.`;
   if (running(record.pid)) return undefined;
-  if (record.move) await undoMove(record.move);
-  const kept: string[] = [];
-  for (const { file, original, text } of record.files) {
-    const current = await readFile(file, "utf8").catch((error: unknown) => {
-      if (isMissingPath(error)) return undefined;
-      throw error;
-    });
-    if (current === text) await replaceFile(file, original, (await stat(file)).mode);
-    else if (current !== original) kept.push(file);
+  const paths = new Set(record.files.map(({ file }) => file));
+  if (record.move) {
+    paths.add(record.move.from);
+    paths.add(record.move.to);
   }
-  if (kept.length > 0)
-    return `Could not undo an interrupted LSP edit of ${kept.join(", ")}: the files changed since. ${entry} keeps their original text.`;
-  await unlink(entry);
-  return `Undid an interrupted LSP edit of ${record.files.length} files.`;
-}
-
-async function undoMove({ from, to }: FileMove): Promise<void> {
-  if ((await realpathOrMissing(from)) === undefined && (await realpathOrMissing(to)) !== undefined)
-    await moveFile({ from: to, to: from });
+  return `Interrupted LSP edit. Inspect: ${[...paths].join(", ")}. Review the edit journal: ${entry}.`;
 }

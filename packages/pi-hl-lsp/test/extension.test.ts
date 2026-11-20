@@ -1203,7 +1203,11 @@ it.each([
   },
 );
 
-it("restores the edits when the file cannot be moved", async () => {
+it("reports the journal when the file cannot be moved", async () => {
+  vi.stubEnv("PI_CODING_AGENT_DIR", await directory());
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
   const state = await renameFileSession("rename-file");
   await writeFile(join(state.cwd, "blocked"), "not a directory\n");
   const result = await renameFile(state, "lib.ts", "blocked/util.ts");
@@ -1211,10 +1215,11 @@ it("restores the edits when the file cannot be moved", async () => {
     isError: true,
     details: { outcome: "failed" },
   });
-  expect(JSON.stringify(result)).toContain("Restored every written file");
+  expect(JSON.stringify(result)).toContain("Inspect files for partial edits: index.ts.");
+  expect(JSON.stringify(result)).toContain("Review the edit journal:");
   expect(await readFile(join(state.cwd, "lib.ts"), "utf8")).toBe("export const value = 1;\n");
   expect(await readFile(join(state.cwd, "index.ts"), "utf8")).toBe(
-    'import { value } from "./lib";\n',
+    'import { value } from "./util";\n',
   );
 });
 
