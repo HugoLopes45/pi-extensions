@@ -12,7 +12,12 @@ import {
 export type UiTheme = Pick<Theme, "fg" | "bg" | "bold" | "strikethrough">;
 
 /** Collapsed View preview lengths, copied from the Nearest Built-in tool of each kind. */
-export const COLLAPSED_LINES = { fallback: 10, terminal: 5, search: 15, list: 20 } as const;
+export const COLLAPSED_LINES = {
+  fallback: 10,
+  terminal: 5,
+  search: 15,
+  list: 20,
+} as const;
 
 /** Pi's cap on a widget's rendered lines. */
 const WIDGET_MAX_LINES = 10;
@@ -127,13 +132,17 @@ export class CollapsedPreview implements Component {
   constructor(
     private readonly theme: Pick<UiTheme, "fg">,
     private readonly child: Component,
-    private readonly options: { limit: number; expanded: boolean; keep?: "head" | "end" },
+    private readonly options: {
+      limit: number;
+      expanded: boolean;
+      keep?: "head" | "end";
+    },
   ) {}
 
   render(width: number): string[] {
     const lines = this.child.render(width);
     const hidden = lines.length - this.options.limit;
-    if (this.options.expanded || hidden <= 0) return lines;
+    if (this.options.expanded || hidden <= 0) return [...lines];
     const keepEnd = this.options.keep === "end";
     const hint = new Text(
       expandHint(this.theme, hidden, keepEnd ? "earlier" : "more"),
@@ -185,7 +194,12 @@ const trackers = new WeakMap<WeakKey, DurationTracker>();
 function trackerFor(context: DurationContext): DurationTracker {
   let tracker = trackers.get(context.state);
   if (!tracker) {
-    tracker = { startedAt: undefined, endedAt: undefined, interval: undefined, resultSeen: false };
+    tracker = {
+      startedAt: undefined,
+      endedAt: undefined,
+      interval: undefined,
+      resultSeen: false,
+    };
     trackers.set(context.state, tracker);
   }
   return tracker;

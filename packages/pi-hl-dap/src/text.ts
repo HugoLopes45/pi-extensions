@@ -1,0 +1,363 @@
+import { isAbsolute, relative } from "node:path";
+
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+  truncateHead,
+} from "@earendil-works/pi-coding-agent";
+import type { DebugProtocol } from "@vscode/debugprotocol";
+
+import type {
+  DapDesiredBreakpointFile,
+  DapResult,
+  DapSnapshot,
+  DapVariableGroup,
+} from "./controller.js";
+import type { DapExecutionWaitOperation, DapOperation } from "./schemas.js";
+
+/** How a wait ended early without a stop or exit: its call was cancelled, or a Queued Steer yielded it. */
+export type DapExecutionWaitEnd = "cancelled" | "steered";
+
+/** Everything a text formatter may show: one operation's result plus how to present paths. */
+interface DapTextContext {
+  readonly operation: DapOperation;
+  readonly result: DapResult;
+  /** Project directory that source paths are shown relative to. */
+  readonly cwd: string;
+  /** Why the call stopped waiting before the Debuggee stopped or exited, when it did. */
+  readonly executionWaitEnd: DapExecutionWaitEnd | undefined;
+}
+
+type DapTextFormatter = (context: DapTextContext) => readonly string[];
+
+/** Compact text a model reads for one operation: a few lines, never a raw JSON dump. */
+interface DapToolTextInput {
+  readonly operation: DapOperation;
+  readonly result: DapResult;
+  readonly cwd: string;
+  readonly executionWaitEnd: DapExecutionWaitEnd | undefined;
+  /** Warnings lead so that truncating a long result can never drop them. */
+  readonly warnings: readonly string[];
+}
+
+/**
+ * Adapter-supplied strings stay on one line, so a value can neither add rows nor fake the
+ * "Debuggee output" heading the Observer UI looks for. `structuredContent` keeps them verbatim.
+ */
+export function oneLine(value: string): string {
+  return value.replace(/\r\n|\r|\n/gu, "\\n");
+}
+
+function sourceLabel(source: DebugProtocol.Source | undefined, cwd: string): string | undefined {
+  if (source?.path !== undefined) return workspaceRelativeDapPath(cwd, source.path);
+  return source?.name;
+}
+
+/** `file:line:column` for a frame, or `line:column` when the adapter named no source. */
+function frameLocation(frame: DebugProtocol.StackFrame, cwd: string): string {
+  const position = `${frame.line}:${frame.column}`;
+  const source = sourceLabel(frame.source, cwd);
+  return oneLine(source === undefined ? position : `${source}:${position}`);
+}
+
+/** Operations that wait for the Debuggee, so a `running` result means the wait ended early. */
+export function isDapExecutionWaitOperation(
+  operation: DapOperation,
+): operation is DapExecutionWaitOperation {
+  return (
+    operation === "launch" ||
+    operation === "continue" ||
+    operation === "next" ||
+    operation === "step_in" ||
+    operation === "step_out"
+  );
+}
+
+function runningHeadline(state: string, { operation, executionWaitEnd }: DapTextContext) {
+  if (executionWaitEnd !== undefined) return `${state} (wait ${executionWaitEnd})`;
+  // A pause never yields to a steer, so its wait ends running only on timeout or cancellation.
+  if (operation === "pause") return `${state} (no stop after pause)`;
+  return isDapExecutionWaitOperation(operation) ? `${state} (wait timed out)` : state;
+}
+
+function terminatedHeadline(snapshot: Extract<DapSnapshot, { state: "terminated" }>): string {
+  const detail = [
+    snapshot.exitCode === undefined ? undefined : `exit code ${snapshot.exitCode}`,
+    snapshot.terminationReason === undefined ? undefined : oneLine(snapshot.terminationReason),
+  ].filter((part) => part !== undefined);
+  return detail.length === 0 ? "terminated" : `terminated (${detail.join("; ")})`;
+}
+
+function stateHeadline(context: DapTextContext): string {
+  const { result, cwd } = context;
+  const { snapshot } = result;
+  switch (snapshot.state) {
+    case "idle":
+      return "idle (no Debug Session)";
+    case "launching":
+    case "running":
+      return runningHeadline(snapshot.state, context);
+    case "stopped": {
+      const frame = result.stop?.topFrame;
+      const location =
+        frame === undefined
+          ? ""
+          : ` at ${frameLocation(frame, cwd)} in ${oneLine(frame.name)} (frame ${frame.id})`;
+      const thread = snapshot.threadId === undefined ? "" : ` · thread ${snapshot.threadId}`;
+      return `stopped (${oneLine(snapshot.stopReason)})${location}${thread}`;
+    }
+    case "terminated":
+      return terminatedHeadline(snapshot);
+  }
+}
+
+/** The most undebugged child sessions shown in text; `structuredContent` lists them all. */
+const MAX_REJECTED_CHILD_SESSION_LINES = 5;
+
+/** One line per child session HL DAP could not debug, so the model learns its breakpoints will not bind. */
+function rejectedChildSessionLines({ result }: DapTextContext): readonly string[] {
+  const rejected = result.rejectedChildSessions ?? [];
+  const lines = rejected
+    .slice(0, MAX_REJECTED_CHILD_SESSION_LINES)
+    .map((child) => `Warning: ${oneLine(child.message)}`);
+  if (rejected.length > MAX_REJECTED_CHILD_SESSION_LINES) {
+    lines.push(
+      `Warning: ${rejected.length - MAX_REJECTED_CHILD_SESSION_LINES} more child sessions not debugged`,
+    );
+  }
+  if (rejected.length > 0) {
+    lines.push("To debug that code, launch it directly as the program.");
+  }
+  return lines;
+}
+
+/** Lifecycle summary shared by every operation that reports where the Debug Session stands. */
+const stateLines: DapTextFormatter = (context) => {
+  const { stop } = context.result;
+  const lines = [stateHeadline(context)];
+  if (stop?.childSession !== undefined) lines.push(`child session: ${oneLine(stop.childSession)}`);
+  if (stop?.description !== undefined) lines.push(`description: ${oneLine(stop.description)}`);
+  if (stop?.hitBreakpointIds !== undefined && stop.hitBreakpointIds.length > 0) {
+    lines.push(`hit breakpoint ids: ${stop.hitBreakpointIds.join(", ")}`);
+  }
+  lines.push(...rejectedChildSessionLines(context));
+  return lines;
+};
+
+function desiredBreakpointLines(
+  files: readonly DapDesiredBreakpointFile[],
+  cwd: string,
+): readonly string[] {
+  const rows = files.flatMap((file) =>
+    file.breakpoints.map((breakpoint) => {
+      const condition = breakpoint.condition === undefined ? "" : ` if ${breakpoint.condition}`;
+      return oneLine(
+        `  ${workspaceRelativeDapPath(cwd, file.filePath)}:${breakpoint.line}${condition}`,
+      );
+    }),
+  );
+  return rows.length === 0 ? ["Desired Breakpoints: none"] : ["Desired Breakpoints:", ...rows];
+}
+
+const setBreakpointsLines: DapTextFormatter = ({ result, cwd }) => {
+  const rows = result.breakpoints;
+  const lines: string[] = [];
+  if (rows === undefined) {
+    lines.push("Saved; breakpoints apply to the next launch (no active Debug Session).");
+  } else {
+    const verified = rows.filter((breakpoint) => breakpoint.verified).length;
+    lines.push(`Breakpoints: ${verified} of ${rows.length} verified`);
+    for (const breakpoint of rows) {
+      const id = breakpoint.id === undefined ? "" : ` (id ${breakpoint.id})`;
+      const message = breakpoint.message === undefined ? "" : `: ${oneLine(breakpoint.message)}`;
+      const status = breakpoint.verified ? "verified" : "not verified";
+      lines.push(`  line ${breakpoint.line ?? "?"}${id} ${status}${message}`);
+    }
+  }
+  return [...lines, ...desiredBreakpointLines(result.desiredBreakpoints, cwd)];
+};
+
+/**
+ * Desired Breakpoints show in `hl_dap_set_breakpoints` (which changes them), `hl_dap_launch`, and
+ * `hl_dap_status`. An empty list adds no line to a state report.
+ */
+const stateWithDesiredBreakpointsLines: DapTextFormatter = (context) => [
+  ...stateLines(context),
+  ...(context.result.desiredBreakpoints.some((file) => file.breakpoints.length > 0)
+    ? desiredBreakpointLines(context.result.desiredBreakpoints, context.cwd)
+    : []),
+];
+
+/**
+ * The adapter marks the frame as noise: a `subtle` frame, a `label` separator such as an async
+ * boundary, or a frame in a source it deemphasizes because the user did not write it.
+ */
+function isHintedFrame(frame: DebugProtocol.StackFrame): boolean {
+  return (
+    frame.presentationHint === "subtle" ||
+    frame.presentationHint === "label" ||
+    frame.source?.presentationHint === "deemphasize"
+  );
+}
+
+/** `ids 34–46` for consecutive ascending ids, otherwise every id in order. */
+function frameIdList(frames: readonly DebugProtocol.StackFrame[]): string {
+  const ids = frames.map((frame) => frame.id);
+  const [first = 0] = ids;
+  return ids.every((id, index) => id === first + index)
+    ? `ids ${first}\u2013${ids.at(-1)}`
+    : `ids ${ids.join(", ")}`;
+}
+
+/** Consecutive frames grouped by whether the adapter hinted them. */
+function hintRuns(frames: readonly DebugProtocol.StackFrame[]) {
+  const runs: { hinted: boolean; frames: DebugProtocol.StackFrame[] }[] = [];
+  for (const frame of frames) {
+    const hinted = isHintedFrame(frame);
+    const last = runs.at(-1);
+    if (last?.hinted === hinted) last.frames.push(frame);
+    else runs.push({ hinted, frames: [frame] });
+  }
+  return runs;
+}
+
+/**
+ * One line per Stack Frame, except that each run of two or more hinted frames becomes one line
+ * giving their count and ids, which `hl_dap_variables` and `hl_dap_evaluate` still accept. A lone hinted
+ * frame stays verbatim: collapsing it would save no line. `structuredContent` lists every frame.
+ */
+const stackLines: DapTextFormatter = ({ result, cwd }) => {
+  const frames = result.stackFrames ?? [];
+  const total = result.totalFrames ?? frames.length;
+  const count = total > frames.length ? `${frames.length} of ${total}` : `${frames.length}`;
+  return [
+    `Stack: ${count} frame${total === 1 ? "" : "s"}`,
+    ...hintRuns(frames).flatMap((run) =>
+      run.hinted && run.frames.length >= 2
+        ? [`  \u2026 ${run.frames.length} deemphasized frames (${frameIdList(run.frames)})`]
+        : run.frames.map(
+            (frame) =>
+              `  frame ${frame.id}: ${oneLine(frame.name)} at ${frameLocation(frame, cwd)}`,
+          ),
+    ),
+  ];
+};
+
+function variableLine(variable: DebugProtocol.Variable, indent: string): string {
+  const type = variable.type === undefined ? "" : `: ${oneLine(variable.type)}`;
+  const children =
+    variable.variablesReference > 0 ? ` [variables_reference ${variable.variablesReference}]` : "";
+  return `${indent}${oneLine(variable.name)}${type} = ${oneLine(variable.value)}${children}`;
+}
+
+function scopeLines({ scope, variables }: DapVariableGroup): readonly string[] {
+  const header = `Scope ${oneLine(scope.name)} [variables_reference ${scope.variablesReference}]`;
+  if (variables === undefined) {
+    return [`${header} (expensive, not expanded; pass its variables_reference to expand)`];
+  }
+  const count = `${variables.length} variable${variables.length === 1 ? "" : "s"}`;
+  return [`${header}: ${count}`, ...variables.map((variable) => variableLine(variable, "  "))];
+}
+
+const variablesLines: DapTextFormatter = ({ result }) => {
+  if (result.variableGroups !== undefined)
+    return result.variableGroups.length ? result.variableGroups.flatMap(scopeLines) : ["Scopes: 0"];
+  const variables = result.variables ?? [];
+  return [
+    `Variables: ${variables.length}`,
+    ...variables.map((variable) => variableLine(variable, "  ")),
+  ];
+};
+
+const evaluateLines: DapTextFormatter = ({ result }) => {
+  const evaluation = result.evaluation;
+  if (evaluation === undefined) return [];
+  const type = evaluation.type === undefined ? "" : ` (${oneLine(evaluation.type)})`;
+  const children =
+    evaluation.variablesReference > 0
+      ? ` [variables_reference ${evaluation.variablesReference}]`
+      : "";
+  return [`${oneLine(evaluation.result)}${type}${children}`];
+};
+
+const DAP_TEXT_FORMATTERS = {
+  launch: stateWithDesiredBreakpointsLines,
+  set_breakpoints: setBreakpointsLines,
+  continue: stateLines,
+  next: stateLines,
+  step_in: stateLines,
+  step_out: stateLines,
+  pause: stateLines,
+  stack: stackLines,
+  variables: variablesLines,
+  evaluate: evaluateLines,
+  status: stateWithDesiredBreakpointsLines,
+  stop: stateLines,
+} satisfies Record<DapOperation, DapTextFormatter>;
+
+/**
+ * Model-visible text of one successful operation: warnings, a compact operation summary, then any
+ * drained Debuggee output under its own heading. The full data stays in `structuredContent`.
+ */
+export function formatResult(input: DapToolTextInput): string {
+  const { operation, result, cwd, executionWaitEnd, warnings } = input;
+  const lines = [
+    ...warnings.map((warning) => `Warning: ${oneLine(warning)}`),
+    ...DAP_TEXT_FORMATTERS[operation]({
+      operation,
+      result,
+      cwd,
+      executionWaitEnd,
+    }),
+  ];
+  const summary = lines.join("\n");
+  if (result.output.length === 0) return summary;
+  const discardNotice =
+    result.discardedOutputBytes === 0
+      ? ""
+      : ` (${result.discardedOutputBytes} older bytes discarded)`;
+  return `${summary}\n\nDebuggee output${discardNotice}:\n${result.output}`;
+}
+
+/** Model-visible part of a result: whole lines within Pi's limits, never empty for non-empty text. */
+export interface DapVisibleText {
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
+/** Pi's text limits, or the part of them a caller leaves for one piece of text. */
+export interface DapVisibleTextLimits {
+  readonly maxBytes: number;
+  readonly maxLines: number;
+}
+
+/**
+ * Cut `text` at line boundaries to Pi's 2,000-line/50-KB limit. Pi's `truncateHead` returns nothing
+ * when the first line alone is over the byte limit; then that line is cut mid-line instead, so the
+ * reader still sees the start of the result.
+ */
+export function visibleText(
+  text: string,
+  limits: DapVisibleTextLimits = {
+    maxBytes: DEFAULT_MAX_BYTES,
+    maxLines: DEFAULT_MAX_LINES,
+  },
+): DapVisibleText {
+  const head = truncateHead(text, limits);
+  if (!head.truncated) return { text, truncated: false };
+  if (head.content.length > 0) return { text: head.content, truncated: true };
+  const firstLine = text.split("\n", 1)[0] ?? "";
+  const bytes = Buffer.from(firstLine, "utf8").subarray(0, limits.maxBytes);
+  // A cut inside a multi-byte character decodes to a trailing U+FFFD; drop it.
+  return {
+    text: bytes.toString("utf8").replace(/\uFFFD$/u, ""),
+    truncated: true,
+  };
+}
+
+/** Render an absolute workspace path as relative while retaining paths outside the workspace. */
+export function workspaceRelativeDapPath(cwd: string, filePath: string): string {
+  if (!isAbsolute(filePath)) return filePath;
+  const relativePath = relative(cwd, filePath);
+  return relativePath !== "" && !relativePath.startsWith("..") ? relativePath : filePath;
+}

@@ -53,7 +53,7 @@ class ExpandOnClick implements Component {
   }
 
   render(width: number): string[] {
-    return this.region.render(width);
+    return [...this.region.render(width)];
   }
 
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {

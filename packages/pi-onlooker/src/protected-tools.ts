@@ -59,23 +59,25 @@ async function grepSourceLines(
   const last = Math.max(...positions);
   let number = 1;
   let prefix = "";
+  function consumeChunk(text: string): boolean {
+    let start = 0;
+    while (start < text.length) {
+      const end = text.indexOf("\n", start);
+      if (positions.has(number))
+        prefix = (prefix + text.slice(start, end < 0 ? undefined : end)).slice(0, previewSize);
+      if (end < 0) break;
+      if (positions.has(number)) result.set(number, truncateLine(prefix.replace(/\r$/u, "")).text);
+      prefix = "";
+      start = end + 1;
+      if (++number > last) break;
+    }
+    return number > last;
+  }
   try {
     for await (const chunk of chunks) {
       signal?.throwIfAborted();
       const text = decoder.write(chunk);
-      let start = 0;
-      while (start < text.length) {
-        const end = text.indexOf("\n", start);
-        if (positions.has(number))
-          prefix = (prefix + text.slice(start, end < 0 ? undefined : end)).slice(0, previewSize);
-        if (end < 0) break;
-        if (positions.has(number))
-          result.set(number, truncateLine(prefix.replace(/\r$/u, "")).text);
-        prefix = "";
-        start = end + 1;
-        if (++number > last) break;
-      }
-      if (number > last) break;
+      if (consumeChunk(text)) break;
     }
     if (number <= last && positions.has(number))
       result.set(number, truncateLine((prefix + decoder.end()).replace(/\r$/u, "")).text);

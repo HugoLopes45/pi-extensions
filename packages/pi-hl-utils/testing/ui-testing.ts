@@ -1,6 +1,25 @@
+import { CustomMessageComponent, type Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, type Component, type TuiMouseEvent } from "@earendil-works/pi-tui";
 
 import type { UiTheme } from "../src/ui.js";
+
+/**
+ * The live Theme instance Pi renders with. Pi exports no Theme value, so a message component hands
+ * its renderer the one it uses. Call `initTheme` first.
+ */
+export function liveTheme(): Theme {
+  let live: Theme | undefined;
+  const probe = new CustomMessageComponent(
+    { role: "custom", customType: "theme-probe", content: "", display: false, timestamp: 0 },
+    (_message, _options, current) => {
+      live = current;
+      return undefined;
+    },
+  );
+  probe.render(40);
+  if (!live) throw new Error("Pi rendered the message without a theme");
+  return live;
+}
 
 /** Pi 1.5's `KeybindingHints`, declared here because Pi 1.0.3 does not export the type. */
 interface KeybindingHints {

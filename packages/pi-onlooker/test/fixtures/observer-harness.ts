@@ -10,6 +10,7 @@ import {
   fauxAssistantMessage,
   type Api,
   type AssistantMessage,
+  type AssistantMessageEventStream,
   type Context,
   type Model,
   type SimpleStreamOptions,
@@ -259,38 +260,49 @@ export function longSessionStream(
       message.stopReason = "toolUse";
     }
   }
+  function answerSummary(
+    context: Context,
+    message: Message,
+    stream: AssistantMessageEventStream,
+    streamOptions?: SimpleStreamOptions,
+  ): boolean {
+    summaryCount++;
+    summaries?.push(structuredClone(context));
+    if (hangSummaries) {
+      streamOptions?.signal?.addEventListener(
+        "abort",
+        () =>
+          stream.push({
+            type: "error",
+            reason: "aborted",
+            error: { ...message, stopReason: "aborted" },
+          }),
+        { once: true },
+      );
+      return true;
+    }
+    if (usage) message.usage = structuredClone(usage);
+    message.content = [{ type: "text", text: "Summary: the user asked to refactor the parser." }];
+    return false;
+  }
   return {
     stream(model: Model<Api>, context: Context, streamOptions?: SimpleStreamOptions) {
       const privateRole = context.tools?.some((tool) => tool.name === "onlooker_report");
       const stream = createAssistantMessageEventStream();
       let held: Promise<void> | undefined;
+      let delay: number | undefined;
       const message = {
         ...fauxAssistantMessage("Done"),
         model: model.id,
         provider: model.provider,
         api: model.api,
       };
-      if (privateRole) held = answerReview(context, message);
-      else if (!context.tools?.length) {
-        summaryCount++;
-        summaries?.push(structuredClone(context));
-        if (hangSummaries) {
-          streamOptions?.signal?.addEventListener(
-            "abort",
-            () =>
-              stream.push({
-                type: "error",
-                reason: "aborted",
-                error: { ...message, stopReason: "aborted" },
-              }),
-            { once: true },
-          );
-          return stream;
-        }
-        if (usage) message.usage = structuredClone(usage);
-        message.content = [
-          { type: "text", text: "Summary: the user asked to refactor the parser." },
-        ];
+      if (privateRole) {
+        held = answerReview(context, message);
+        delay = reviewDelayMs;
+      } else if (!context.tools?.length) {
+        delay = summaryDelayMs;
+        if (answerSummary(context, message, stream, streamOptions)) return stream;
       } else if (firstError) {
         const errorMessage = firstError;
         firstError = undefined;
@@ -312,10 +324,15 @@ export function longSessionStream(
           reason: message.stopReason === "toolUse" ? "toolUse" : "stop",
           message,
         });
-      const delay = privateRole ? reviewDelayMs : context.tools?.length ? 0 : summaryDelayMs;
-      if (held) void held.then(done);
-      else if (delay) setTimeout(done, delay);
-      else queueMicrotask(done);
+      if (held) {
+        void held.then(done);
+        return stream;
+      }
+      if (delay) {
+        setTimeout(done, delay);
+        return stream;
+      }
+      queueMicrotask(done);
       return stream;
     },
     toolResult: (event: ToolResultEvent): ToolResultEventResult => {
@@ -377,6 +394,15 @@ function isBlocks(value: unknown): value is EvidenceBlock[] {
 
 const stopReasons = new Set<unknown>([undefined, "error", "aborted", "length"]);
 
+function isToolResultEvidence(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.ref === "string" &&
+    typeof value.toolName === "string" &&
+    typeof value.isError === "boolean" &&
+    isBlocks(value.content)
+  );
+}
+
 function isEvidenceMessage(value: unknown): value is EvidenceMessage {
   if (!isRecord(value)) return false;
   switch (value.role) {
@@ -389,12 +415,7 @@ function isEvidenceMessage(value: unknown): value is EvidenceMessage {
         (value.errorMessage === undefined || typeof value.errorMessage === "string")
       );
     case "toolResult":
-      return (
-        typeof value.ref === "string" &&
-        typeof value.toolName === "string" &&
-        typeof value.isError === "boolean" &&
-        isBlocks(value.content)
-      );
+      return isToolResultEvidence(value);
     default:
       return false;
   }

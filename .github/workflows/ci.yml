@@ -45,6 +45,8 @@ jobs:
       # Corepack installs the pnpm version pinned in packageManager and verifies its signature.
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Prepare pinned DAP integration fixture
+        run: node packages/pi-hl-dap/scripts/fetch-vscode-js-debug.mjs
       - run: pnpm run verify
 
   # Each package declares its oldest supported Pi in engines.pi. It is checked on that version and on the latest.
@@ -90,6 +92,8 @@ jobs:
           pnpm install --no-frozen-lockfile --ignore-scripts
         env:
           PI_VERSION: ${{ matrix.pi }}
+      - name: Prepare pinned DAP integration fixture
+        run: node packages/pi-hl-dap/scripts/fetch-vscode-js-debug.mjs
       - if: matrix.pi != 'latest'
         name: Check the packages whose oldest supported Pi is ${{ matrix.pi }}
         run: |

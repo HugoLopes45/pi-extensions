@@ -10,7 +10,7 @@ import {
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { expandMessageOnClick } from "../src/expand-on-click.js";
-import { expectClickToggles, keybindingHints } from "../testing/ui-testing.js";
+import { expectClickToggles, keybindingHints, liveTheme } from "../testing/ui-testing.js";
 
 beforeAll(() => initTheme("dark"));
 
@@ -21,17 +21,6 @@ beforeAll(() => {
   theme = liveTheme();
 });
 
-/** Pi exports no Theme instance; its message component hands its renderer the live one. */
-function liveTheme(): Theme {
-  let live: Theme | undefined;
-  const probe = new CustomMessageComponent(message(), (_message, _options, current) => {
-    live = current;
-    return undefined;
-  });
-  probe.render(40);
-  if (!live) throw new Error("Pi rendered the message without a theme");
-  return live;
-}
 const collapsed = { ...keybindingHints, expanded: false, outputPad: 1 };
 const expandedOptions = { ...keybindingHints, expanded: true, outputPad: 1 };
 

@@ -33,7 +33,7 @@ beforeAll(() => {
  * Render at 40 and 120 columns, proving both fit (Markdown bodies follow Pi's global theme), and
  * return the 120-column lines as readable tags.
  */
-function lines(component: { render(width: number): string[] } | undefined): string[] {
+function lines(component: { render(width: number): readonly string[] } | undefined): string[] {
   if (!component) throw new Error("Expected a component");
   for (const width of [40, 120])
     expectLinesFitWidth(component.render(width), width, { piThemedBody: true });
@@ -79,7 +79,11 @@ describe("Onlooker Interventions", () => {
     const text = plainText(
       lines(
         renderOnlookerIntervention(
-          { severity: "concern", message: "Run tests", name: "Inspector gadget" },
+          {
+            severity: "concern",
+            message: "Run tests",
+            name: "Inspector gadget",
+          },
           collapsed,
           theme,
         ),
@@ -100,7 +104,11 @@ describe("Onlooker Interventions", () => {
     ).toContain("Marcel");
   });
   it("labels each severity with a coloured word, never a glyph", () => {
-    const colors = { nit: "dim", concern: "warning", blocker: "error" } as const;
+    const colors = {
+      nit: "dim",
+      concern: "warning",
+      blocker: "error",
+    } as const;
     for (const severity of ["nit", "concern", "blocker"] as const) {
       const rendered = lines(
         renderOnlookerIntervention({ severity, message: "Run the tests" }, collapsed, theme),
@@ -164,7 +172,13 @@ const snapshot = {
   backlog: 2,
   effectiveModel: "anthropic/claude-sonnet",
   effectiveThinkingLevel: "high",
-  usage: { input: 40_000, output: 1_200, cacheRead: 0, cacheWrite: 0, total: 41_200 },
+  usage: {
+    input: 40_000,
+    output: 1_200,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 41_200,
+  },
   cost: 0.18,
   lastError: null,
   error: null,
@@ -214,15 +228,28 @@ describe("Onlooker status", () => {
       ms: 12_340,
     };
     const idle = { ...work, count: 0 };
-    const evidence = { seeds: 2, omittedMessages: 14, shortenedMessages: 0, cappedResults: 3 };
-    const spend = { reviews: work, consultations: idle, compactions: idle, evidence };
+    const evidence = {
+      seeds: 2,
+      omittedMessages: 14,
+      shortenedMessages: 0,
+      cappedResults: 3,
+    };
+    const spend = {
+      reviews: work,
+      consultations: idle,
+      compactions: idle,
+      evidence,
+    };
     const text = status({ ...snapshot, spend });
     expect(text).toContain(
       "2 Reviews · 3 calls · in 40.0k · cache read 30.0k · cache write 2.0k · out 1.2k · $0.01 · 12.3s",
     );
     expect(text).not.toContain("consultation");
     expect(text).toContain("evidence: 2 Context Seeds · 14 omitted · 3 capped");
-    const unknown = { ...spend, compactions: { ...work, count: 1, cost: null } };
+    const unknown = {
+      ...spend,
+      compactions: { ...work, count: 1, cost: null },
+    };
     expect(status({ ...snapshot, spend: unknown })).toContain("1 compaction · 3 calls");
     expect(status({ ...snapshot, spend: unknown })).toMatch(/1 compaction .*cost unknown/);
   });
@@ -404,6 +431,8 @@ describe("onlooker_ask rendering", () => {
 describe("untrusted text", () => {
   // A title change, a screen clear, a C1 CSI, and a lone bell and escape.
   const hostile = "ok\x1b]0;pwned\x07\x1b[2J\x9b2J\x07\x1b done\r\nnext";
+  const isTerminalControl = (code: number) =>
+    code !== 0x0a && code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f));
   // Style sequences are the renderer's own; anything else reached the text from outside.
   const controls = (rendered: readonly string[]) => {
     const text = rendered.join("\n");
@@ -418,12 +447,11 @@ describe("untrusted text", () => {
         }
       }
       const code = text.charCodeAt(index);
-      if (code !== 0x0a && code !== 0x09 && (code < 0x20 || (code >= 0x7f && code <= 0x9f)))
-        found.push(text.charAt(index));
+      if (isTerminalControl(code)) found.push(text.charAt(index));
     }
     return found;
   };
-  const render = (component: { render(width: number): string[] }) => component.render(120);
+  const render = (component: { render(width: number): readonly string[] }) => component.render(120);
 
   it("keeps terminal controls in model text out of Interventions and onlooker_ask rows", () => {
     const finding = { severity: "concern", message: hostile } as const;
