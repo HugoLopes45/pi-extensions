@@ -260,7 +260,8 @@ function scopeLines({ scope, variables }: DapVariableGroup): readonly string[] {
 }
 
 const variablesLines: DapTextFormatter = ({ result }) => {
-  if (result.variableGroups !== undefined) return result.variableGroups.flatMap(scopeLines);
+  if (result.variableGroups !== undefined)
+    return result.variableGroups.length ? result.variableGroups.flatMap(scopeLines) : ["Scopes: 0"];
   const variables = result.variables ?? [];
   return [
     `Variables: ${variables.length}`,
@@ -301,7 +302,7 @@ const DAP_TEXT_FORMATTERS = {
 export function formatResult(input: DapToolTextInput): string {
   const { operation, result, cwd, executionWaitEnd, warnings } = input;
   const lines = [
-    ...warnings.map((warning) => `Warning: ${warning}`),
+    ...warnings.map((warning) => `Warning: ${oneLine(warning)}`),
     ...DAP_TEXT_FORMATTERS[operation]({
       operation,
       result,

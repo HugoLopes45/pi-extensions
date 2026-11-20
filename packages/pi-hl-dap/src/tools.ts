@@ -23,7 +23,6 @@ import {
   type DapLaunchInput,
   type DapController,
   type DapResult,
-  type DapSnapshot,
   type DapStackInput,
   type DapVariablesInput,
 } from "./controller.js";
@@ -41,7 +40,7 @@ import {
   type DapToolParameters,
   type DapToolRenderDetails,
 } from "./schemas.js";
-import { isDapExecutionWaitOperation, oneLine, type DapExecutionWaitEnd } from "./text.js";
+import { isDapExecutionWaitOperation, oneLine } from "./text.js";
 import { createDapToolOutput, stateFailureResult, type DapToolResult } from "./tool-output.js";
 import { TROUBLESHOOTING_HINT } from "./troubleshooting.js";
 
@@ -190,11 +189,11 @@ function dapArgumentsParser<TParameters extends TSchema>(schema: TParameters) {
 async function sourceFileWarnings(filePath: string): Promise<readonly string[]> {
   try {
     if ((await stat(filePath)).isFile()) return [];
-    return [`not a file: ${filePath}; breakpoints will not bind`];
+    return [`not a local file: ${filePath}`];
   } catch (cause) {
     const code = cause instanceof Error && "code" in cause ? String(cause.code) : "unknown";
     return code === "ENOENT"
-      ? [`file not found: ${filePath}; breakpoints will not bind until it exists`]
+      ? [`file not found locally: ${filePath}`]
       : [`could not check ${filePath}: ${code}`];
   }
 }
@@ -325,19 +324,6 @@ function notifyDapToolObserver(operation: () => void): void {
   }
 }
 
-/** How an execution wait that returned without the Debuggee stopping or exiting was cut short. */
-function executionWaitEnd(
-  waits: boolean,
-  signal: AbortSignal | undefined,
-  steerSignal: AbortSignal | undefined,
-  state: DapSnapshot["state"],
-): DapExecutionWaitEnd | undefined {
-  if (waits && signal?.aborted === true && state === "running") return "cancelled";
-  // A Steer Yield leaves the Debuggee running; a stop or exit that raced it is reported as itself.
-  if (steerSignal?.aborted === true && state === "running") return "steered";
-  return undefined;
-}
-
 function dapOperationFailure(
   cause: unknown,
   error: Error,
@@ -394,7 +380,7 @@ async function executeDapOperation(
       result,
       runtime.artifacts,
       cwd,
-      executionWaitEnd(waits, signal, steerWatch?.signal, result.snapshot.state),
+      result.snapshot.state === "running" ? result.waitEnd : undefined,
       warnings,
     );
     notifyDapToolObserver(() => runtime.observer?.onToolSuccess(parameters, result));

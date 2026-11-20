@@ -399,7 +399,10 @@ describe("DAP tools", () => {
         "status",
         {},
         {
-          snapshot: { ...stoppedSnapshot, stopReason: "step\nDebuggee output:" },
+          snapshot: {
+            ...stoppedSnapshot,
+            stopReason: "step\nDebuggee output:",
+          },
           desiredBreakpoints: [
             {
               filePath: "/w/a\nb.ts",
@@ -426,7 +429,10 @@ describe("DAP tools", () => {
         textOf(
           "continue",
           {},
-          { snapshot: stoppedSnapshot, stop: { description: "hit", hitBreakpointIds: [-3] } },
+          {
+            snapshot: stoppedSnapshot,
+            stop: { description: "hit", hitBreakpointIds: [-3] },
+          },
         ),
       ).resolves.toContain("hit breakpoint ids: -3");
     });
@@ -1013,7 +1019,12 @@ describe("DAP tools", () => {
   test("does not mark a cancelled wait whose Debuggee already exited", async () => {
     const fixture = await createToolFixture();
     fixture.session.result = {
-      snapshot: { state: "terminated", adapterId: "node", profileId: "node", exitCode: 0 },
+      snapshot: {
+        state: "terminated",
+        adapterId: "node",
+        profileId: "node",
+        exitCode: 0,
+      },
       output: "",
       discardedOutputBytes: 0,
       desiredBreakpoints: [],
@@ -1238,7 +1249,7 @@ describe("DAP tools", () => {
         file_path: "src/missing.ts",
         breakpoints: [{ line: 3 }],
       });
-      const warning = `file not found: ${missing}; breakpoints will not bind until it exists`;
+      const warning = `file not found locally: ${missing}`;
       expect(fixture.session.calls).toEqual([
         {
           name: "setBreakpoints",
@@ -1259,7 +1270,7 @@ describe("DAP tools", () => {
         file_path: "src",
         breakpoints: [{ line: 1 }],
       });
-      const warning = `not a file: ${resolve(fixture.cwd, "src")}; breakpoints will not bind`;
+      const warning = `not a local file: ${resolve(fixture.cwd, "src")}`;
       expect(fixture.session.calls).toHaveLength(1);
       expect(result.content[0]).toMatchObject({
         text: stringContaining(warning),
@@ -1452,7 +1463,10 @@ describe("DAP tools", () => {
       { expression: "x", frameId: -7 },
       undefined,
     ]);
-    expect(result.structuredContent).toMatchObject({ thread_id: -1, top_frame: { id: -7 } });
+    expect(result.structuredContent).toMatchObject({
+      thread_id: -1,
+      top_frame: { id: -7 },
+    });
   });
 
   test("points the model at the troubleshooting Skill only for failures it diagnoses", async () => {
@@ -1568,7 +1582,9 @@ describe("DAP tools", () => {
         ),
       });
     vi.spyOn(fixture.session, "launch").mockRejectedValueOnce(
-      new DapError("state", "previous cleanup failed", { cause: cleanupFailure() }),
+      new DapError("state", "previous cleanup failed", {
+        cause: cleanupFailure(),
+      }),
     );
     vi.spyOn(fixture.session, "stop").mockRejectedValueOnce(cleanupFailure());
     const causes = "causes: adapter crashed; kill EPERM; Owned process group remains present";
@@ -1580,7 +1596,9 @@ describe("DAP tools", () => {
       undefined,
       fixture.context,
     );
-    expect(launched.structuredContent).toMatchObject({ error: stringContaining(causes) });
+    expect(launched.structuredContent).toMatchObject({
+      error: stringContaining(causes),
+    });
     await expect(
       dapTool(() => fixture.runtime, "stop").execute(
         "stop",
@@ -1596,7 +1614,9 @@ describe("DAP tools", () => {
     const fixture = await createToolFixture();
     const leaf = new Error("kill EPERM");
     const aggregate = new AggregateError([leaf], "Debug Session failure and cleanup failures");
-    const failure = new DapError("adapter", "Debug Session cleanup failed", { cause: aggregate });
+    const failure = new DapError("adapter", "Debug Session cleanup failed", {
+      cause: aggregate,
+    });
     aggregate.errors.push(aggregate, failure);
     leaf.cause = failure;
     vi.spyOn(fixture.session, "stop").mockRejectedValueOnce(failure);

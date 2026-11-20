@@ -19,6 +19,15 @@ test("retains the newest unread Debuggee output and reports discarded bytes", ()
   expect(output.drain()).toEqual({ discardedBytes: 0, text: "" });
 });
 
+test("discarding half of a UTF-8 character discards the whole character", () => {
+  const output = new DapOutputBuffer();
+  const tail = "a".repeat(DAP_MAX_OUTPUT_BYTES - 1);
+  output.append("é" + tail);
+  const result = output.drain();
+  expect(result.discardedBytes).toBe(2);
+  expect(result.text === tail).toBe(true);
+});
+
 test.each(["persisted", "in-memory"])(
   "writes private Result Spills and adapter stderr paths, then cleans up for %s Pi sessions",
   async (mode) => {

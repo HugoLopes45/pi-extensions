@@ -503,6 +503,40 @@ describe("DapConnection", () => {
     }
   });
 
+  test("rejects an occupied fixed TCP port before connecting", async () => {
+    const owner = createServer((socket) => socket.destroy());
+    owner.listen(0, "127.0.0.1");
+    await once(owner, "listening");
+    try {
+      const address = owner.address();
+      if (!address || typeof address === "string") throw new Error("expected TCP address");
+      await expect(
+        createClient({
+          args: [fixturePath, "--tcp", "$PORT"],
+          transport: tcpTransport(address.port),
+        }),
+      ).rejects.toThrow("allocate a TCP port");
+    } finally {
+      owner.close();
+    }
+  });
+
+  test("requires the spawned process itself to own the connected socket", async () => {
+    // This launcher delegates serving to a subprocess. It does not own the accepted stream.
+    await expect(
+      createClient({
+        args: [
+          "-e",
+          "require('node:child_process').fork(process.argv[1], process.argv.slice(2))",
+          fixturePath,
+          "--tcp",
+          "$PORT",
+        ],
+        transport: tcpTransport(),
+      }),
+    ).rejects.toThrow("TCP peer ownership");
+  });
+
   test("uses a configured fixed TCP port", async () => {
     const port = await unusedTcpPort();
     const client = await createClient({

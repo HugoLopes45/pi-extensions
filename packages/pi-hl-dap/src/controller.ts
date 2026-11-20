@@ -175,6 +175,7 @@ export interface DapStopDetails {
 
 /** Successful Debug Session operation including unread Debuggee output. */
 export interface DapResult {
+  readonly waitEnd?: "steered" | "cancelled";
   readonly snapshot: DapSnapshot;
   readonly stop?: DapStopDetails;
   readonly output: string;
@@ -340,10 +341,14 @@ function resolvedLaunchArguments(
 
 function launchFailure(cause: unknown): DapError {
   if (isProtocolCancellation(cause)) {
-    return new DapError("adapter", "launch was cancelled and cleaned up", { cause });
+    return new DapError("adapter", "launch was cancelled and cleaned up", {
+      cause,
+    });
   }
   if (cause instanceof DapError) return cause;
-  return new DapError("adapter", `launch failed: ${errorText(cause)}`, { cause });
+  return new DapError("adapter", `launch failed: ${errorText(cause)}`, {
+    cause,
+  });
 }
 
 function terminatedSnapshot(terminated: Extract<DapState, { kind: "terminated" }>): DapSnapshot {
@@ -580,6 +585,7 @@ export class DapController {
    * Session or finishes rolling back, so `dispose` outlives both and never waits on a stale one.
    */
   private startup: StartupBarrier | undefined;
+  private rollbackFailure: DapError | undefined;
 
   /** Construct an inert Debug Session controller; launch starts the first Debug Adapter. */
   constructor(private readonly options: DapControllerOptions) {}
@@ -603,6 +609,7 @@ export class DapController {
 
   /** Reject a launch or a startup step that a Debug Session shutdown has made unusable. */
   private requireOpen(): void {
+    if (this.rollbackFailure) throw this.rollbackFailure;
     if (this.closed) throw new DapError("state", CLOSED_SESSION_MESSAGE);
   }
 
@@ -712,12 +719,13 @@ export class DapController {
       if (this.isCurrentActive(active) && active.phase === "launching") {
         this.transitionActiveToRunning(active);
       }
+      let outcome: ExecutionWaitOutcome | undefined;
       if (this.isCurrentActive(active) && active.phase === "running") {
         const wait = this.waitForExecutionTransition(signal, steerSignal);
-        await wait.promise;
+        outcome = await wait.promise;
       }
       await active.cleanupPromise;
-      return await this.launchResult(active);
+      return await this.launchResult(active, outcome);
     } catch (cause) {
       if (active !== undefined) {
         await this.finishActiveSession(active, "launch failed", cause);
@@ -731,9 +739,12 @@ export class DapController {
   }
 
   /** The result of a launch that ended, unless a channel failure ended it before the user saw it. */
-  private async launchResult(active: ActiveDapSession): Promise<DapResult> {
+  private async launchResult(
+    active: ActiveDapSession,
+    outcome: ExecutionWaitOutcome | undefined,
+  ): Promise<DapResult> {
     if (active.failure !== undefined) throw this.startupFailure(active.failure, active);
-    return await this.stoppedResult(active);
+    return await this.stoppedResult(active, outcome);
   }
 
   private async initializeActiveSession(
@@ -763,7 +774,7 @@ export class DapController {
     );
     await awaitInitialized(initialized, launchOutcome);
     active.rootTarget.ready = true;
-    await this.applyDesiredBreakpoints(active, active.primary, signal);
+    await this.applyDesiredBreakpoints(active, active.rootTarget, signal);
     if (capabilities.supportsConfigurationDoneRequest === true) {
       await client.request("configurationDone", {}, dapRequestOptions(signal));
     }
@@ -856,6 +867,7 @@ export class DapController {
   /** Retrieve a page of Stack Frames from the stopped thread. */
   async stack(input: DapStackInput = {}, signal?: AbortSignal): Promise<DapResult> {
     const active = this.requireActivePhase("stopped", "stack");
+    const stopSequence = active.stopSequence;
     const target = active.focus;
     const threadId =
       input.threadId === undefined
@@ -870,7 +882,7 @@ export class DapController {
       ),
       "stackTrace",
     );
-    this.requireTarget(active, target, "stack");
+    this.requireTarget(active, target, stopSequence, "stack");
     return this.result({
       stackFrames: body.stackFrames,
       totalFrames: body.totalFrames ?? body.stackFrames.length,
@@ -883,6 +895,7 @@ export class DapController {
     const start = input.start ?? 0;
     const count = input.count ?? 100;
     const target = active.focus;
+    const stopSequence = active.stopSequence;
     if (input.variablesReference !== undefined) {
       const body = await this.requestVariables(
         target,
@@ -891,7 +904,7 @@ export class DapController {
         count,
         signal,
       );
-      this.requireTarget(active, target, "variables");
+      this.requireTarget(active, target, stopSequence, "variables");
       return this.result({ variables: body.variables });
     }
     const scopes = parseDapBody(
@@ -899,7 +912,7 @@ export class DapController {
       await target.client.request("scopes", { frameId: input.frameId }, dapRequestOptions(signal)),
       "scopes",
     ).scopes;
-    this.requireTarget(active, target, "variables");
+    this.requireTarget(active, target, stopSequence, "variables");
     // An expensive scope can hold thousands of rows; list it, don't expand it.
     const variableGroups = await Promise.all(
       scopes.map(async (scope): Promise<DapVariableGroup> => {
@@ -914,7 +927,7 @@ export class DapController {
         return { scope, variables };
       }),
     );
-    this.requireTarget(active, target, "variables");
+    this.requireTarget(active, target, stopSequence, "variables");
     return this.result({ variableGroups });
   }
 
@@ -922,6 +935,7 @@ export class DapController {
   async evaluate(input: DapEvaluateInput, signal?: AbortSignal): Promise<DapResult> {
     const active = this.requireActivePhase("stopped", "evaluate");
     const target = active.focus;
+    const stopSequence = active.stopSequence;
     let frameId = input.frameId;
     if (frameId === undefined) {
       const stackResult = parseDapBody(
@@ -937,7 +951,7 @@ export class DapController {
         ),
         "stackTrace",
       );
-      this.requireTarget(active, target, "evaluate");
+      this.requireTarget(active, target, stopSequence, "evaluate");
       frameId = stackResult.stackFrames.at(0)?.id;
       if (frameId === undefined) {
         throw new DapError("state", "evaluate requires a top Stack Frame");
@@ -952,7 +966,7 @@ export class DapController {
       ),
       "evaluate",
     );
-    this.requireTarget(active, target, "evaluate");
+    this.requireTarget(active, target, stopSequence, "evaluate");
     return this.result({ evaluation });
   }
 
@@ -1001,6 +1015,7 @@ export class DapController {
     this.disposePromise = (async () => {
       // Outlive a startup this shutdown aborted, so no adapter or Debuggee escapes the cleanup.
       await this.startup?.settled;
+      if (this.rollbackFailure) throw this.rollbackFailure;
       const active = this.currentActive();
       if (active !== undefined) {
         await this.finishOperation(active, "Pi session shutdown");
@@ -1154,10 +1169,11 @@ export class DapController {
     };
     const children = [...active.children].filter((child) => child.ready);
     return this.waitAfter(active, signal, undefined, async () => {
-      await Promise.all([
+      const results = await Promise.allSettled([
         pause(active.primary),
         ...children.map((child) => this.unlessChildEnded(active, child, pause(child))),
       ]);
+      for (const result of results) if (result.status === "rejected") throw result.reason;
     });
   }
 
@@ -1178,18 +1194,21 @@ export class DapController {
       wait.cancel();
       // A target that stopped meanwhile stays reportable even though this request failed.
       this.focusQueuedStop(active);
-      if (isProtocolCancellation(cause)) return this.result();
+      if (isProtocolCancellation(cause)) return this.stoppedResult(active, await wait.promise);
       throw cause;
     }
     // Another target stopped while this one was stopped: its stop is reported next, right away.
     this.focusQueuedStop(active);
-    await wait.promise;
+    const outcome = await wait.promise;
     await active.cleanupPromise;
-    return this.stoppedResult(active);
+    return this.stoppedResult(active, outcome);
   }
 
   /** Result that, when the Debuggee is stopped, says where and why without a separate stack call. */
-  private async stoppedResult(active: ActiveDapSession): Promise<DapResult> {
+  private async stoppedResult(
+    active: ActiveDapSession,
+    outcome?: ExecutionWaitOutcome,
+  ): Promise<DapResult> {
     if (this.isCurrentActive(active) && active.phase === "stopped") {
       const stopSequence = active.stopSequence;
       const topFrame = await this.readTopFrame(active);
@@ -1203,6 +1222,7 @@ export class DapController {
       }
     }
     return this.result({
+      ...(outcome === "steered" || outcome === "cancelled" ? { waitEnd: outcome } : {}),
       ...this.stopPayload(),
       ...this.drainRejectedChildSessions(),
     });
@@ -1309,8 +1329,18 @@ export class DapController {
   }
 
   /** Frame and variable ids are target-local, so an answer is void once another stop has the focus. */
-  private requireTarget(active: ActiveDapSession, target: DapTarget, operation: string): void {
-    if (active.phase !== "stopped" || active.focus !== target) {
+  private requireTarget(
+    active: ActiveDapSession,
+    target: DapTarget,
+    sequence: number,
+    operation: string,
+  ): void {
+    if (
+      !this.isCurrentActive(active) ||
+      active.phase !== "stopped" ||
+      active.focus !== target ||
+      active.stopSequence !== sequence
+    ) {
       throw new DapError("state", `${operation} requires the stopped target it started on`);
     }
   }
@@ -1549,7 +1579,9 @@ export class DapController {
           firstFailure ??
             (cause instanceof Error
               ? cause
-              : new DapError("adapter", "child channel cleanup failed", { cause })),
+              : new DapError("adapter", "child channel cleanup failed", {
+                  cause,
+                })),
         ),
     );
     if (active.focus !== target) return;
@@ -1660,7 +1692,10 @@ export class DapController {
     const active = getActive();
     const child = childSessionRequest(request, active?.adapter.channels?.targetIdKey);
     if (child === undefined) {
-      return { success: false, message: "HL DAP: startDebugging arguments are invalid" };
+      return {
+        success: false,
+        message: "HL DAP: startDebugging arguments are invalid",
+      };
     }
     if (active === undefined) {
       return {
@@ -1937,7 +1972,9 @@ export class DapController {
             activeAtSpawn,
             cause instanceof Error
               ? cause
-              : new DapError("adapter", "owned Debuggee group probe failed", { cause }),
+              : new DapError("adapter", "owned Debuggee group probe failed", {
+                  cause,
+                }),
           );
         }
       });
@@ -2074,10 +2111,11 @@ export class DapController {
     const errors: unknown[] = results.flatMap((result): unknown[] =>
       result.status === "rejected" ? [result.reason] : [],
     );
-    if (errors.length === 0) return;
+    if (!errors.length && !(cause instanceof DapConnectionError && cause.rollbackFailed)) return;
     const error = new DapError("adapter", "launch and Debuggee cleanup failed", {
       cause: new AggregateError([cause, ...errors], "Launch failure and cleanup failures"),
     });
+    this.rollbackFailure = error;
     this.publishUnexpectedFailure(error);
     throw error;
   }

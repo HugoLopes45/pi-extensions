@@ -69,7 +69,7 @@ export function dapObserverLine(text: string): string {
 }
 
 function boundedDapPreview(text: string, width = 160): string {
-  const singleLine = dapObserverLine(text);
+  const singleLine = sanitizeDapObserverText(text).replaceAll("\n", "\\n").replaceAll("\t", "\\t");
   if (visibleWidth(singleLine) <= width) return singleLine;
   return `${sliceByColumn(singleLine, 0, width - 3, true).trimEnd()}...`;
 }
@@ -127,7 +127,7 @@ function dapCallHeaderParts(parameters: DapToolCallArguments, cwd: string): DapC
       break;
     case "evaluate":
       if (parameters.expression !== undefined) {
-        parts.target = boundedDapPreview(parameters.expression, 72);
+        parts.target = boundedDapPreview(dapObserverLine(parameters.expression), 72);
       }
       break;
     default:
@@ -147,10 +147,7 @@ function dapCallArgumentRows(parameters: DapToolCallArguments, cwd: string): str
   add("program", mapDefined(parameters.program, path));
   add(
     "args",
-    mapDefined(
-      parameters.args,
-      (args) => args.map((argument) => boundedDapPreview(argument)).join(" ") || "(none)",
-    ),
+    mapDefined(parameters.args, (args) => boundedDapPreview(JSON.stringify(args))),
   );
   add("cwd", mapDefined(parameters.cwd, path));
   add(
@@ -206,7 +203,9 @@ export function renderCall(
   );
   container.addChild(new Text(header, 0, 0));
   if (context.expanded) {
-    const rows = dapCallArgumentRows(parameters, context.cwd).map(dapObserverLine);
+    const rows = dapCallArgumentRows(parameters, context.cwd).map((row) =>
+      sanitizeDapObserverText(row).replaceAll("\n", "\\n").replaceAll("\t", "\\t"),
+    );
     if (rows.length > 0) {
       container.addChild(new Text(rows.map((row) => theme.fg("muted", row)).join("\n"), 0, 0));
     }

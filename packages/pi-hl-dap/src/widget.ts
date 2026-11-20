@@ -203,11 +203,11 @@ export class DapWidget implements DapToolObserver {
   }
 
   /** Learn source location only from a successful result already returned by the tool. */
-  onToolSuccess(_parameters: DapToolParameters, result: DapResult): void {
+  onToolSuccess(parameters: DapToolParameters, result: DapResult): void {
     if (this.disposed) return;
     this.activeToolCalls = Math.max(0, this.activeToolCalls - 1);
     if (this.snapshot.state === "stopped") {
-      this.updateSourceLocation(result);
+      this.updateSourceLocation(parameters, result);
     }
     this.refreshWidget();
     this.flushHeldFailures();
@@ -229,9 +229,7 @@ export class DapWidget implements DapToolObserver {
   /** Project one actual Debug Session lifecycle transition into the Observer snapshot. */
   onSessionSnapshot(snapshot: DapSnapshot): void {
     if (this.disposed) return;
-    if (snapshot.state !== "stopped" || this.snapshot.state !== "stopped") {
-      this.sourceLocation = undefined;
-    }
+    this.sourceLocation = undefined;
     this.snapshot = snapshot;
     if (snapshot.state === "idle") {
       this.clearRefreshInterval();
@@ -280,8 +278,19 @@ export class DapWidget implements DapToolObserver {
     this.hideWidget();
   }
 
-  private updateSourceLocation(result: DapResult): void {
-    const frame = result.stop?.topFrame ?? result.stackFrames?.[0];
+  private showsStoppedFrame(parameters: DapToolParameters): boolean {
+    return (
+      parameters.operation === "stack" &&
+      !parameters.start &&
+      (parameters.thread_id === undefined ||
+        (this.snapshot.state === "stopped" && parameters.thread_id === this.snapshot.threadId))
+    );
+  }
+
+  private updateSourceLocation(parameters: DapToolParameters, result: DapResult): void {
+    const frame =
+      result.stop?.topFrame ??
+      (this.showsStoppedFrame(parameters) ? result.stackFrames?.[0] : undefined);
     if (frame === undefined) return;
     const source = frame.source?.path ?? frame.source?.name;
     if (source !== undefined) {
@@ -314,7 +323,10 @@ export class DapWidget implements DapToolObserver {
 
   private refreshWidget(): void {
     if (this.context.mode !== "tui") return;
-    const view = this.observerWidgetView();
+    const view =
+      this.snapshot.state === "terminated" && this.terminalHidden
+        ? undefined
+        : this.observerWidgetView();
     this.currentView = view;
     if (view === undefined) {
       this.hideWidget();
@@ -354,11 +366,15 @@ export class DapWidget implements DapToolObserver {
     this.refreshInterval = undefined;
   }
 
+  private terminalHidden = false;
+
   private ensureCooldown(): void {
+    this.terminalHidden = false;
     if (this.context.mode !== "tui") return;
     this.clearCooldown();
     this.cooldownTimeout = setTimeout(() => {
       this.cooldownTimeout = undefined;
+      this.terminalHidden = true;
       this.hideWidget();
     }, DAP_OBSERVER_TERMINAL_COOLDOWN_MS);
     this.cooldownTimeout.unref?.();

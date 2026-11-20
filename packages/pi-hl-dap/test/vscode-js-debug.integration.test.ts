@@ -266,6 +266,7 @@ test("debugs TypeScript through the Supported vscode-js-debug adapter and cleans
     artifacts: files,
     onSnapshotChange: (snapshot) => observerSnapshots.push(snapshot),
   });
+  openSessions.push(session);
   await session.setBreakpoints({
     filePath: programPath,
     breakpoints: [{ line: 3 }],

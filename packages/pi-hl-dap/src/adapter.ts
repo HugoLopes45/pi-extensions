@@ -1,9 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, createConnection, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 
 import type { DebugProtocol } from "@vscode/debugprotocol";
 import { type Static, Type } from "typebox";
@@ -171,6 +172,7 @@ export interface DapConnectionErrorOptions extends ErrorOptions {
 
 /** Classified Debug Adapter process, transport, protocol, timeout, and cancellation failure. */
 export class DapConnectionError extends Error {
+  rollbackFailed = false;
   /** Construct a searchable DAP client failure that names its stderr capture unless told it is empty. */
   constructor(
     readonly kind:
@@ -286,7 +288,7 @@ function isDapStartupCancelled(options: DapConnectionOptions): boolean {
   return options.startupSignal?.aborted ?? false;
 }
 
-async function allocateTcpPort(host: string): Promise<number> {
+async function allocateTcpPort(host: string, requestedPort: number): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
@@ -299,7 +301,7 @@ async function allocateTcpPort(host: string): Promise<number> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen({ host, port: 0 });
+    server.listen({ host, port: requestedPort });
   });
   const address = server.address();
   if (
@@ -377,10 +379,65 @@ function waitForChildSpawn(
   });
 }
 
+function endpoint(address: string | undefined, port: number | undefined): string {
+  if (address === undefined || port === undefined)
+    throw new Error("TCP connection has no endpoint");
+  return address.includes(":") ? `[${address}]:${port}` : `${address}:${port}`;
+}
+
+// Match the server end of this established stream, not a listening port that can change owners.
+async function verifyPeer(
+  socket: Socket,
+  child: ChildProcessWithoutNullStreams,
+  options: DapConnectionOptions,
+  deadline: number,
+): Promise<Socket> {
+  const onError = () => socket.destroy();
+  socket.once("error", onError);
+  try {
+    const pid = child.pid;
+    if (pid === undefined) throw new Error("Debug Adapter has no PID");
+    const name =
+      "n" +
+      endpoint(socket.remoteAddress, socket.remotePort) +
+      "->" +
+      endpoint(socket.localAddress, socket.localPort);
+    const { stdout } = await promisify(execFile)(
+      process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof",
+      ["-nP", "-a", "-p", String(pid), "-iTCP", "-sTCP:ESTABLISHED", "-Fpn"],
+      {
+        timeout: Math.max(1, deadline - Date.now()),
+        signal: options.startupSignal,
+      },
+    );
+    const fields = stdout.split("\n");
+    if (
+      !fields.includes("p" + String(pid)) ||
+      !fields.includes(name) ||
+      socket.destroyed ||
+      child.exitCode !== null ||
+      child.signalCode !== null
+    )
+      throw new Error("Connected socket is not owned by the Debug Adapter");
+    return socket;
+  } catch (cause) {
+    socket.destroy();
+    throw new DapConnectionError(
+      isDapStartupCancelled(options) ? "cancelled" : "transport",
+      options.adapterId,
+      options.stderrPath,
+      "Cannot verify TCP peer ownership for the spawned Debug Adapter",
+      { cause },
+    );
+  } finally {
+    socket.off("error", onError);
+  }
+}
+
 async function connectTcpWithRetry(
   host: string,
   port: number,
-  child: ChildProcessWithoutNullStreams | undefined,
+  child: ChildProcessWithoutNullStreams,
   options: DapConnectionOptions,
 ): Promise<Socket> {
   const deadline = Date.now() + options.timeouts.startupMs;
@@ -394,7 +451,7 @@ async function connectTcpWithRetry(
         "Debug Adapter startup was cancelled",
       );
     }
-    if (child !== undefined && (child.exitCode !== null || child.signalCode !== null)) {
+    if (child.exitCode !== null || child.signalCode !== null) {
       throw new DapConnectionError(
         "exit",
         options.adapterId,
@@ -403,7 +460,7 @@ async function connectTcpWithRetry(
       );
     }
     try {
-      return await new Promise<Socket>((resolve, reject) => {
+      const connected = await new Promise<Socket>((resolve, reject) => {
         const socket = createConnection({ host, port });
         // A dropped SYN neither connects nor errors before the OS timeout.
         const timer = setTimeout(
@@ -444,8 +501,9 @@ async function connectTcpWithRetry(
         });
         if (isDapStartupCancelled(options)) onAbort();
       });
+      return await verifyPeer(connected, child, options, deadline);
     } catch (cause) {
-      if (cause instanceof DapConnectionError && cause.kind === "cancelled") throw cause;
+      if (cause instanceof DapConnectionError) throw cause;
       lastCause = cause;
       const remaining = deadline - Date.now();
       if (remaining > 0) await delay(Math.min(TCP_RETRY_DELAY_MS, remaining));
@@ -587,10 +645,7 @@ async function prepareAdapterTransport(options: DapConnectionOptions) {
     }
   } else {
     try {
-      selectedPort =
-        options.transport.port === 0
-          ? await allocateTcpPort(options.transport.host)
-          : options.transport.port;
+      selectedPort = await allocateTcpPort(options.transport.host, options.transport.port);
     } catch (cause) {
       throw new DapConnectionError(
         "transport",
@@ -791,6 +846,7 @@ export class DapConnection {
         Date.now() + options.timeouts.shutdownMs,
       );
       if (cleanupErrors.length === 0) throw startupError;
+      startupError.rollbackFailed = true;
       startupError.cause = new AggregateError(
         startupError.cause === undefined ? cleanupErrors : [startupError.cause, ...cleanupErrors],
         "Debug Adapter startup failure and cleanup failures",
@@ -816,7 +872,11 @@ export class DapConnection {
 
   /** Connect the primary adapter-owned target channel without spawning another process. */
   async connectTargetChannel(overrides: DapTargetChannelOptions = {}): Promise<DapConnection> {
-    if (this.options.transport === "stdio" || this.selectedPort === undefined) {
+    if (
+      this.options.transport === "stdio" ||
+      this.selectedPort === undefined ||
+      this.child === undefined
+    ) {
       throw new DapConnectionError(
         "transport",
         this.adapterId,
@@ -833,7 +893,7 @@ export class DapConnection {
     const socket = await connectTcpWithRetry(
       this.options.transport.host,
       this.selectedPort,
-      undefined,
+      this.child,
       options,
     );
     return new DapConnection(

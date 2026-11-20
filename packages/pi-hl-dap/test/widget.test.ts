@@ -233,6 +233,16 @@ describe("HL DAP Observer UI", () => {
     expect(fixture.component()).toBeDefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(fixture.component()).toBeUndefined();
+    controller.onToolSuccess(
+      { operation: "status" },
+      {
+        snapshot: { state: "terminated", adapterId: "node", profileId: "node" },
+        output: "",
+        discardedOutputBytes: 0,
+        desiredBreakpoints: [],
+      },
+    );
+    expect(fixture.component()).toBeUndefined();
 
     controller.onToolStart({ operation: "launch", program: "app.ts" });
     controller.onSessionSnapshot({
@@ -260,7 +270,12 @@ describe("HL DAP Observer UI", () => {
     expect(fixture.ui.notify).not.toHaveBeenCalled();
     controller.onToolSuccess(
       { operation: "stop" },
-      { snapshot: { state: "idle" }, output: "", discardedOutputBytes: 0, desiredBreakpoints: [] },
+      {
+        snapshot: { state: "idle" },
+        output: "",
+        discardedOutputBytes: 0,
+        desiredBreakpoints: [],
+      },
     );
     expect(fixture.ui.notify).toHaveBeenCalledExactlyOnceWith("DAP: cleanup failed", "error");
     controller.dispose();
@@ -325,7 +340,12 @@ describe("HL DAP Observer UI", () => {
     controller.onToolFailure({ operation: "continue" }, failure);
     controller.onToolSuccess(
       { operation: "status" },
-      { snapshot: { state: "idle" }, output: "", discardedOutputBytes: 0, desiredBreakpoints: [] },
+      {
+        snapshot: { state: "idle" },
+        output: "",
+        discardedOutputBytes: 0,
+        desiredBreakpoints: [],
+      },
     );
     expect(fixture.ui.notify).not.toHaveBeenCalled();
     controller.dispose();
@@ -335,7 +355,11 @@ describe("HL DAP Observer UI", () => {
     const fixture = createContext("tui");
     const controller = new DapWidget(fixture.context);
     controller.onToolStart({ operation: "launch", program: "app.ts" });
-    controller.onSessionSnapshot({ state: "running", adapterId: "node", profileId: "node" });
+    controller.onSessionSnapshot({
+      state: "running",
+      adapterId: "node",
+      profileId: "node",
+    });
     controller.onToolSuccess(
       { operation: "launch" },
       {

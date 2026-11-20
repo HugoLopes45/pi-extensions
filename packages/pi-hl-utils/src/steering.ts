@@ -78,7 +78,15 @@ export function queueSteering(sessionId: string): void {
   if (steers.pending) return;
   steers.pending = true;
   // A copy, so a listener subscribed during notification waits for the next steer.
-  for (const listener of Array.from(steers.listeners)) listener();
+  const failures: unknown[] = [];
+  for (const listener of Array.from(steers.listeners)) {
+    try {
+      listener();
+    } catch (cause) {
+      failures.push(cause);
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, "Queued steer notification failed");
 }
 
 /** Record that Pi took the session's Queued Steers, or discarded them with the run. */

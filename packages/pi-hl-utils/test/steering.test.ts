@@ -78,6 +78,21 @@ test("reloaded module copies share the pending steer", async () => {
   expect(hasSteering("copy")).toBe(false);
 });
 
+test("a failed listener does not strand another watcher", () => {
+  const unlisten = subscribeSteering("failure", () => {
+    throw new Error("listener failed");
+  });
+  const watch = watchSteering("failure");
+  try {
+    expect(() => queueSteering("failure")).toThrow("Queued steer notification failed");
+    expect(watch.signal.aborted).toBe(true);
+  } finally {
+    unlisten();
+    watch.dispose();
+    clearSteering("failure");
+  }
+});
+
 test("a malformed shared registry is rejected without discarding it", () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, sessionsKey);
   const malformed = new Map([["broken", { pending: true, listeners: "invalid" }]]);

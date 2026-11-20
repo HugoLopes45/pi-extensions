@@ -69,6 +69,15 @@ async function readTextIfPresent(path) {
   }
 }
 
+/** @param {string} directory */
+async function hasEntryPoint(directory) {
+  const entry = await stat(resolve(directory, "src/dapDebugServer.js")).catch((cause) => {
+    if (hasNodeProcessErrorCode(parseNodeProcessError(cause), "ENOENT")) return undefined;
+    throw cause;
+  });
+  return entry?.isFile() === true;
+}
+
 /**
  * Downloads the tarball and checks it against the pinned integrity.
  *
@@ -118,7 +127,7 @@ export async function ensureVscodeJsDebug(
   const fixture = await readFixture(fixtureDirectory);
   const directory = resolve(fixtureDirectory, extractDirectoryName);
   const recorded = await readTextIfPresent(resolve(directory, integrityMarkerName));
-  if (recorded === fixture.integrity) {
+  if (recorded === fixture.integrity && (await hasEntryPoint(directory))) {
     return { status: "present", version: fixture.version, directory };
   }
 
@@ -163,8 +172,8 @@ export default async function setup() {
     const recorded = await readTextIfPresent(resolve(defaultExtractDirectory, integrityMarkerName));
     if (recorded !== fixture.integrity)
       throw new Error("Pinned integrity marker is missing or mismatched");
-    const entryPoint = await stat(resolve(defaultExtractDirectory, "src/dapDebugServer.js"));
-    if (!entryPoint.isFile()) throw new Error("Adapter entry point is not a file");
+    if (!(await hasEntryPoint(defaultExtractDirectory)))
+      throw new Error("Adapter entry point is not a file");
   } catch (cause) {
     throw new Error(
       `Prepare the pinned vscode-js-debug fixture before offline checks. Remove its cached integrity marker if present (${resolve(defaultExtractDirectory, integrityMarkerName)}), then run from the repository root: cd packages/pi-hl-dap && node scripts/fetch-vscode-js-debug.mjs`,

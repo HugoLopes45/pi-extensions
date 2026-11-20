@@ -52,6 +52,12 @@ export class RecordingDapController {
         else steerSignal.addEventListener("abort", () => settle(), { once: true });
       });
     }
+    return this.waitResult(signal, steerSignal);
+  }
+
+  private waitResult(signal?: AbortSignal, steerSignal?: AbortSignal): DapResult {
+    if (signal?.aborted) return { ...this.result, waitEnd: "cancelled" };
+    if (this.yieldOnSteer && steerSignal?.aborted) return { ...this.result, waitEnd: "steered" };
     return this.result;
   }
 

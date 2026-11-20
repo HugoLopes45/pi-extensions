@@ -19,7 +19,8 @@ export class DapOutputBuffer {
   /** Append Debuggee output in protocol event order. */
   append(output: string): void {
     const combined = Buffer.concat([this.content, Buffer.from(output)]);
-    const overflow = Math.max(0, combined.length - DAP_MAX_OUTPUT_BYTES);
+    let overflow = Math.max(0, combined.length - DAP_MAX_OUTPUT_BYTES);
+    while (overflow < combined.length && ((combined[overflow] ?? 0) & 0xc0) === 0x80) overflow++;
     this.discardedBytes += overflow;
     this.content = overflow === 0 ? combined : Buffer.from(combined.subarray(overflow));
   }
