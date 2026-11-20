@@ -8,12 +8,22 @@
     "pi-extension",
     "pi-package"
   ],
+  "homepage": "https://github.com/HugoLopes45/pi-extensions/tree/main/packages/pi-hl-lsp#readme",
+  "bugs": {
+    "url": "https://github.com/HugoLopes45/pi-extensions/issues"
+  },
   "license": "MIT",
   "author": "HugoLopes45",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HugoLopes45/pi-extensions.git",
+    "directory": "packages/pi-hl-lsp"
+  },
   "files": [
     "dist",
     "README.md",
     "LICENSE",
+    "CHANGELOG.md",
     "THIRD_PARTY_NOTICES"
   ],
   "type": "module",

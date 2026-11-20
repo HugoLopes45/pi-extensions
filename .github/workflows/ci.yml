@@ -230,6 +230,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - if: matrix.package == 'pi-hl-dap'
+        name: Prepare pinned DAP integration fixture
+        run: node scripts/fetch-vscode-js-debug.mjs
       # npm install rejects pnpm's workspace: protocol; the exact version is satisfied by the bundled copy.
       - name: Pin workspace dependencies
         run: |
